@@ -1,24 +1,49 @@
 ![AI Assisted](https://img.shields.io/badge/AI-Assisted-blue?style=flat-square&logo=openai)
 # Guild Queue Bot 🛡️
 
-Telegram bot for managing guild queues and character registration in MMO games.
-Designed to simplify loot distribution and activity tracking.
+Телеграм-бот для управления очередями в MMORPG гильдии (Perfect World). 
+Помогает автоматизировать запись на ивенты, распределение наград и уведомления участников.
 
-## Features
-* **Character Management:** Link main and alt characters to Telegram ID.
-* **Validation:** Checks character nicknames against a Guild Google Sheet.
-* **Queue System:** Sign up for guild activities (raids, loot distribution).
-* **Database:** SQLite storage for reliable data handling.
+## 🚀 Основные возможности (Features)
 
-## Tech Stack
-* Python 3.10+
-* aiogram 3.x (Async Telegram API)
-* aiosqlite (Async SQLite)
-* Google Sheets API (gspread)
+* **Система очередей:** Пользователи могут записываться в разные очереди (УФ, Метеориты, КХ) с учетом лимитов.
+* **Мультиаккаунтинг:** Поддержка привязки нескольких игровых персонажей (Основа + Твины) к одному Telegram-аккаунту.
+* **Google Sheets Integration:** Автоматическая валидация никнеймов через Google Таблицу гильдии (кэширование данных).
+* **Планировщик (Scheduler):** Гибкая настройка уведомлений и объявлений по расписанию (Cron) с учетом часового пояса (MSK).
+* **Панель Мастера (Admin Panel):**
+    * Управление очередями (открытие/закрытие записи).
+    * Массовая и поштучная выдача наград с логгированием.
+    * Настройка глобальных и персональных лимитов для игроков.
+    * Принудительное добавление/удаление игроков.
 
-## Setup
-1. Clone the repository.
-2. Create a `.env` file with your `BOT_TOKEN`.
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
+## 🛠 Технологический стек (Tech Stack)
+
+* **Language:** Python 3.10+
+* **Framework:** aiogram 3.x (асинхронный)
+* **Database:** SQLite + SQLAlchemy (ORM)
+* **Scheduling:** APScheduler
+* **External API:** Google Sheets API (gspread)
+
+## 📦 Установка и запуск
+
+1.  **Клонируйте репозиторий:**
+    ```bash
+    git clone [https://github.com/your-username/guild-queue-bot.git](https://github.com/your-username/guild-queue-bot.git)
+    ```
+
+2.  **Установите зависимости:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Настройка окружения:**
+    * Создайте файл `.env` и добавьте токен бота: `BOT_TOKEN=ваш_токен`
+    * Добавьте файл `credentials.json` от Google Service Account для доступа к таблицам.
+
+4.  **Запуск:**
+    ```bash
+    python bot.py
+    ```
+
+## 📝 Лицензия
+Project is open for educational purposes.

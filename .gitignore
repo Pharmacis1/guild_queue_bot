@@ -1,7 +1,14 @@
-.env
-__pycache__/
-*.db
-.DS_Store
-.idea/
-.vscode/
+# Виртуальное окружение
 venv/
+.idea/
+__pycache__/
+
+# Секретные ключи и конфиги
+.env
+credentials.json
+
+# База данных (локальная)
+*.db
+
+# Логи
+*.log
