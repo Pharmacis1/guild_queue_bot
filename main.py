@@ -17,6 +17,7 @@ from apscheduler.jobstores.base import JobLookupError
 # Импорт наших модулей
 from database import *
 from utils import check_google_sheet
+from utils import check_google_sheet, log_reward_to_sheet # <--- Добавили log_reward_to_sheet
 
 # --- КОНФИГУРАЦИЯ ---
 load_dotenv()
@@ -368,16 +369,32 @@ async def do_join(callback: types.CallbackQuery):
     existing = session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first()
     if existing: return await callback.answer("Вы уже в очереди.", show_alert=True)
     
-    # --- НОВАЯ ЛОГИКА ПРОВЕРКИ ЛИМИТА ---
+    # Проверка лимита
     limit = get_effective_limit(user.id)
     current_count = session.query(QueueEntry).filter_by(user_id=user.id).count()
     
     if current_count >= limit:
         return await callback.answer(f"⛔ Лимит записей исчерпан! ({current_count}/{limit})", show_alert=True)
-    # ------------------------------------
     
+    # --- ВОТ ЭТО БЫЛО ПОТЕРЯНО ---
+    # 1. Сохраняем в базу бота
     session.add(QueueEntry(user_id=user.id, queue_type_id=qid, character_name=char.nickname))
     session.commit()
+    # -----------------------------
+    
+    # 2. Ищем основу для Гугл таблицы
+    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    main_nick = main_char.nickname if main_char else char.nickname
+    
+    # 3. Запускаем фоновую запись в Гугл (статус "В очереди")
+    asyncio.create_task(log_reward_to_sheet(
+        queue_name=session.get(QueueType, qid).name,
+        main_nick=main_nick, 
+        char_nick=char.nickname, 
+        manager_name=user.username,
+        status="В очереди" 
+    ))
+
     await callback.answer(f"Записан: {char.nickname}")
     await view_queue(callback)
 
@@ -385,11 +402,36 @@ async def do_join(callback: types.CallbackQuery):
 async def leave_queue(callback: types.CallbackQuery):
     qid = int(callback.data.split("_")[2])
     user = ensure_user(callback.from_user.id, callback.from_user.username)
+    
+    # Ищем запись перед тем, как удалить
     entry = session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first()
+    
     if entry:
+        # --- ЛОГИРОВАНИЕ В ГУГЛ (ВЫХОД) ---
+        # 1. Ищем основу (так же, как при записи)
+        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        main_nick = main_char.nickname if main_char else entry.character_name
+        
+        # 2. Получаем имя очереди
+        q_name = entry.queue.name
+        
+        # 3. Пишем в таблицу со статусом "Вышел"
+        asyncio.create_task(log_reward_to_sheet(
+            queue_name=q_name,
+            main_nick=main_nick, 
+            char_nick=entry.character_name, 
+            manager_name=user.username,
+            status="❌ Вышел" 
+        ))
+        # ----------------------------------
+
+        # Теперь спокойно удаляем
         session.delete(entry)
         session.commit()
-        await callback.answer("Вы вышли.")
+        await callback.answer("Вы вышли из очереди.")
+    else:
+        await callback.answer("Вы уже вышли.", show_alert=True)
+        
     await view_queue(callback)
 
 @dp.callback_query(F.data == "my_active_queues")
@@ -699,24 +741,59 @@ async def m_show_dist_list(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("issue_"))
 async def m_issue_reward(callback: types.CallbackQuery):
-    eid = int(callback.data.split("_")[1])
+    try:
+        eid = int(callback.data.split("_")[1])
+    except:
+        return await callback.answer("Ошибка данных.", show_alert=True)
+
     entry = session.get(QueueEntry, eid)
-    if not entry: return await callback.answer("Уже выдано.", show_alert=True)
-    
+    if not entry: 
+        try:
+            await callback.answer("Уже выдано или удалено.", show_alert=True)
+            return await callback.message.delete()
+        except: return
+
     qid = entry.queue_type_id
-    q_name, c_name = entry.queue.name, entry.character_name
+    q_name = entry.queue.name
+    char_nick = entry.character_name
+    
+    # --- МАГИЯ ПОИСКА ОСНОВЫ ---
+    # Ищем пользователя, который записался
+    user = session.get(User, entry.user_id)
+    main_nick = "Не найден"
+    
+    if user:
+        # Ищем среди его персонажей того, у кого is_main=True
+        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        if main_char:
+            main_nick = main_char.nickname
+        else:
+            # Если основы нет (странно, но бывает), пишем сам ник получателя
+            main_nick = char_nick
+    # ---------------------------
+
     master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
     
-    session.add(RewardHistory(user_id=entry.user_id, character_name=c_name, queue_name=q_name, issued_by=master.username))
+    # 1. Сохраняем в историю бота
+    session.add(RewardHistory(user_id=entry.user_id, character_name=char_nick, queue_name=q_name, issued_by=master.username))
+    
+    # 2. 🔥 ПИШЕМ В GOOGLE ТАБЛИЦУ (Фоновая задача)
+    # Мы не ждем (await), а просто запускаем задачу, чтобы бот не тупил
+    asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
+    
+    # 3. Уведомляем игрока
     try:
-        u = session.get(User, entry.user_id)
         kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔄 Записаться снова", callback_data=f"pre_join_{qid}")],[types.InlineKeyboardButton(text="📋 Другая очередь", callback_data="menu_join")]])
-        await bot.send_message(u.telegram_id, f"🎉 <b>Мастер выдал тебе награду:</b> {q_name} ({c_name}).\nНе забудь забрать ресы из Клан листа до 23:30 воскресенья (по мск). После выдачи персонажи автоматически исключаются из очереди, но ты сразу же можешь записаться в эту же или другую очередь, нажав на кнопку ниже: ", parse_mode="HTML", reply_markup=kb)
+        await bot.send_message(user.telegram_id, f"🎉 <b>Мастер выдал тебе награду:</b> {q_name} ({char_nick})\n Не забудь забрать ресы из Клан листа до 23:30 воскресенья (по мск). После выдачи персонажи автоматически исключаются из очереди, но ты сразу же можешь записаться в эту же или другую очередь, нажав на кнопку ниже: ", parse_mode="HTML", reply_markup=kb)
     except: pass
     
+    # 4. Удаляем из очереди
     session.delete(entry)
     session.commit()
-    await callback.answer(f"✅ Выдано: {c_name}")
+    session.expire_all()
+    
+    await callback.answer(f"✅ Выдано: {char_nick}")
+    
     callback.data = f"dist_{qid}"
     await m_show_dist_list(callback)
 
@@ -774,11 +851,39 @@ async def m_force_add_final(callback: types.CallbackQuery, state: FSMContext):
     qid = int(callback.data.split("_")[2])
     data = await state.get_data()
     nick = data['nick']
+    
+    # Определяем ID пользователя (если такой ник есть в базе персонажей)
     char = session.query(Character).filter_by(nickname=nick).first()
-    uid = char.user_id if char else session.query(User).filter_by(telegram_id=callback.from_user.id).first().id
+    if char:
+        uid = char.user_id
+        # Ищем ник основы для красивого лога
+        main_char = session.query(Character).filter_by(user_id=uid, is_main=True).first()
+        main_nick = main_char.nickname if main_char else nick
+    else:
+        # Если такого персонажа нет в базе бота (редкий случай), привязываем к самому Мастеру или оставляем как есть
+        # Но лучше привязать к Мастеру, чтобы не ломать логику
+        master_user = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
+        uid = master_user.id
+        main_nick = nick 
+
+    # Добавляем в БД
     session.add(QueueEntry(user_id=uid, queue_type_id=qid, character_name=nick))
     session.commit()
-    await callback.message.edit_text(f"✅ {nick} добавлен.", reply_markup=get_master_menu())
+    
+    # --- ЛОГ В ГУГЛ ---
+    q_name = session.get(QueueType, qid).name
+    master_username = callback.from_user.username
+    
+    asyncio.create_task(log_reward_to_sheet(
+        queue_name=q_name,
+        main_nick=main_nick, 
+        char_nick=nick, 
+        manager_name=master_username,
+        status="👑 Мастер добавил" 
+    ))
+    # ------------------
+
+    await callback.message.edit_text(f"✅ {nick} добавлен вручную.", reply_markup=get_master_menu())
     await state.clear()
 
 @dp.callback_query(F.data == "m_force_del")
@@ -805,22 +910,37 @@ async def m_kill(callback: types.CallbackQuery):
     e = session.get(QueueEntry, eid)
     
     if e:
-        # 1. Запоминаем ID очереди перед удалением
         qid = e.queue_type_id
         
-        # 2. Удаляем запись
+        # --- ЛОГ В ГУГЛ (ПЕРЕД УДАЛЕНИЕМ) ---
+        # 1. Ищем основу того, КОГО удаляют
+        user = session.get(User, e.user_id)
+        main_nick = e.character_name # По умолчанию
+        if user:
+            main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+            if main_char: main_nick = main_char.nickname
+            
+        # 2. Пишем лог
+        asyncio.create_task(log_reward_to_sheet(
+            queue_name=e.queue.name,
+            main_nick=main_nick, 
+            char_nick=e.character_name, 
+            manager_name=callback.from_user.username, # Имя Мастера, кто удалил
+            status="⛔ Кик Мастером" 
+        ))
+        # ------------------------------------
+
+        # Удаляем из БД
         session.delete(e)
         session.commit()
         await callback.answer("✅ Удалено.")
         
-        # 3. Обновляем список (вместо удаления сообщения)
-        # Подменяем данные колбэка, чтобы функция списка поняла, какую очередь показать
+        # Обновляем список
         callback.data = f"sel_del_{qid}"
         await m_force_del_list(callback)
         
     else:
         await callback.answer("Уже удален.", show_alert=True)
-        # Если запись не найдена, просто удаляем сообщение (или можно вернуть в меню)
         await callback.message.delete()
 
 @dp.callback_query(F.data == "m_global_log")
