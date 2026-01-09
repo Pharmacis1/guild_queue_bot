@@ -1026,7 +1026,8 @@ async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
     if atype == "now":
         # Отправка сразу
         data = await state.get_data()
-        ann = ScheduledAnnouncement(text=data['text'], schedule_type='once_now', run_time='now', is_active=False)
+        # ИСПРАВЛЕНИЕ: Ставим is_active=True, иначе run_broadcast его проигнорирует!
+        ann = ScheduledAnnouncement(text=data['text'], schedule_type='once_now', run_time='now', is_active=True)
         session.add(ann)
         session.commit()
         await run_broadcast(ann.id, callback.bot)
