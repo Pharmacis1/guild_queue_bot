@@ -1,6 +1,6 @@
 services:
   bot:
-    build: .
+    image: hyperf0rm/guild_queue_bot:latest
     restart: always
     env_file:
       - .env
