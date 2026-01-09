@@ -11,6 +11,7 @@ class User(Base):
     telegram_id = Column(Integer, unique=True)
     username = Column(String)
     is_master = Column(Boolean, default=False)
+    is_banned = Column(Boolean, default=False)
     
     # НОВОЕ ПОЛЕ: Личный лимит. Если NULL (None), то используется общий.
     personal_limit = Column(Integer, nullable=True) 

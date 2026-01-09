@@ -19,7 +19,7 @@ if not SPREADSHEET_URL:
 
 # НАСТРОЙКА: Какой по счету столбец читать?
 # 0 = Столбец A (Первый)
-TARGET_COL_INDEX = 0 
+TARGET_COL_INDEX = 1 
 
 # Сколько первых строк пропускать
 SKIP_ROWS = 1
@@ -32,18 +32,20 @@ CACHE_DURATION = timedelta(minutes=10)
 async def update_cache():
     global cached_nicks, last_update_time
     
-    # Если ссылки нет - выходим сразу, чтобы не сломать бота
     if not SPREADSHEET_URL:
         print("❌ Error: SPREADSHEET_URL is missing.")
         return
 
-    print("🔄 Updating Google Sheets cache...")
+    print(f"🔗 DEBUG: Читаю таблицу: {SPREADSHEET_URL}")
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
         client = gspread.authorize(creds)
 
+        # Открываем первый лист
         sheet = client.open_by_url(SPREADSHEET_URL).sheet1
+        title = sheet.title
+        print(f"📄 DEBUG: Открыт лист с названием: '{title}'") # <--- ПРОВЕРЬ ЭТО ИМЯ!
         
         all_rows = sheet.get_all_values()
         
@@ -51,12 +53,22 @@ async def update_cache():
             print("❌ Таблица пуста.")
             return
 
+        # --- РЕНТГЕН: ПОКАЗЫВАЕМ СТРУКТУРУ ---
+        # Берем вторую строку (обычно там уже данные)
+        if len(all_rows) > 1:
+            sample_row = all_rows[1] 
+            print("\n🗺 --- КАРТА СТОЛБЦОВ (СТРОКА №2) ---")
+            for idx, value in enumerate(sample_row):
+                # chr(65+idx) превращает 0 в A, 1 в B...
+                print(f"   Столбец {chr(65+idx)} (Index {idx}): '{value}'")
+            print("------------------------------------\n")
+        # ---------------------------------------
+
         new_nicks = []
-        
         for i, row in enumerate(all_rows):
-            if i < SKIP_ROWS:
-                continue
+            if i < SKIP_ROWS: continue
             
+            # Используем твой текущий настройки
             if len(row) > TARGET_COL_INDEX:
                 val = str(row[TARGET_COL_INDEX]).strip()
                 if val and len(val) > 1:
@@ -64,10 +76,9 @@ async def update_cache():
         
         cached_nicks = new_nicks
         last_update_time = datetime.now()
-        print(f"✅ Cache updated. Loaded {len(cached_nicks)} nicknames.")
         
     except Exception as e:
-        print(f"❌ Error updating Google Sheets: {e}")
+        print(f"❌ Error: {e}")
 
 async def check_google_sheet(nickname: str) -> bool:
     global cached_nicks, last_update_time

@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime
 import pytz # Библиотека часовых поясов
+import math
 
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
@@ -46,6 +47,7 @@ class EditQueueStates(StatesGroup):
 class MasterManageStates(StatesGroup):
     waiting_for_nickname_add = State()
     waiting_for_queue_add = State()
+    waiting_for_admin_username = State()
 
 class AnnounceStates(StatesGroup):
     waiting_for_text = State()
@@ -95,10 +97,10 @@ def get_effective_limit(user_id):
 
 def get_main_menu(user):
     kb = [
-        [types.InlineKeyboardButton(text="👥 Мои персонажи", callback_data="menu_chars"),
-         types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")],
-        [types.InlineKeyboardButton(text="📜 Моя история", callback_data="menu_history"),
-         types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")],
+        [types.InlineKeyboardButton(text="👥 Мои персонажи", callback_data="menu_chars")],
+        [types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")],
+        [types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")],
+        [types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")],
         [types.InlineKeyboardButton(text="🏃 Мои очереди", callback_data="my_active_queues")]
     ]
     if user.is_master:
@@ -107,22 +109,24 @@ def get_main_menu(user):
 
 def get_master_menu():
     kb = [
-        [types.InlineKeyboardButton(text="🎁 Выдать награды", callback_data="m_distribute"),
-         types.InlineKeyboardButton(text="⚙️ Лимиты очередей", callback_data="m_limits_menu")],
+        [types.InlineKeyboardButton(text="🎁 Выдать награды", callback_data="m_distribute")],
+        [types.InlineKeyboardButton(text="👥 Список игроков", callback_data="m_users_list")],
+        [types.InlineKeyboardButton(text="⚙️ Управлять лимитами очередей", callback_data="m_limits_menu")],
          
         # НОВАЯ КНОПКА ЗДЕСЬ
-        [types.InlineKeyboardButton(text="🔒 Блокировка очередей", callback_data="m_lock_menu")],
+        [types.InlineKeyboardButton(text="🔒 Блокировка очередей для записи", callback_data="m_lock_menu")],
         
-        [types.InlineKeyboardButton(text="✏️ Ред. описание", callback_data="m_edit_desc"),
-         types.InlineKeyboardButton(text="🗓 Расписание", callback_data="m_schedule")],
+        [types.InlineKeyboardButton(text="✏️ Ред. описание очередей", callback_data="m_edit_desc")],
+        [types.InlineKeyboardButton(text="🗓 Расписание объявлений", callback_data="m_schedule")],
          
-        [types.InlineKeyboardButton(text="📢 Объявление", callback_data="m_announce")],
+        [types.InlineKeyboardButton(text="📢 Создать объявление", callback_data="m_announce")],
         
-        [types.InlineKeyboardButton(text="➕ Force Add", callback_data="m_force_add"),
-         types.InlineKeyboardButton(text="❌ Force Del", callback_data="m_force_del")],
+        [types.InlineKeyboardButton(text="➕ Добавить персонажа в очередь (любого)", callback_data="m_force_add")],
+        [types.InlineKeyboardButton(text="❌ Удалить персонажа из очереди (любого)", callback_data="m_force_del")],
          
-        [types.InlineKeyboardButton(text="📜 Общий Архив", callback_data="m_global_log"),
-         types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")]
+        [types.InlineKeyboardButton(text="📜 Общий Архив выдачи наград", callback_data="m_global_log")],
+        [types.InlineKeyboardButton(text="👑 Добавить Админа", callback_data="m_add_admin_start")],
+        [types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -153,8 +157,24 @@ def get_weekdays_kb(selected_days=None):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user = ensure_user(message.from_user.id, message.from_user.username)
-    await message.answer("👋 **Добро пожаловать в Guild Bot!**\nВыберите действие:", 
-                         reply_markup=get_main_menu(user), parse_mode="Markdown")
+    
+    # ⛔ ПРОВЕРКА НА БАН
+    if user.is_banned:
+        return await message.answer("⛔ <b>Вы забанены администратором гильдии.</b>\nДоступ к боту ограничен.", parse_mode="HTML")
+        
+
+    
+    # Инструкция для новичков (HTML версия)
+    text = (
+        "👋 <b>Привет!</b>\n\n"
+        "Чтобы получить ресы с КХ, следуй простой инструкции:\n"
+        "1️⃣ Зайди в <b>«👥 Мои персонажи»</b> и добавь своего основного персонажа и твинов(если есть).\n"
+        "2️⃣ Нажми <b>«✍️ Записаться в очередь»</b>, выбери нужную очередь и нажми на ник своего персонажа.\n\n"
+        "🤖 Бот пришлет уведомление, когда Мастер выдаст тебе награду.\n\n"
+        "👇 <b>Выбери действие:</b>"
+    )
+    
+    await message.answer(text, reply_markup=get_main_menu(user), parse_mode="HTML")
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -170,17 +190,17 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "menu_chars")
 async def chars_menu(callback: types.CallbackQuery):
     kb = [
-        [types.InlineKeyboardButton(text="➕ Изменить Основу", callback_data="add_main")],
-        [types.InlineKeyboardButton(text="➕ Добавить Твина", callback_data="add_alt")],
+        [types.InlineKeyboardButton(text="➕ Добавить или изменить основу", callback_data="add_main")],
+        [types.InlineKeyboardButton(text="➕ Добавить твина", callback_data="add_alt")],
         [types.InlineKeyboardButton(text="📋 Список моих чаров", callback_data="list_chars")],
-        [types.InlineKeyboardButton(text="🗑 Удалить Твина", callback_data="del_alt_menu")],
+        [types.InlineKeyboardButton(text="🗑 Удалить твина", callback_data="del_alt_menu")],
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
     ]
     await callback.message.edit_text("⚙️ **Управление персонажами:**", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "add_main")
 async def add_main_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("✍️ Введите никнейм **ОСНОВЫ**:", reply_markup=get_back_btn("menu_chars"), parse_mode="Markdown")
+    await callback.message.edit_text("✍️ Введи никнейм **ОСНОВЫ**:", reply_markup=get_back_btn("menu_chars"), parse_mode="Markdown")
     await state.set_state(Registration.waiting_for_main_nickname)
 
 @dp.message(Registration.waiting_for_main_nickname)
@@ -197,29 +217,59 @@ async def process_main(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "add_alt")
 async def add_alt_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("✍️ Введите никнейм **ТВИНА**:", reply_markup=get_back_btn("menu_chars"), parse_mode="Markdown")
+    await callback.message.edit_text("✍️ Введи никнейм **ТВИНА**:", reply_markup=get_back_btn("menu_chars"), parse_mode="Markdown")
     await state.set_state(Registration.waiting_for_alt_nickname)
 
 @dp.message(Registration.waiting_for_alt_nickname)
 async def process_alt(message: types.Message, state: FSMContext):
     nick = message.text.strip()
-    if not await check_google_sheet(nick): return await message.answer("❌ Ник не найден.")
     user = ensure_user(message.from_user.id, message.from_user.username)
+    
+    # 1. ПРОВЕРКА: ЕСТЬ ЛИ ОСНОВА?
+    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    if not main_char:
+        await message.answer(
+            "⛔ <b>Ошибка!</b>\n"
+            "Сначала нужно добавить <b>Основу</b>.\n"
+            "Без основы твинов добавлять нельзя.", 
+            parse_mode="HTML", 
+            reply_markup=get_back_btn("menu_chars")
+        )
+        return await state.clear()
+    
+    # 2. Проверка валидности ника (через таблицу)
+    if not await check_google_sheet(nick): 
+        return await message.answer(
+            "❌ Ник не найден в таблице гильдии.\nПроверьте правильность написания.", 
+            reply_markup=get_back_btn("menu_chars")
+        )
+
+    # 3. Проверка на дубликаты
     if session.query(Character).filter_by(user_id=user.id, nickname=nick).first():
-        return await message.answer("Уже добавлен.")
+        return await message.answer(
+            "⚠️ Этот персонаж уже добавлен.", 
+            reply_markup=get_back_btn("menu_chars")
+        )
+
+    # 4. Добавляем твина
     session.add(Character(user_id=user.id, nickname=nick, is_main=False))
     session.commit()
-    await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
+    
+    await message.answer(
+        f"✅ Твин добавлен: <b>{nick}</b>\n(Привязан к основе: {main_char.nickname})", 
+        parse_mode="HTML", 
+        reply_markup=get_main_menu(user)
+    )
     await state.clear()
 
 @dp.callback_query(F.data == "list_chars")
 async def list_chars(callback: types.CallbackQuery):
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     chars = session.query(Character).filter_by(user_id=user.id).all()
-    text = "🧙‍♂️ <b>Ваши персонажи:</b>\n"
+    text = "<b>Твои персонажи:</b>\n"
     if not chars: text += "Список пуст."
     for c in chars:
-        role = "👑" if c.is_main else "👤"
+        role = "💎" if c.is_main else "🔹"
         text += f"{role} {c.nickname}\n"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("menu_chars"))
 
@@ -261,7 +311,7 @@ async def join_menu(callback: types.CallbackQuery):
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
     
     await callback.message.edit_text(
-        "✍️ <b>Выберите очередь:</b>\n(🔒 = запись временно закрыта)", 
+        "✍️ <b>Выберите очередь:</b>\nДля того, чтобы записаться, у тебя должен быть добавлен персонаж как основа или твин (пункт в меню <b>Мои персонажи</b>) \n(🔒 = запись временно закрыта)", 
         parse_mode="HTML", 
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
     )
@@ -380,13 +430,238 @@ async def master_menu(callback: types.CallbackQuery):
     if not is_master(callback.from_user.id): return
     await callback.message.edit_text("👑 **Панель Мастера**", reply_markup=get_master_menu(), parse_mode="Markdown")
 
+import math # Не забудь добавить это в самый верх файла!
+
+# ... (другой код)
+
+# --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (С ПАГИНАЦИЕЙ) ---
+
+PAGE_SIZE = 10 # Сколько игроков показывать на одной странице
+
+@dp.callback_query(F.data.startswith("m_users_list"))
+async def m_users_list(callback: types.CallbackQuery):
+    # Парсим номер страницы из колбэка (формат "m_users_list:0", "m_users_list:1" и т.д.)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0
+
+    # Загружаем всех пользователей с персонажами
+    users = session.query(User).join(Character).distinct().all()
+    
+    if not users:
+        return await callback.message.edit_text("🤷‍♂️ В базе пока нет игроков с персонажами.", reply_markup=get_back_btn("menu_master"))
+
+    # Считаем страницы
+    total_pages = math.ceil(len(users) / PAGE_SIZE)
+    
+    # Берем "кусочек" списка для текущей страницы
+    start_idx = page * PAGE_SIZE
+    end_idx = start_idx + PAGE_SIZE
+    current_users = users[start_idx:end_idx]
+    
+    # 1. Формируем ТЕКСТ сообщения (подробный)
+    text = f"👥 <b>Список игроков</b> (Стр. {page + 1}/{total_pages})\n"
+    text += "<i>Нажмите на кнопку с ником, чтобы управлять профилем.</i>\n\n"
+    
+    kb = []
+    
+    for u in current_users:
+        # Данные игрока
+        main_char = next((c for c in u.characters if c.is_main), None)
+        alts = [c.nickname for c in u.characters if not c.is_main]
+        
+        main_nick = main_char.nickname if main_char else "Без основы"
+        user_tag = f"@{u.username}" if u.username else f"ID {u.telegram_id}"
+        alts_str = ", ".join(alts) if alts else "нет"
+        
+        # Добавляем строку в текстовое сообщение
+        # Пример: 🛡 Nagibator (@dima) | Твины: Tvin1, Tvin2
+        text += f"🔹 <b>{main_nick}</b> ({user_tag})\n"
+        text += f"   ╚ <i>Твины: {alts_str}</i>\n\n"
+        
+        # 2. Формируем КНОПКУ (краткую)
+        # Формат: Nagibator (@dima)
+        btn_text = f"{main_nick} ({user_tag})"
+        kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"m_u_manage_{u.id}_{page}")]) 
+        # Передаем page, чтобы при нажатии "Назад" вернуться на ту же страницу
+
+    # 3. Кнопки навигации (Назад / Вперед)
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(types.InlineKeyboardButton(text="⬅️ Туда", callback_data=f"m_users_list:{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(types.InlineKeyboardButton(text="Сюда ➡️", callback_data=f"m_users_list:{page + 1}"))
+    
+    if nav_buttons:
+        kb.append(nav_buttons)
+
+    kb.append([types.InlineKeyboardButton(text="🔙 В меню мастера", callback_data="menu_master")])
+    
+    await callback.message.edit_text(
+        text, 
+        parse_mode="HTML", 
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+@dp.callback_query(F.data.startswith("m_u_manage_"))
+async def m_user_manage(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    uid = int(parts[3])
+    try: page = int(parts[4])
+    except IndexError: page = 0
+    
+    user = session.get(User, uid)
+    if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
+    
+    chars = session.query(Character).filter_by(user_id=user.id).all()
+    user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без юзернейма'}</a>"
+    
+    # Определяем статус бана для текста и кнопки
+    status_emoji = "⛔ ЗАБАНЕН" if user.is_banned else "✅ Активен"
+    ban_btn_text = "🕊 Разбанить" if user.is_banned else "🔨 ЗАБАНИТЬ"
+    
+    text = (f"👤 <b>Управление профилем:</b>\n"
+            f"Игрок: {user_link}\n"
+            f"Статус: <b>{status_emoji}</b>\n\n"
+            f"👇 <b>Список персонажей:</b>")
+    
+    kb = []
+    # Кнопка БАНА (ставим первой) - передаем ID юзера и текущую страницу
+    kb.append([types.InlineKeyboardButton(text=ban_btn_text, callback_data=f"m_ban_toggle_{uid}_{page}")])
+
+    for c in chars:
+        role = "👑" if c.is_main else "👤"
+        kb.append([types.InlineKeyboardButton(text=f"❌ {role} {c.nickname}", callback_data=f"m_del_char_{c.id}_{uid}_{page}")])
+        
+    kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data=f"m_users_list:{page}")])
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+# --- НОВАЯ ФУНКЦИЯ БАНА ---
+@dp.callback_query(F.data.startswith("m_ban_toggle_"))
+async def m_toggle_ban(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    uid = int(parts[3])
+    page = int(parts[4])
+    
+    user = session.get(User, uid)
+    if user:
+        # Если это Мастер, не даем ему забанить самого себя или другого мастера (защита от дурака)
+        if user.is_master:
+            return await callback.answer("❌ Нельзя забанить Мастера!", show_alert=True)
+
+        # Переключаем статус (True -> False или False -> True)
+        user.is_banned = not user.is_banned
+        
+        # Если забанили - можно удалить его из всех очередей сразу
+        if user.is_banned:
+            session.query(QueueEntry).filter_by(user_id=uid).delete()
+            
+        session.commit()
+        
+        status = "забанен" if user.is_banned else "разбанен"
+        await callback.answer(f"Пользователь {status}.")
+        
+        # Обновляем страницу профиля
+        callback.data = f"m_u_manage_{uid}_{page}"
+        await m_user_manage(callback)
+
+@dp.callback_query(F.data.startswith("m_del_char_"))
+async def m_delete_char_admin(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    cid = int(parts[3]) 
+    uid = int(parts[4])
+    page = int(parts[5]) # Сохраняем страницу
+    
+    char = session.get(Character, cid)
+    if char:
+        nickname = char.nickname
+        session.delete(char)
+        session.query(QueueEntry).filter_by(character_name=nickname).delete()
+        session.commit()
+        await callback.answer(f"✅ Ник {nickname} отвязан.")
+        
+        # Обновляем профиль (передаем те же параметры)
+        callback.data = f"m_u_manage_{uid}_{page}"
+        await m_user_manage(callback)
+    else:
+        await callback.answer("Уже удален.")
+        callback.data = f"m_u_manage_{uid}_{page}"
+        await m_user_manage(callback)
+
+# --- ДОБАВЛЕНИЕ НОВОГО МАСТЕРА ---
+
+@dp.callback_query(F.data == "m_add_admin_start")
+async def m_add_admin_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "👑 **Назначение администратора**\n\n"
+        "Всем администраторам доступна панель мастера в полном объёме.\n"
+        "Введи **Telegram Username** игрока (например: @durov).\n"
+        "⚠️ Игрок должен был хоть раз запустить этого бота.", 
+        parse_mode="Markdown", 
+        reply_markup=get_back_btn("menu_master")
+    )
+    await state.set_state(MasterManageStates.waiting_for_admin_username)
+
+@dp.message(MasterManageStates.waiting_for_admin_username)
+async def m_add_admin_save(message: types.Message, state: FSMContext):
+    # Убираем символ @ если есть и пробелы
+    target_username = message.text.replace("@", "").strip()
+    
+    # Ищем пользователя в базе (по username телеграма, не по нику в игре!)
+    user = session.query(User).filter(User.username == target_username).first()
+    
+    if not user:
+        return await message.answer(
+            f"❌ Пользователь @{target_username} не найден в базе.\n"
+            "Попросите его нажать /start в боте и попробуйте снова.",
+            reply_markup=get_back_btn("menu_master")
+        )
+        
+    if user.is_master:
+        return await message.answer(
+            f"🤨 @{target_username} уже является Мастером.",
+            reply_markup=get_master_menu()
+        )
+    
+    # Выдаем права
+    user.is_master = True
+    session.commit()
+    
+    await message.answer(
+        f"✅ <b>Успешно!</b>\nПользователь @{target_username} теперь тоже <b>Мастер</b>.\n"
+        "Он должен перезапустить бота (/start), чтобы увидеть панель.", 
+        parse_mode="HTML",
+        reply_markup=get_master_menu()
+    )
+    await state.clear()
+
 # Раздача наград
 @dp.callback_query(F.data == "m_distribute")
 async def m_dist_start(callback: types.CallbackQuery):
     queues = session.query(QueueType).all()
-    kb = [[types.InlineKeyboardButton(text=f"{q.name}", callback_data=f"dist_{q.id}")] for q in queues]
+    kb = []
+    
+    for q in queues:
+        # Считаем количество людей в очереди
+        count = session.query(QueueEntry).filter_by(queue_type_id=q.id).count()
+        
+        # Добавляем счетчик к названию
+        # Пример: "Метеориты (5)" или "УФ (0)"
+        btn_text = f"{q.name} ({count})"
+        
+        kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"dist_{q.id}")])
+        
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
-    await callback.message.edit_text("🎁 Что раздаем?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    
+    await callback.message.edit_text(
+        "🎁 <b>Выберите очередь для раздачи:</b>\n"
+        "(В скобках указано количество ожидающих)", 
+        parse_mode="HTML", 
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @dp.callback_query(F.data.startswith("dist_"))
 async def m_show_dist_list(callback: types.CallbackQuery):
@@ -408,9 +683,9 @@ async def m_show_dist_list(callback: types.CallbackQuery):
     nick_list = "\n".join([e.character_name for e in entries])
     
     text = (f"🎁 <b>Раздача: {q.name}</b>\n\n"
-            f"Список для копирования:\n"
+            f"Список персонажей в очередях:\n"
             f"<code>{nick_list}</code>\n\n"
-            f"👇 Нажмите на кнопку, чтобы выдать награду:")
+            f"👇 Нажми на никнеймы, которым выдал награды. Я выпишу их из очереди и отправлю им личные сообщения, что пора забирать награду из Клан листа:")
     
     # 2. Формируем кнопки
     kb = [[types.InlineKeyboardButton(text=f"💰 {e.character_name}", callback_data=f"issue_{e.id}")] for e in entries]
@@ -436,7 +711,7 @@ async def m_issue_reward(callback: types.CallbackQuery):
     try:
         u = session.get(User, entry.user_id)
         kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔄 Записаться снова", callback_data=f"pre_join_{qid}")],[types.InlineKeyboardButton(text="📋 Другая очередь", callback_data="menu_join")]])
-        await bot.send_message(u.telegram_id, f"🎉 <b>Награда:</b> {q_name} ({c_name})\nЧто дальше?", parse_mode="HTML", reply_markup=kb)
+        await bot.send_message(u.telegram_id, f"🎉 <b>Мастер выдал тебе награду:</b> {q_name} ({c_name}).\nНе забудь забрать ресы из Клан листа до 23:30 воскресенья (по мск). После выдачи персонажи автоматически исключаются из очереди, но ты сразу же можешь записаться в эту же или другую очередь, нажав на кнопку ниже: ", parse_mode="HTML", reply_markup=kb)
     except: pass
     
     session.delete(entry)
@@ -451,7 +726,7 @@ async def m_edit_start(callback: types.CallbackQuery):
     queues = session.query(QueueType).all()
     kb = [[types.InlineKeyboardButton(text=f"{q.name}", callback_data=f"edit_d_{q.id}")] for q in queues]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
-    await callback.message.edit_text("✏️ Выберите очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await callback.message.edit_text("✏️ Выбери очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @dp.callback_query(F.data.startswith("edit_d_"))
 async def m_edit_input(callback: types.CallbackQuery, state: FSMContext):
@@ -459,7 +734,7 @@ async def m_edit_input(callback: types.CallbackQuery, state: FSMContext):
     q = session.get(QueueType, qid)
     await state.update_data(qid=qid)
     await callback.message.edit_text(
-        f"Текущее: {q.description}\n\n👇 **Введите новое описание:**", 
+        f"Текущее: {q.description}\n\n👇 **Введи новое описание:**", 
         parse_mode="Markdown",
         reply_markup=get_back_btn("menu_master") # <--- КНОПКА
     )
@@ -478,7 +753,7 @@ async def m_edit_save(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "m_force_add")
 async def m_force_add(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "➕ Введите никнейм для принудительной записи:", 
+        "➕ Введи никнейм для записи:", 
         parse_mode="Markdown",
         reply_markup=get_back_btn("menu_master") # <--- КНОПКА
     )
@@ -514,7 +789,7 @@ async def m_force_del(callback: types.CallbackQuery):
         count = session.query(QueueEntry).filter_by(queue_type_id=q.id).count()
         if count > 0: kb.append([types.InlineKeyboardButton(text=f"{q.name} ({count})", callback_data=f"sel_del_{q.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
-    await callback.message.edit_text("❌ Выберите очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await callback.message.edit_text("❌ Выбери очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @dp.callback_query(F.data.startswith("sel_del_"))
 async def m_force_del_list(callback: types.CallbackQuery):
@@ -613,7 +888,7 @@ async def m_list_personal_limits(callback: types.CallbackQuery):
 # 1. Глобальный лимит
 @dp.callback_query(F.data == "m_set_global")
 async def m_set_global_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🌐 Введите новое число для <b>ОБЩЕГО</b> лимита:", parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
+    await callback.message.edit_text("🌐 Введи новое число для <b>ОБЩЕГО</b> лимита:", parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
     await state.set_state(LimitStates.waiting_for_global_limit)
 
 @dp.message(LimitStates.waiting_for_global_limit)
@@ -629,12 +904,12 @@ async def m_set_global_save(message: types.Message, state: FSMContext):
         await message.answer(f"✅ Общий лимит теперь: <b>{val}</b>", parse_mode="HTML", reply_markup=get_master_menu())
         await state.clear()
     except:
-        await message.answer("❌ Введите целое число больше 0.", reply_markup=get_back_btn("m_limits_menu"))
+        await message.answer("❌ Введи целое число больше 0.", reply_markup=get_back_btn("m_limits_menu"))
 
 # 2. Персональный лимит
 @dp.callback_query(F.data == "m_set_personal")
 async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("👤 Введите <b>никнейм</b> игрока (Основы или Твина):", parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
+    await callback.message.edit_text("👤 Введи <b>никнейм</b> игрока (основы или твина):", parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
     await state.set_state(LimitStates.waiting_for_nick_limit)
 
 @dp.message(LimitStates.waiting_for_nick_limit)
@@ -653,7 +928,7 @@ async def m_set_personal_nick(message: types.Message, state: FSMContext):
     await message.answer(
         f"👤 Игрок: <b>{user.username}</b> (найден по {nick})\n"
         f"Текущий личный лимит: <b>{current}</b>\n\n"
-        f"Введите новое число (или 0, чтобы сбросить на общий):", 
+        f"Введи новое число (или 0, чтобы сбросить на общий):", 
         parse_mode="HTML", 
         reply_markup=get_back_btn("m_limits_menu")
     )
@@ -677,7 +952,7 @@ async def m_set_personal_save(message: types.Message, state: FSMContext):
         await message.answer(msg, parse_mode="HTML", reply_markup=get_master_menu())
         await state.clear()
     except:
-        await message.answer("❌ Введите целое число.", reply_markup=get_back_btn("m_limits_menu"))
+        await message.answer("❌ Введи целое число.", reply_markup=get_back_btn("m_limits_menu"))
 
 # --- БЛОКИРОВКА ОЧЕРЕДЕЙ (LOCKS) ---
 
@@ -685,7 +960,7 @@ async def m_set_personal_save(message: types.Message, state: FSMContext):
 async def m_lock_menu(callback: types.CallbackQuery):
     queues = session.query(QueueType).filter_by(is_active=True).all()
     
-    text = "🔒 <b>Управление доступом:</b>\nНажмите на очередь, чтобы Открыть/Закрыть её для записи."
+    text = "🔒 <b>Управление доступом:</b>\nНажми на очередь, чтобы Открыть/Закрыть её для записи."
     kb = []
     
     for q in queues:
@@ -725,7 +1000,7 @@ async def m_toggle_lock(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "m_announce")
 async def m_ann_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "📢 Введите текст объявления:", 
+        "📢 Введи текст объявления: ", 
         parse_mode="Markdown",
         # ДОБАВИЛИ КНОПКУ ОТМЕНЫ
         reply_markup=get_back_btn("menu_master")
@@ -762,7 +1037,7 @@ async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
     elif atype == "future":
         # Разово в будущем
         await callback.message.edit_text(
-            "📅 Введите дату и время (МСК) в формате:\n`ДД.ММ.ГГГГ ЧЧ:ММ`\nПример: 25.12.2024 14:00", 
+            "📅 Введи дату и время (МСК) в формате:\n`ДД.ММ.ГГГГ ЧЧ:ММ`\nПример: 25.12.2024 14:00", 
             parse_mode="Markdown",
             reply_markup=get_back_btn("menu_master") # <--- КНОПКА
         )
@@ -772,7 +1047,7 @@ async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
         # Ежедневно
         await state.update_data(days=[]) 
         await callback.message.edit_text(
-            "⏰ Введите время (МСК) в формате `ЧЧ:ММ`:", 
+            "⏰ Введи время (МСК) в формате `ЧЧ:ММ`:", 
             parse_mode="Markdown",
             reply_markup=get_back_btn("menu_master") # <--- КНОПКА
         )
@@ -782,7 +1057,7 @@ async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
     elif atype == "weekly":
         # Выбор дней недели
         await state.update_data(days=[]) # Инициализируем список
-        await callback.message.edit_text("📆 Выберите дни недели:", reply_markup=get_weekdays_kb([]))
+        await callback.message.edit_text("📆 Выбери дни недели:", reply_markup=get_weekdays_kb([]))
         await state.set_state(AnnounceStates.waiting_for_days)
 
 # --- Обработка ввода даты/времени/дней ---
@@ -828,7 +1103,7 @@ async def confirm_days(callback: types.CallbackQuery, state: FSMContext):
         return await callback.answer("Выберите хотя бы один день!", show_alert=True)
     
     await callback.message.edit_text(
-        "⏰ Введите время (МСК) в формате `ЧЧ:ММ`:", 
+        "⏰ Введи время (МСК) в формате `ЧЧ:ММ`:", 
         parse_mode="Markdown",
         reply_markup=get_back_btn("menu_master") # <--- КНОПКА
     )
