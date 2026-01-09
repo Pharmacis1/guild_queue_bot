@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./guild_bot.db:/app/guild_bot.db
+      - ./credentials.json:/app/credentials.json:ro
