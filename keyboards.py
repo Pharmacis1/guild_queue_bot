@@ -32,6 +32,7 @@ def get_master_menu():
          
         [types.InlineKeyboardButton(text="📜 Общий Архив выдачи наград", callback_data="m_global_log")],
         [types.InlineKeyboardButton(text="👑 Добавить Мастера", callback_data="m_add_admin_start")],
+        [types.InlineKeyboardButton(text="💾 Скачать Бэкап БД", callback_data="m_backup")],
         [types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)

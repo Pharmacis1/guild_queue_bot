@@ -13,6 +13,8 @@ from keyboards import get_master_menu, get_back_btn, get_weekdays_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
 
+from aiogram.types import FSInputFile
+
 router = Router()
 PAGE_SIZE = 10
 
@@ -533,3 +535,26 @@ async def m_del_schedule(callback: types.CallbackQuery):
         await callback.answer("Отключено.")
         await m_show_schedule(callback)
     else: await m_show_schedule(callback)
+
+# --- БЭКАП БД ---
+@router.callback_query(F.data == "m_backup")
+async def m_send_backup(callback: types.CallbackQuery):
+    # Формируем красивое имя файла с датой: backup_2023-10-25_14-30.db
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    filename = f"backup_{date_str}.db"
+    
+    # Путь к файлу внутри контейнера (у тебя он лежит в корне /app/guild_bot.db)
+    db_path = "guild_bot.db"
+    
+    try:
+        # Создаем объект файла для отправки
+        backup_file = FSInputFile(db_path, filename=filename)
+        
+        await callback.message.answer_document(
+            backup_file, 
+            caption=f"📦 <b>Резервная копия базы данных</b>\n📅 {date_str}\n\nСохрани этот файл в надежное место!",
+            parse_mode="HTML"
+        )
+        await callback.answer("Файл отправлен.")
+    except Exception as e:
+        await callback.answer(f"Ошибка при создании бэкапа: {e}", show_alert=True)
