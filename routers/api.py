@@ -189,16 +189,28 @@ try:
 except ImportError:
     pwobs_scraper = None
 
+SCRAPER_IS_RUNNING = False
+
 async def bg_run_scraper(server: str, only_unknown: bool = False):
+    global SCRAPER_IS_RUNNING
+    
     if not pwobs_scraper:
         logging.error("Scraper module not found")
         return
+        
+    if SCRAPER_IS_RUNNING:
+        logging.warning("⚠️ Scraper is already running. Skipping duplicate trigger.")
+        return
+
     try:
+        SCRAPER_IS_RUNNING = True
         logging.info(f"Triggering background scrape for {server} (only_unknown={only_unknown})")
         stats = await pwobs_scraper.run_scraper(server=server, headless=True, only_unknown=only_unknown)
         logging.info(f"Background scrape finished: {stats}")
     except Exception as e:
         logging.error(f"Background scrape failed: {e}")
+    finally:
+        SCRAPER_IS_RUNNING = False
 
 @router.post("/api/scrape_players")
 async def trigger_scrape(background_tasks: BackgroundTasks, request: Request):
