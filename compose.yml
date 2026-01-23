@@ -1,20 +1,9 @@
 services:
-  caddy:
-    image: caddy:latest
+  bot:
+    image: hyperf0rm/guild_queue_bot:latest
     restart: always
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - bot
-
-  bot:
-    build: .
-    restart: always
+      - "8001:8081"
     volumes:
       - ./guild_bot.db:/app/guild_bot.db
       - ./backups:/app/backups
@@ -23,8 +12,3 @@ services:
       - .env
     environment:
       - WEB_PORT=8081
-
-volumes:
-  caddy_data:
-  caddy_config:
-
