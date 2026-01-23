@@ -1,22 +1,13 @@
-
-FROM python:3.10-slim
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies required for Playwright and general build
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright and its dependencies
-RUN playwright install --with-deps chromium
 
 COPY . .
 
