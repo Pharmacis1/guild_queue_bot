@@ -336,7 +336,7 @@ async def read_root(
 
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "is_authenticated": False,
+        "is_authenticated": False, # Temporarily disabled
         "bot_username": BOT_USERNAME,
         "last_updated": last_upd,
         "user_nickname": "Guest",
@@ -367,3 +367,12 @@ async def read_root(
         "current_history_types": current_history_types,
         "CLASSES": CLASSES # needed?
     })
+
+@router.get("/admin/auth", response_class=HTMLResponse)
+async def remote_auth_page(request: Request):
+    """
+    Secret admin page for remote browser authentication.
+    In production, this should be protected by a password or Telegram Auth.
+    For now, relying on obscurity + explicit user request.
+    """
+    return templates.TemplateResponse("remote_auth.html", {"request": request})

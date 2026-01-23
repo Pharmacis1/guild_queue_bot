@@ -39,6 +39,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(views.router)
 app.include_router(api.router)
 app.include_router(auth.router)
+# Remote Admin Browser
+from routers import admin_browser
+app.include_router(admin_browser.router)
 
 
 async def on_startup():
