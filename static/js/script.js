@@ -150,6 +150,21 @@ function applyFilter() {
     if (isMoney) namespace = 'money';
     else if (isHistory) namespace = 'history';
 
+    // CLEANUP: Remove parameters from OTHER namespaces to prevent mixing
+    // list of known prefixes
+    const allNamespaces = ['kh', 'money', 'history'];
+    allNamespaces.forEach(ns => {
+        if (ns !== namespace) {
+            // Remove all keys starting with this namespace
+            const keys = Array.from(params.keys());
+            keys.forEach(key => {
+                if (key.startsWith(ns + '_')) {
+                    params.delete(key);
+                }
+            });
+        }
+    });
+
     // Dates
     let startId = 'khStartDate';
     let endId = 'khEndDate';
