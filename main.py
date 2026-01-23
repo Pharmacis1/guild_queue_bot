@@ -1,24 +1,56 @@
 import asyncio
 import logging
+import uvicorn
 from aiogram import Bot
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
-# Наш новый файл loader, где живут bot, dp и scheduler
+# Bot imports
 from loader import bot, dp, scheduler
-
-# Подключаем роутеры из папки handlers
 from handlers import user, admin
+from handlers.admin import schedule_job
 from database import init_db, session, ScheduledAnnouncement
 
-# Нужно импортировать функцию schedule_job, чтобы восстановить задачи при старте
-# Поскольку она теперь в handlers/admin.py, импортируем оттуда
-from handlers.admin import schedule_job
+# Web imports
+from starlette.middleware.sessions import SessionMiddleware
+from routers import api, views, auth
+import os
+
+# --- WEB APP SETUP ---
+app = FastAPI()
+
+# Session Middleware (Needed for Auth)
+SECRET_KEY = os.getenv("BOT_TOKEN", "super-secret-key-fallback")
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False)
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Include Routers
+app.include_router(views.router)
+app.include_router(api.router)
+app.include_router(auth.router)
+
 
 async def on_startup():
-    # 1. Настройка команд меню
+    # 1. Init Web DB
+    # 1. Web DB init removed (handled by sync init_db)
+    pass
+    
+    # 2. Bot Setup - Menu
     from aiogram.types import BotCommand
     await bot.set_my_commands([BotCommand(command="/start", description="🏠 Главное меню")])
     
-    # 2. Восстановление задач расписания
+    # 3. Restore Scheduled Tasks
     tasks = session.query(ScheduledAnnouncement).filter_by(is_active=True).all()
     count = 0
     for t in tasks:
@@ -26,22 +58,41 @@ async def on_startup():
             schedule_job(t, bot)
             count += 1
             
-    # 3. Запуск планировщика
+    # 3.1 Schedule Daily Backup (at 04:00 AM)
+    from scripts.backup_db import perform_backup
+    scheduler.add_job(perform_backup, 'cron', hour=4, minute=0, id="daily_backup", replace_existing=True)
+    # Also run one immediately on startup if needed, or just rely on schedule. 
+    # Let's run safe backup on startup to be sure.
+    perform_backup("startup_auto")
+    print("✅ Backup system initialized.")
+            
+    # 4. Start Scheduler
     scheduler.start()
     print(f"✅ Bot started. Jobs restored: {count}")
 
 async def main():
-    # Подключаем логику
+    # Setup Bot Routers
     dp.include_router(user.router)
     dp.include_router(admin.router)
     
     await bot.delete_webhook(drop_pending_updates=True)
     await on_startup()
-    await dp.start_polling(bot)
+    
+    # Configure Web Server
+    import os
+    port = int(os.getenv("WEB_PORT", 8081))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+
+    # Run Bot and Web Concurrently
+    await asyncio.gather(
+        dp.start_polling(bot),
+        server.serve()
+    )
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    init_db()
+    init_db() # Init Bot DB (Sync)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

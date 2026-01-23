@@ -19,7 +19,8 @@ def get_master_menu():
         [types.InlineKeyboardButton(text="🎁 Выдать награды", callback_data="m_distribute")],
         [types.InlineKeyboardButton(text="👥 Список игроков", callback_data="m_users_list")],
         [types.InlineKeyboardButton(text="⚙️ Управлять лимитами очередей", callback_data="m_limits_menu")],
-         
+        [types.InlineKeyboardButton(text="🔐 Код верификации", callback_data="m_verification")],
+
         [types.InlineKeyboardButton(text="🔒 Блокировка очередей для записи", callback_data="m_lock_menu")],
         
         [types.InlineKeyboardButton(text="✏️ Ред. описание очередей", callback_data="m_edit_desc")],
@@ -57,3 +58,10 @@ def get_weekdays_kb(selected_days=None):
     # Кнопка Готово
     kb.append([types.InlineKeyboardButton(text="💾 Готово / Далее", callback_data="days_confirm")])
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+# --- REPLY KEYBOARDS (Persistent) ---
+def get_persistent_menu():
+    kb = [
+        [types.KeyboardButton(text="🏠 Главное меню")]
+    ]
+    return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)

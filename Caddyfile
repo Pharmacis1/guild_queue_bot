@@ -1,0 +1,3 @@
+arahnius.net-forge.ru {
+    reverse_proxy bot:8081
+}

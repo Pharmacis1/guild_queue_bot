@@ -2,13 +2,14 @@ import math
 import asyncio
 from datetime import datetime
 from aiogram import Router, F, types
+from aiogram.types import ChatMemberUpdated
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from apscheduler.jobstores.base import JobLookupError
 
 # Импорты из других файлов проекта
 from loader import bot, scheduler, MSK
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting
 from keyboards import get_master_menu, get_back_btn, get_weekdays_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
@@ -104,10 +105,10 @@ async def m_user_manage(callback: types.CallbackQuery):
     status_emoji = "⛔ ЗАБАНЕН" if user.is_banned else "✅ Активен"
     ban_text = "🕊 Разбанить" if user.is_banned else "🔨 ЗАБАНИТЬ"
     
-    text = f"👤 <b>Управление профилем:</b>\nИгрок: {user_link}\nСтатус: <b>{status_emoji}</b>\n\n👇 <b>Список персонажей:</b>"
+    text = f"👤 <b>Управление профилем:</b>\nИгрок: {user_link}\nСтатус: <b>{status_emoji}</b>\n\n👇 <b>Выберите персонажа:</b>"
     kb = [[types.InlineKeyboardButton(text=ban_text, callback_data=f"m_ban_toggle_{uid}_{page}")]]
     for c in chars:
-        kb.append([types.InlineKeyboardButton(text=f"❌ {'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"m_del_char_{c.id}_{uid}_{page}")])
+        kb.append([types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"m_char_menu_{c.id}_{uid}_{page}")])
     kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data=f"m_users_list:{page}")])
     
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -126,17 +127,98 @@ async def m_toggle_ban(callback: types.CallbackQuery):
         callback.data = f"m_u_manage_{uid}_{page}"
         await m_user_manage(callback)
 
+@router.callback_query(F.data.startswith("m_char_menu_"))
+async def m_char_menu(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
+    char = session.get(Character, cid)
+    if not char: return await callback.answer("Персонаж не найден.", show_alert=True)
+    
+    text = f"⚙️ <b>Управление персонажем:</b>\nНик: <b>{char.nickname}</b>\nРоль: {'👑 Основа' if char.is_main else '👤 Твин'}"
+    kb = [
+        [types.InlineKeyboardButton(text="✏️ Изменить ник", callback_data=f"m_ren_start_{cid}_{uid}_{page}")],
+        [types.InlineKeyboardButton(text="❌ Отвязать/Удалить", callback_data=f"m_del_char_{cid}_{uid}_{page}")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data=f"m_u_manage_{uid}_{page}")]
+    ]
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data.startswith("m_ren_start_"))
+async def m_rename_start(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
+    char = session.get(Character, cid)
+    if not char: return await callback.answer("Ошибка char.", show_alert=True)
+    
+    await callback.message.edit_text(f"✏️ Введите новый никнейм для <b>{char.nickname}</b>:", parse_mode="HTML", reply_markup=get_back_btn(f"m_char_menu_{cid}_{uid}_{page}"))
+    await state.update_data(target_cid=cid, uid=uid, page=page)
+    await state.set_state(MasterManageStates.waiting_for_rename)
+
+@router.message(MasterManageStates.waiting_for_rename)
+async def m_rename_save(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    cid, uid, page = data['target_cid'], data['uid'], data['page']
+    new_nick = message.text.strip()
+    
+    char = session.get(Character, cid)
+    if not char: 
+        await message.answer("Персонаж удален.")
+        await state.clear()
+        return
+
+    old_nick = char.nickname
+    char.nickname = new_nick
+    
+    # Update Queues
+    count = 0
+    entries = session.query(QueueEntry).filter_by(character_name=old_nick).all()
+    for e in entries:
+        e.character_name = new_nick
+        count += 1
+    
+    session.commit()
+    
+    await message.answer(f"✅ Переименовано: {old_nick} -> {new_nick}\nОбновлено записей в очередях: {count}")
+    
+    # Return to menu requires building callback object or sending new message with KB.
+    # Simpler: just clear state and send text with button.
+    # Or mimic callback logic.
+    kb = [[types.InlineKeyboardButton(text="🔙 К меню персонажа", callback_data=f"m_char_menu_{cid}_{uid}_{page}")]]
+    await message.answer("Готово.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await state.clear()
+
 @router.callback_query(F.data.startswith("m_del_char_"))
 async def m_delete_char_admin(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
+
     char = session.get(Character, cid)
+    
     if char:
         nick = char.nickname
+        user_id = char.user_id
+        user = session.get(User, user_id)
+        
         session.delete(char)
         session.query(QueueEntry).filter_by(character_name=nick).delete()
         session.commit()
         await callback.answer(f"✅ Ник {nick} отвязан.")
+        
+        # Check for kick
+        session.expire_all()
+        count = session.query(Character).filter_by(user_id=user_id).count()
+        chat_id = get_setting('clan_chat_id')
+        
+        if count == 0 and chat_id:
+            try:
+                await bot.ban_chat_member(chat_id, user.telegram_id)
+                await bot.unban_chat_member(chat_id, user.telegram_id)
+                await bot.send_message(user.telegram_id, "⚠️ Вы были исключены из группы клана, так как администратор удалил вашего последнего персонажа.")
+                await callback.message.answer(f"👢 Игрок {user.username} был кикнут из чата (0 персонажей).")
+            except Exception as e:
+                # Ignore "chat owner" error or log silently
+                if "chat owner" not in str(e):
+                    await callback.message.answer(f"⚠️ Ошибка кика: {e}")
+            
     else: await callback.answer("Уже удален.")
     
     callback.data = f"m_u_manage_{uid}_{page}"
@@ -223,23 +305,28 @@ async def m_issue_reward(callback: types.CallbackQuery):
 @router.callback_query(F.data == "m_limits_menu")
 async def m_limits_menu(callback: types.CallbackQuery):
     g_limit = session.query(Settings).filter_by(key="default_limit").first().value
+    
+    # Fetch personal limits
+    p_users = session.query(User).filter(User.personal_limit != None).all()
+    
+    text = f"⚙️ <b>Настройки лимитов</b>\n\n"
+    text += f"🌐 <b>Общий лимит:</b> {g_limit} (записей на человека)\n\n"
+    
+    if p_users:
+        text += "👤 <b>Индивидуальные лимиты:</b>\n"
+        for u in p_users:
+            main_char = next((c for c in u.characters if c.is_main), None)
+            name = main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}")
+            text += f"• <b>{name}</b>: {u.personal_limit}\n"
+    else:
+        text += "👤 <i>Индивидуальных лимитов нет.</i>"
+
     kb = [
         [types.InlineKeyboardButton(text=f"🌐 Изм. общий ({g_limit})", callback_data="m_set_global")],
         [types.InlineKeyboardButton(text="👤 Изм. личный", callback_data="m_set_personal")],
-        [types.InlineKeyboardButton(text="📋 Список индив. лимитов", callback_data="m_list_limits")],
         [types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")]
     ]
-    await callback.message.edit_text("⚙️ <b>Настройки лимитов</b>", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
-
-@router.callback_query(F.data == "m_list_limits")
-async def m_list_personal_limits(callback: types.CallbackQuery):
-    users = session.query(User).filter(User.personal_limit != None).all()
-    text = "📋 <b>Особые лимиты:</b>\n\n" + ("Нет." if not users else "")
-    for u in users:
-        mc = session.query(Character).filter_by(user_id=u.id, is_main=True).first()
-        name = mc.nickname if mc else u.username
-        text += f"👤 <b>{name}</b>: {u.personal_limit}\n"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @router.callback_query(F.data == "m_set_global")
 async def m_set_global_start(callback: types.CallbackQuery, state: FSMContext):
@@ -260,7 +347,23 @@ async def m_set_global_save(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data == "m_set_personal")
 async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("👤 Введи <b>никнейм</b> игрока:", parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
+    # Fetch personal limits for display
+    p_users = session.query(User).filter(User.personal_limit != None).all()
+    
+    text = "👤 <b>Установка личного лимита.</b>\n\n"
+    if p_users:
+        text += "📋 <b>Текущие лимиты:</b>\n"
+        for u in p_users:
+            main_char = next((c for c in u.characters if c.is_main), None)
+            name = main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}")
+            text += f"• <b>{name}</b>: {u.personal_limit}\n"
+        text += "\n"
+    else:
+        text += "<i>Индивидуальных лимитов нет.</i>\n\n"
+
+    text += "✍️ Введи <b>никнейм игрока</b>, чтобы изменить его лимит:"
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("m_limits_menu"))
     await state.set_state(LimitStates.waiting_for_nick_limit)
 
 @router.message(LimitStates.waiting_for_nick_limit)
@@ -558,3 +661,223 @@ async def m_send_backup(callback: types.CallbackQuery):
         await callback.answer("Файл отправлен.")
     except Exception as e:
         await callback.answer(f"Ошибка при создании бэкапа: {e}", show_alert=True)
+
+# --- APPROVAL SYSTEM (NEW ACCESS) ---
+@router.callback_query(F.data.startswith("appr:"))
+async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    action = parts[1] # ok, edit, no
+    user_id = int(parts[2])
+    
+    # Optional parts
+    reg_type = parts[3] if len(parts) > 3 else "" # main_input, alt_input
+    
+    # Clean up message buttons first
+    try: await callback.message.edit_reply_markup(reply_markup=None)
+    except: pass
+    
+    target_user = session.get(User, user_id)
+    if not target_user: return await callback.answer("Пользователь не найден.", show_alert=True)
+    
+    # 1. Reject
+    if action == "no":
+        try: await bot.send_message(target_user.telegram_id, "❌ <b>Ваша заявка отклонена Мастером.</b>", parse_mode="HTML")
+        except: pass
+        await callback.message.answer(f"❌ Заявка отклонена ({target_user.username}).")
+        await callback.answer()
+        return
+
+    # 2. Approve OK (Direct)
+    if action == "ok":
+        # Nick starts at index 4. It might contain colons? Probably not, but let's join.
+        # Actually user.py creates it simple. But to be safe:
+        nick = ":".join(parts[4:]) 
+        await finalize_approval(callback, target_user, nick, reg_type)
+    
+    # 3. Approve Edit (Ask for nick)
+    if action == "edit":
+        # Need to ask Master for nick.
+        await callback.message.answer(f"✍️ Введите правильный ник для {target_user.username}:", reply_markup=get_back_btn("menu_master"))
+        await state.update_data(target_uid=user_id, reg_type=reg_type)
+        await state.set_state(MasterManageStates.waiting_for_approve_edit)
+
+@router.message(MasterManageStates.waiting_for_approve_edit)
+async def m_approve_edit_save(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    uid = data['target_uid']
+    reg_type = data['reg_type']
+    nick = message.text.strip()
+    
+    target_user = session.get(User, uid)
+    if target_user:
+        await finalize_approval(message, target_user, nick, reg_type)
+    
+    await state.clear()
+
+async def finalize_approval(event, target_user, nick, reg_type):
+    # Logic similar to finish_main_input / finish_alt_input
+    # But since we are in admin.py and can't easy import from user.py, we replicate core logic.
+    
+    # 1. Main Char Logic
+    if reg_type == "main_input":
+        existing_char = session.query(Character).filter_by(user_id=target_user.id, nickname=nick).first()
+        old_main = session.query(Character).filter_by(user_id=target_user.id, is_main=True).first()
+        
+        if not old_main:
+            if existing_char:
+                existing_char.is_main = True
+                msg = f"🆙 Твин <b>{nick}</b> повышен до Основы (Мастером)!"
+            else:
+                session.add(Character(user_id=target_user.id, nickname=nick, is_main=True))
+                msg = f"✅ Основа установлена: <b>{nick}</b> (Одобрено Мастером)"
+                
+                # Invite Link for First Char
+                count = session.query(Character).filter_by(user_id=target_user.id).count()
+                if count == 0: # It was 0 before this add
+                     chat_id = get_setting('clan_chat_id')
+                     if chat_id:
+                        try:
+                            # We need bot instance. event can be Message or Callback
+                            bot_inst = event.bot
+                            link = await bot_inst.create_chat_invite_link(chat_id, member_limit=1, name=f"For {target_user.username}")
+                            try: await bot_inst.send_message(target_user.telegram_id, f"👋 Заявка одобрена!\nВот твоя ссылка: {link.invite_link}")
+                            except: pass
+                        except Exception as e: print(f"Invite error approval: {e}")
+
+        else:
+             # Logic for changing main is complex (confirmations etc). 
+             # Simplify for Master Force Add: Just do it.
+             old_main.is_main = False
+             if existing_char: existing_char.is_main = True
+             else: session.add(Character(user_id=target_user.id, nickname=nick, is_main=True))
+             msg = f"✅ Основа сменена на <b>{nick}</b> (Мастером)."
+             
+             # Queue updates
+             entries = session.query(QueueEntry).filter_by(user_id=target_user.id).all()
+             for e in entries:
+                 if e.character_name != nick:
+                     e.character_name = nick
+                     # Log update logic omitted for brevity or can copy-paste log call
+
+    # 2. Alt Logic
+    elif reg_type == "alt_input":
+        if session.query(Character).filter_by(user_id=target_user.id, nickname=nick).first():
+            msg = f"⚠️ Твин {nick} уже был у пользователя."
+        else:
+            session.add(Character(user_id=target_user.id, nickname=nick, is_main=False))
+            msg = f"✅ Твин добавлен: <b>{nick}</b> (Одобрено Мастером)"
+
+    session.commit()
+    
+    # Notify User
+    try: await bot.send_message(target_user.telegram_id, msg, parse_mode="HTML")
+    except: pass
+    
+    # Notify Master
+    if isinstance(event, types.CallbackQuery):
+        await event.message.answer(f"✅ Успешно: {target_user.username} -> {nick}")
+    else:
+        await event.answer(f"✅ Успешно: {target_user.username} -> {nick}", reply_markup=get_master_menu())
+
+# --- ГРУППА КЛАНА ---
+@router.message(Command("set_clan_group"))
+async def cmd_set_clan_group(message: types.Message):
+    if not is_master(message.from_user.id): return
+    
+    # If command argument is present, use it. Else use current chat.
+    args = message.text.split()
+    if len(args) > 1:
+        chat_id = args[1]
+    else:
+        chat_id = message.chat.id
+        
+    set_setting("clan_chat_id", chat_id)
+    await message.answer(f"✅ ID этой группы ({chat_id}) сохранен как Клановая Группа.\nТеперь бот будет приглашать сюда новичков и кикать тех, кто удалил всех персонажей.")
+
+# --- VERIFICATION CODE SETTINGS ---
+@router.callback_query(F.data == "m_verification")
+async def m_verification_menu(callback: types.CallbackQuery):
+    code = get_setting("verification_code")
+    status = f"✅ ВКЛ ({code})" if code else "❌ ВЫКЛ"
+    
+    text = f"🔐 <b>Код верификации</b>\nТекущий статус: {status}\n\nЕсли включено, бот будет требовать этот код при добавлении любого персонажа (основы или твина)."
+    
+    kb = [
+        [types.InlineKeyboardButton(text="✏️ Задать код", callback_data="m_set_code")],
+        [types.InlineKeyboardButton(text="❌ Отключить проверку", callback_data="m_disable_code")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")]
+    ]
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data == "m_set_code")
+async def m_set_code_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("🔐 Введите новый код верификации (любое слово или число):", reply_markup=get_back_btn("m_verification"))
+    await state.set_state(MasterManageStates.waiting_for_code_setting)
+
+@router.message(MasterManageStates.waiting_for_code_setting)
+async def m_set_code_save(message: types.Message, state: FSMContext):
+    code = message.text.strip()
+    set_setting("verification_code", code)
+    await message.answer(f"✅ Код верификации установлен: <b>{code}</b>", parse_mode="HTML", reply_markup=get_master_menu())
+    await state.clear()
+
+@router.callback_query(F.data == "m_disable_code")
+async def m_disable_code(callback: types.CallbackQuery):
+    set_setting("verification_code", None) # None удаляет или ставит null (в нашей функции set_setting надо проверить реализацию, обычно она делает update, если None -> удалим?)
+    # Проверим реализацию set_setting. Если она просто пишет строку, то None может упасть или записаться как "None".
+    # Лучше записать пустую строку или удалить запись. 
+    # В database.py:
+    # def set_setting(key, value):
+    #     s = session.query(Settings).filter_by(key=key).first()
+    #     if s: s.value = value
+    #     else: session.add(Settings(key=key, value=value))
+    #     session.commit()
+    # Если value=None, то s.value = None. В базе Column(String).
+    
+    # Чтобы было надежнее, удалим запись.
+    s = session.query(Settings).filter_by(key="verification_code").first()
+    if s: 
+        session.delete(s)
+        session.commit()
+        
+    await callback.answer("✅ Проверка кодом отключена.")
+    await m_verification_menu(callback)
+
+
+@router.chat_member()
+async def on_user_join(event: ChatMemberUpdated):
+    # Проверяем, что это вступление (был left/kicked/restricted -> стал member/creator/administrator)
+    old = event.old_chat_member.status
+    new = event.new_chat_member.status
+    
+    # Реагируем только на вступление (member)
+    if new not in ["member", "administrator", "creator"]: return
+    if old in ["member", "administrator", "creator"]: return # Уже был в чате (смена прав)
+
+    chat_id = get_setting('clan_chat_id')
+    current_chat_id = str(event.chat.id)
+    
+    # Проверяем, что это целевая группа
+    if not chat_id or str(chat_id) != current_chat_id: return
+
+    user = event.new_chat_member.user
+    if user.is_bot: return
+
+    # Проверка по базе
+    db_user = session.query(User).filter_by(telegram_id=user.id).first()
+    has_chars = False
+    
+    if db_user:
+        count = session.query(Character).filter_by(user_id=db_user.id).count()
+        if count > 0: has_chars = True
+    
+    if not has_chars:
+        try:
+            await event.bot.ban_chat_member(event.chat.id, user.id)
+            await event.bot.unban_chat_member(event.chat.id, user.id)
+            await event.bot.send_message(event.chat.id, f"⛔ Пользователь {user.mention_html()} был исключен (нет персонажей в боте).", parse_mode="HTML")
+        except Exception as e:
+            await event.bot.send_message(event.chat.id, f"⚠️ Не удалось кикнуть нелегала: {e}")
+    else:
+        # Можно поприветствовать
+        pass

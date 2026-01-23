@@ -11,6 +11,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     telegram_id = Column(Integer, unique=True)
     username = Column(String)
+    avatar_url = Column(String, nullable=True)
     is_master = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
     personal_limit = Column(Integer, nullable=True) 
@@ -64,6 +65,32 @@ class ScheduledAnnouncement(Base):
     days_of_week = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
 
+class Player(Base):
+    __tablename__ = 'players'
+    role_id = Column(Integer, primary_key=True)
+    nickname = Column(String, default=None)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    in_clan = Column(Integer, default=1)
+    class_id = Column(Integer, default=-1)
+
+class Event(Base):
+    __tablename__ = 'events'
+    id = Column(Integer, primary_key=True)
+    role_id = Column(Integer)
+    timestamp = Column(Integer)
+    event_date = Column(String)
+    event_type = Column(Integer)
+    value = Column(Integer)
+    raw_desc = Column(String)
+
+class Item(Base):
+    __tablename__ = 'items'
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    icon_url = Column(String, nullable=True)
+    # UniqueConstraint is implicit via logic or can be added if using strict ORM enforcement, 
+    # but for now simple class definition is enough. uniqueness is handled by scraper usually.
+
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
 engine = create_engine('sqlite:///guild_bot.db', echo=False)
@@ -110,6 +137,17 @@ def get_effective_limit_logic(user):
     if user.personal_limit is not None:
         return user.personal_limit
         
-    # Иначе берем общий из настроек
     setting = session.query(Settings).filter_by(key="default_limit").first()
     return int(setting.value) if setting else 1
+
+def get_setting(key, default=None):
+    s = session.query(Settings).filter_by(key=key).first()
+    return s.value if s else default
+
+def set_setting(key, value):
+    s = session.query(Settings).filter_by(key=key).first()
+    if not s:
+        s = Settings(key=key)
+        session.add(s)
+    s.value = str(value)
+    session.commit()

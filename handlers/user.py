@@ -4,8 +4,8 @@ from aiogram.fsm.context import FSMContext
 import asyncio
 
 # Импорты из корня проекта
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic
-from keyboards import get_main_menu, get_back_btn
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting
+from keyboards import get_main_menu, get_back_btn, get_persistent_menu
 from helpers import get_menu_text
 from states import Registration
 from utils import check_google_sheet, log_reward_to_sheet
@@ -20,7 +20,18 @@ async def cmd_start(message: types.Message):
         return await message.answer("⛔ <b>Вы забанены.</b>", parse_mode="HTML")
 
     text = get_menu_text(user)
+    # Send persistent keyboard separately or attach? usually attach to answer.
+    # We send the inline menu message, AND a separate message (or same) with ReplyKeyboard? 
+    # ReplyKeyboard cannot be combined with Inline in same message? 
+    # Actually they can be separate messages. Inline is usually for interaction, Reply for global nav.
+    # Let's send a "Welcome" with ReplyMarkup, and then the menu with Inline.
+    
+    await message.answer("👋", reply_markup=get_persistent_menu())
     await message.answer(text, reply_markup=get_main_menu(user), parse_mode="HTML")
+
+@router.message(F.text == "🏠 Главное меню")
+async def main_menu_text(message: types.Message):
+    await cmd_start(message)
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -61,64 +72,68 @@ async def add_main_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(Registration.waiting_for_main_nickname)
 
 @router.message(Registration.waiting_for_main_nickname)
-async def process_main_input(message: types.Message, state: FSMContext):
+async def process_main_input_entry(message: types.Message, state: FSMContext):
     nick = message.text.strip()
-    if not await check_google_sheet(nick): 
-        return await message.answer("❌ Ник не найден в гильдии. Проверь написание.")
+    
+    # Check if exists in DB
+    is_known = await check_google_sheet(nick)
+    await state.update_data(needs_approval=not is_known)
+    
+    code = get_setting("verification_code")
+    # If code is required, OR if user is unknown (we always want code for unknown? User said "also ask code")
+    # Actually user said "if nick not in base, also ask code".
+    # So if code setting is enabled -> ask.
+    # If code setting is DISABLED -> if unknown -> logic? 
+    # Let's assume if code is disabled, we skip code. But user said "person should be in guild", implying code is the key.
+    # If code is OFF, we probably should still ask for approval if unknown.
+    
+    if code:
+        await state.update_data(temp_nick=nick, temp_action="main_input")
+        text = "🔐 Введите код верификации:"
+        if not is_known: text = "⚠️ Этого ника нет в базе.\n🔐 Введите код верификации, чтобы отправить заявку Мастеру:"
+        
+        await message.answer(text, reply_markup=get_back_btn("menu_chars"))
+        await state.set_state(Registration.waiting_for_code)
+        return
+
+    # If NO code setting:
+    if is_known:
+        await finish_main_input(message, state, nick_override=nick)
+    else:
+        # Unknown + No Code => Send to Master directly? Or reject?
+        # User imply code is necessary for proof. But if code is off...
+        # Let's send to Master anyway.
+        await send_approval_request(message, state, nick, "main_input")
+
+async def finish_main_input(message: types.Message, state: FSMContext, nick_override=None):
+    nick = nick_override if nick_override else message.text.strip()
     
     user = ensure_user(message.from_user.id, message.from_user.username)
-    existing_char = session.query(Character).filter_by(user_id=user.id, nickname=nick).first()
-    old_main = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
     
-    if not old_main:
-        if existing_char:
-            existing_char.is_main = True
-            session.commit()
-            await message.answer(f"🆙 Твин <b>{nick}</b> повышен до Основы!", parse_mode="HTML", reply_markup=get_main_menu(user))
-        else:
-            session.add(Character(user_id=user.id, nickname=nick, is_main=True))
-            session.commit()
-            await message.answer(f"✅ Основа установлена: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
-        await state.clear()
-        return
-
-    if old_main.nickname == nick:
-        await message.answer("🤔 Это и так твоя основа.", reply_markup=get_main_menu(user))
-        await state.clear()
-        return
-
-    await state.update_data(new_nick=nick, old_nick=old_main.nickname)
-    text = (f"⚠️ <b>Внимание!</b>\nТвоя текущая основа: <b>{old_main.nickname}</b>\nТы хочешь сменить её на: <b>{nick}</b>\n\n🔄 Это действие обновит очереди. Старая основа станет твином.")
-    if existing_char: text += f"\n(Твин <b>{nick}</b> исчезнет из списка твинов и станет Главой)"
-
-    kb = [[types.InlineKeyboardButton(text="✅ Да, сменить", callback_data="confirm_main_change")], [types.InlineKeyboardButton(text="🔙 Отмена", callback_data="menu_chars")]]
-    await message.answer(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
-    await state.set_state(Registration.waiting_for_main_confirm)
-
-@router.callback_query(F.data == "confirm_main_change", Registration.waiting_for_main_confirm)
-async def process_main_confirm(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    new_nick = data.get("new_nick")
-    old_nick = data.get("old_nick")
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    # Check if already exists (globally or for user?)
+    # Nickname uniqueness is not strictly enforced in DB schema, but logically should be.
+    # Check if this user already has main?
     
-    old_char = session.query(Character).filter_by(user_id=user.id, nickname=old_nick).first()
-    if old_char: old_char.is_main = False
+    existing = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    if existing:
+        existing.is_main = False
+        # Optional: rename old main to alt? 
+        # For this bot logic: user can have only one main? or switch?
+        # Usually we just set new main.
     
-    existing_new = session.query(Character).filter_by(user_id=user.id, nickname=new_nick).first()
-    if existing_new: existing_new.is_main = True 
-    else: session.add(Character(user_id=user.id, nickname=new_nick, is_main=True)) 
+    # Check if nick taken by SOMEONE ELSE?
+    taken = session.query(Character).filter_by(nickname=nick).first()
+    if taken and taken.user_id != user.id:
+        return await message.answer(f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.", parse_mode="HTML", reply_markup=get_back_btn("menu_chars"))
+    
+    if taken and taken.user_id == user.id:
+        taken.is_main = True
+        session.commit()
+    else:
+        session.add(Character(user_id=user.id, nickname=nick, is_main=True))
+        session.commit()
         
-    entries = session.query(QueueEntry).filter_by(user_id=user.id).all()
-    count = 0
-    for entry in entries:
-        if entry.character_name != new_nick:
-            prev_name = entry.character_name
-            entry.character_name = new_nick
-            count += 1
-            asyncio.create_task(log_reward_to_sheet(queue_name=entry.queue.name, main_nick=new_nick, char_nick=new_nick, manager_name=user.username, status=f"🔄 Смена основы ({prev_name})"))
-    session.commit()
-    await callback.message.edit_text(f"✅ <b>Готово!</b>\nНовая основа: {new_nick}\nОбновлено записей: {count}", parse_mode="HTML", reply_markup=get_main_menu(user))
+    await message.answer(f"✅ Основа сохранена: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
     await state.clear()
 
 @router.callback_query(F.data == "add_alt")
@@ -127,21 +142,112 @@ async def add_alt_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(Registration.waiting_for_alt_nickname)
 
 @router.message(Registration.waiting_for_alt_nickname)
-async def process_alt(message: types.Message, state: FSMContext):
+async def process_alt_input_entry(message: types.Message, state: FSMContext):
     nick = message.text.strip()
+    
+    # Check Google
+    is_known = await check_google_sheet(nick)
+    await state.update_data(needs_approval=not is_known)
+
+    code = get_setting("verification_code")
+    if code:
+        await state.update_data(temp_nick=nick, temp_action="alt_input")
+        text = "🔐 Введите код верификации:"
+        if not is_known: 
+            text = ("⚠️ Возможно, этот персонаж уже вступил в гильдию, но в базе его ещё нет, либо в никнейме есть опечатки\n"
+                    "🔐 Если этот персонаж есть в гильдии, и вы правильно ввели никнейм, введите код верификации (он указан в клан листе гильдии), чтобы отправить заявку Мастеру:")
+        
+        await message.answer(text, reply_markup=get_back_btn("menu_chars")) 
+        await state.set_state(Registration.waiting_for_code)
+        return
+
+    if is_known:
+        await finish_alt_input(message, state, nick_override=nick)
+    else:
+        await send_approval_request(message, state, nick, "alt_input")
+
+# @router.message(Registration.waiting_for_alt_nickname)
+async def finish_alt_input(message: types.Message, state: FSMContext, nick_override=None):
+    nick = nick_override if nick_override else message.text.strip()
+    
+    # We retain basic checks but skip Google/Main check as they should be done in entry
     user = ensure_user(message.from_user.id, message.from_user.username)
     main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    
     if not main_char:
+         # Should not happen if pre-checked, but safe to keep
         return await message.answer("⛔ Сначала добавь <b>Основу</b>.", parse_mode="HTML", reply_markup=get_back_btn("menu_chars"))
     
-    if not await check_google_sheet(nick): 
-        return await message.answer("❌ Ник не найден в таблице.", reply_markup=get_back_btn("menu_chars"))
     if session.query(Character).filter_by(user_id=user.id, nickname=nick).first():
         return await message.answer("⚠️ Уже добавлен.", reply_markup=get_back_btn("menu_chars"))
 
     session.add(Character(user_id=user.id, nickname=nick, is_main=False))
     session.commit()
     await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
+    await state.clear()
+
+@router.message(Registration.waiting_for_code)
+async def process_verification_code(message: types.Message, state: FSMContext):
+    input_code = message.text.strip()
+    correct_code = get_setting("verification_code")
+    
+    if correct_code and input_code.lower() != correct_code.lower():
+        return await message.answer("❌ Неверный код! Попробуйте еще раз или нажмите Назад.", reply_markup=get_back_btn("menu_chars"))
+    
+    data = await state.get_data()
+    nick = data.get("temp_nick")
+    action = data.get("temp_action")
+    needs_approval = data.get("needs_approval", False)
+    
+    if needs_approval:
+        await send_approval_request(message, state, nick, action)
+        return
+
+    if action == "main_input":
+        await finish_main_input(message, state, nick_override=nick)
+    elif action == "alt_input":
+        await finish_alt_input(message, state, nick_override=nick)
+    else:
+        await message.answer("Ошибка состояния. Начни заново.", reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username)))
+        await state.clear()
+
+async def send_approval_request(message: types.Message, state: FSMContext, nick: str, action: str):
+    # Find masters
+    masters = session.query(User).filter_by(is_master=True).all()
+    if not masters:
+        await message.answer("⚠️ Нет Мастеров в сети. Попробуй позже.", reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username)))
+        await state.clear()
+        return
+
+    user = ensure_user(message.from_user.id, message.from_user.username)
+    type_str = "ОСНОВА" if action == "main_input" else "ТВИН"
+    user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без ника'}</a>"
+    
+    text = f"🛡 <b>Заявка на добавление:</b>\n"
+    text += f"Игрок: {user_link}\n"
+    text += f"Ник: <code>{nick}</code> ({type_str})\n"
+    text += "⚠️ <i>Этого ника нет в базе. Требуется подтверждение.</i>"
+
+    kb = [
+        [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"appr:ok:{user.id}:{action}:{nick}")], 
+        [types.InlineKeyboardButton(text="✏️ Исправить и принять", callback_data=f"appr:edit:{user.id}:{action}")],
+        [types.InlineKeyboardButton(text="❌ Отказать", callback_data=f"appr:no:{user.id}")]
+    ]
+    
+    count = 0
+    for m in masters:
+        try:
+            # Save temp data in a temporary storage? logic is stateless in callback.
+            # We pass data in callback_data. 
+            await message.bot.send_message(m.telegram_id, text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+            count += 1
+        except: pass
+        
+    if count > 0:
+        await message.answer("⏳ <b>Заявка отправлена Мастеру.</b>\nОжидайте подтверждения.", parse_mode="HTML", reply_markup=get_main_menu(user))
+    else:
+        await message.answer("⚠️ Не удалось связаться с Мастером.", reply_markup=get_main_menu(user))
+    
     await state.clear()
 
 @router.callback_query(F.data == "del_alt_menu")
@@ -159,9 +265,9 @@ async def del_char_action(callback: types.CallbackQuery):
     char = session.get(Character, cid)
     if not char: return await callback.answer("Не найден.")
     
+    user = ensure_user(callback.from_user.id, callback.from_user.username)
     entries = session.query(QueueEntry).filter_by(character_name=char.nickname).all()
     if entries:
-        user = ensure_user(callback.from_user.id, callback.from_user.username)
         main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
         text = f"⚠️ Персонаж <b>{char.nickname}</b> записан в очередях ({len(entries)} шт.)!\n\n"
         kb = []
@@ -174,9 +280,23 @@ async def del_char_action(callback: types.CallbackQuery):
         kb.append([types.InlineKeyboardButton(text="🔙 Отмена", callback_data="menu_chars")])
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
     else:
+        nick = char.nickname
         session.delete(char)
         session.commit()
-        await callback.answer(f"{char.nickname} удален.")
+        await callback.answer(f"{nick} удален.")
+        
+        # Check for kick
+        count = session.query(Character).filter_by(user_id=user.id).count()
+        if count == 0:
+            chat_id = get_setting('clan_chat_id')
+            if chat_id:
+                try:
+                    await callback.bot.ban_chat_member(chat_id, user.telegram_id)
+                    await callback.bot.unban_chat_member(chat_id, user.telegram_id)
+                    await callback.message.answer("⚠️ Вы были исключены из группы клана, так как у вас не осталось активных персонажей.")
+                except Exception as e:
+                    print(f"Kick error: {e}")
+
         await del_alt_menu(callback)
 
 @router.callback_query(F.data.startswith("conf_del_"))
@@ -204,6 +324,19 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
 
     session.delete(char)
     session.commit()
+    
+    # Check for kick
+    count = session.query(Character).filter_by(user_id=user_id).count()
+    if count == 0:
+        chat_id = get_setting('clan_chat_id')
+        if chat_id:
+            try:
+                await callback.bot.ban_chat_member(chat_id, user.telegram_id)
+                await callback.bot.unban_chat_member(chat_id, user.telegram_id)
+                await callback.message.answer("⚠️ Вы были исключены из группы клана, так как у вас не осталось активных персонажей.")
+            except Exception as e:
+                print(f"Kick error (complex): {e}")
+
     await callback.message.edit_text(f"✅ {nick_to_del} удален.", reply_markup=get_back_btn("menu_chars"))
 
 
