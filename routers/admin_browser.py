@@ -25,6 +25,7 @@ class RemoteBrowserSession:
         self.context = None
         self.page = None
         self.is_active = False
+        self.last_error = None
         self.lock = asyncio.Lock()
 
     @classmethod
@@ -157,6 +158,20 @@ class RemoteBrowserSession:
                 
             return {"status": "ok", "message": "Browser session stopped."}
 
+    async def save_session_state(self):
+        async with self.lock:
+            if not self.is_active or not self.context:
+                return {"status": "error", "message": "No active session to save"}
+            
+            try:
+                await self.context.storage_state(path=AUTH_FILE)
+                abs_path = os.path.abspath(AUTH_FILE)
+                logger.info(f"Auth state explicitly saved to {AUTH_FILE} (Abs: {abs_path})")
+                return {"status": "ok", "message": f"Saved to {AUTH_FILE}"}
+            except Exception as e:
+                logger.error(f"Failed to save state: {e}")
+                return {"status": "error", "message": f"Save failed: {e}"}
+
     async def get_status(self):
         return {
             "active": self.is_active,
@@ -235,3 +250,7 @@ async def interact(action: dict):
 @router.post("/stop")
 async def stop_browser():
     return await session_manager.stop_session()
+
+@router.post("/save")
+async def save_browser_state():
+    return await session_manager.save_session_state()
