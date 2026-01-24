@@ -254,3 +254,32 @@ async def stop_browser():
 @router.post("/save")
 async def save_browser_state():
     return await session_manager.save_session_state()
+
+@router.get("/debug/files")
+async def list_session_files():
+    """List files in the sessions directory to verify persistence."""
+    try:
+        if not os.path.exists("sessions"):
+            return {"status": "error", "message": "'sessions' directory does not exist!"}
+        
+        files = []
+        for f in os.listdir("sessions"):
+            path = os.path.join("sessions", f)
+            stat = os.stat(path)
+            files.append({
+                "name": f,
+                "size": stat.st_size,
+                "modified": stat.st_mtime
+            })
+            
+        # Check permissions
+        can_write = os.access("sessions", os.W_OK)
+        
+        return {
+            "status": "ok",
+            "directory": os.path.abspath("sessions"),
+            "writable": can_write,
+            "files": files
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
