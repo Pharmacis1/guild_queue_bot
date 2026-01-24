@@ -14,4 +14,3 @@ credentials.json
 *.log
 
 # Сессии
-pwobs_auth.json

@@ -8,10 +8,9 @@ import json
 
 # Configuration
 # Configuration
-AUTH_FILE = "sessions/pwobs_auth.json"
-# Ensure sessions dir exists
-if not os.path.exists("sessions"):
-    os.makedirs("sessions", exist_ok=True)
+AUTH_FILE = "pwobs_auth.json"
+# Ensure sessions dir exists - REMOVED
+
     
 router = APIRouter(prefix="/api/browser", tags=["admin_browser"])
 logger = logging.getLogger("admin_browser")
