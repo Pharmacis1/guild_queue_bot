@@ -136,11 +136,26 @@ class RemoteBrowserSession:
         return {"status": "ok", "message": "Browser initialization started..."}
 
     async def get_screenshot(self):
-        if not self.is_active or not self.page:
-            # If we have a startup error, return 503 with info
-            if self.last_error:
-                raise HTTPException(status_code=503, detail=f"Startup Failed: {self.last_error}")
+        if not self.is_active:
             raise HTTPException(status_code=404, detail="Session not active")
+            
+        # Recovery: If page is missing but we are active, try to recover main page
+        if not self.page:
+            if hasattr(self, 'main_page') and self.main_page:
+                logger.warning("Active session had no page! Recovering to main_page.")
+                self.page = self.main_page
+            else:
+                raise HTTPException(status_code=503, detail="Session active but page is lost.")
+
+        # Recovery: Check if page is closed
+        if self.page.is_closed():
+             if hasattr(self, 'main_page') and self.main_page and not self.main_page.is_closed():
+                 logger.warning("Current page is closed. Reverting to main_page.")
+                 self.page = self.main_page
+             else:
+                 # Both closed?
+                 await self.stop_session()
+                 raise HTTPException(status_code=503, detail="All pages closed.")
         
         try:
             # Capture as JPEG for speed
@@ -184,9 +199,15 @@ class RemoteBrowserSession:
                 return {"status": "error", "message": f"Save failed: {e}"}
 
     async def get_status(self):
+        url = "Unknown"
+        if self.page and not self.page.is_closed():
+            try: url = self.page.url
+            except: pass
+            
         return {
             "active": self.is_active,
-            "last_error": self.last_error
+            "last_error": self.last_error,
+            "url": url
         }
 
     async def handle_input(self, action: dict):
