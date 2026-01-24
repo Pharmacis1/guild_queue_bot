@@ -35,35 +35,48 @@ class RemoteBrowserSession:
                     await self.page.goto(url)
                 return {"status": "ok", "message": "Session already active, navigated to URL"}
 
-            logger.info("Starting Remote Browser Session...")
-            self.playwright = await async_playwright().start()
-            
-            # Use headless=True normally, but for visual debugging we might want False locally.
-            # However, since we are streaming screenshots, headless=True is fine and preferred for servers.
-            self.browser = await self.playwright.chromium.launch(headless=True)
-            
-            # Load auth state if exists
-            state = None
-            if os.path.exists(AUTH_FILE):
-                try:
-                    state = AUTH_FILE
-                    logger.info(f"Loading state from {AUTH_FILE}")
-                except Exception as e:
-                    logger.error(f"Failed to load state: {e}")
-
-            self.context = await self.browser.new_context(storage_state=state)
-            self.page = await self.context.new_page()
-            
-            # Set viewport to something reasonable for desktop view
-            await self.page.set_viewport_size({"width": 1280, "height": 720})
-
             try:
+                logger.info("Starting Remote Browser Session...")
+                self.playwright = await async_playwright().start()
+                
+                # Docker requires no-sandbox usually
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                )
+                
+                # Load auth state if exists
+                state = None
+                if os.path.exists(AUTH_FILE):
+                    try:
+                        state = AUTH_FILE
+                        logger.info(f"Loading state from {AUTH_FILE}")
+                    except Exception as e:
+                        logger.error(f"Failed to load state: {e}")
+
+                self.context = await self.browser.new_context(storage_state=state)
+                self.page = await self.context.new_page()
+                
+                # Set viewport to something reasonable for desktop view
+                await self.page.set_viewport_size({"width": 1280, "height": 720})
+
+                logger.info(f"Navigating to {url}...")
                 await self.page.goto(url)
                 self.is_active = True
                 return {"status": "ok", "message": "Browser started"}
+                
             except Exception as e:
-                await self.stop_session()
-                raise HTTPException(status_code=500, detail=f"Failed to navigate: {str(e)}")
+                logger.error(f"Failed to start browser session: {e}")
+                # Try to cleanup
+                try: 
+                    await self.stop_session() 
+                except: pass
+                
+                # Return JSON error instead of crashing
+                return JSONResponse(
+                    status_code=500, 
+                    content={"status": "error", "message": f"Launch failed: {str(e)}"}
+                )
 
     async def get_screenshot(self):
         if not self.is_active or not self.page:
