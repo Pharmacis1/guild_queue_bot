@@ -28,15 +28,10 @@ class RemoteBrowserSession:
             cls._instance = RemoteBrowserSession()
         return cls._instance
 
-    async def start_session(self, url="https://pwobs.com/login"):
+    async def _launch_browser_task(self, url):
         async with self.lock:
-            if self.is_active:
-                if self.page:
-                    await self.page.goto(url)
-                return {"status": "ok", "message": "Session already active, navigated to URL"}
-
             try:
-                logger.info("Starting Remote Browser Session...")
+                logger.info("Starting Remote Browser Session (Background)...")
                 self.playwright = await async_playwright().start()
                 
                 # Docker requires no-sandbox usually
@@ -56,103 +51,33 @@ class RemoteBrowserSession:
 
                 self.context = await self.browser.new_context(storage_state=state)
                 self.page = await self.context.new_page()
-                
-                # Set viewport to something reasonable for desktop view
                 await self.page.set_viewport_size({"width": 1280, "height": 720})
 
                 logger.info(f"Navigating to {url}...")
                 await self.page.goto(url)
                 self.is_active = True
-                return {"status": "ok", "message": "Browser started"}
+                logger.info("Browser started successfully.")
                 
             except Exception as e:
                 logger.error(f"Failed to start browser session: {e}")
-                # Try to cleanup
-                try: 
-                    await self.stop_session() 
+                try: await self.stop_session() 
                 except: pass
-                
-                # Return JSON error instead of crashing
-                return JSONResponse(
-                    status_code=500, 
-                    content={"status": "error", "message": f"Launch failed: {str(e)}"}
-                )
 
-    async def get_screenshot(self):
-        if not self.is_active or not self.page:
-            # Return a placeholder image or error
-            raise HTTPException(status_code=400, detail="Session not active")
+    async def start_session(self, background_tasks: BackgroundTasks, url="https://pwobs.com/login"):
+        if self.is_active:
+             return {"status": "ok", "message": "Session already active"}
         
-        try:
-            # Capture as JPEG for speed
-            data = await self.page.screenshot(type="jpeg", quality=60)
-            return Response(content=data, media_type="image/jpeg")
-        except Exception as e:
-             logger.error(f"Screenshot failed: {e}")
-             raise HTTPException(status_code=500, detail="Screenshot failed")
-
-    async def handle_input(self, action: dict):
-        if not self.is_active or not self.page:
-            raise HTTPException(status_code=400, detail="Session not active")
-
-        try:
-            action_type = action.get("type")
-            
-            if action_type == "click":
-                x = action.get("x")
-                y = action.get("y")
-                await self.page.mouse.click(x, y)
-                
-            elif action_type == "type":
-                text = action.get("text")
-                if text:
-                    await self.page.keyboard.type(text)
-            
-            elif action_type == "press":
-                key = action.get("key") # Enter, Backspace, etc
-                if key:
-                    await self.page.keyboard.press(key)
-            
-            return {"status": "ok"}
-            
-        except Exception as e:
-            logger.error(f"Input handling failed: {e}")
-            return {"status": "error", "message": str(e)}
-
-    async def stop_session(self):
-        async with self.lock:
-            if not self.is_active:
-                return {"status": "ok", "message": "Already stopped"}
-            
-            logger.info("Stopping Remote Browser Session...")
-            try:
-                # Save state!
-                if self.context:
-                    await self.context.storage_state(path=AUTH_FILE)
-                    logger.info("Auth state saved.")
-
-                if self.page: await self.page.close()
-                if self.context: await self.context.close()
-                if self.browser: await self.browser.close()
-                if self.playwright: await self.playwright.stop()
-            except Exception as e:
-                logger.error(f"Error stopping session: {e}")
-            finally:
-                self.page = None
-                self.context = None
-                self.browser = None
-                self.playwright = None
-                self.is_active = False
-                
-            return {"status": "ok", "message": "Session stopped and saved"}
+        # Schedule the heavy lifting
+        background_tasks.add_task(self._launch_browser_task, url)
+        return {"status": "ok", "message": "Browser initialization started..."}
 
 # --- Endpoints ---
 
 session_manager = RemoteBrowserSession.get_instance()
 
 @router.post("/start")
-async def start_browser():
-    return await session_manager.start_session()
+async def start_browser(background_tasks: BackgroundTasks):
+    return await session_manager.start_session(background_tasks)
 
 @router.get("/screenshot")
 async def get_screenshot():
