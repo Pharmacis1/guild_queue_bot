@@ -62,8 +62,14 @@ class RemoteBrowserSession:
                             logger.error(f"Failed to load state: {e}")
 
                 self.context = await self.browser.new_context(storage_state=state)
-                self.page = await self.context.new_page()
+                
+                # Setup popup handling
+                self.main_page = await self.context.new_page()
+                self.page = self.main_page # Active page
                 await self.page.set_viewport_size({"width": 1280, "height": 720})
+
+                # Listen for new pages (popups like Telegram Login)
+                self.context.on("page", self._on_popup)
 
                 logger.info(f"Navigating to {url}...")
                 await self.page.goto(url)
@@ -75,6 +81,32 @@ class RemoteBrowserSession:
                 logger.error(f"Failed to start browser session: {e}")
                 try: await self.stop_session() 
                 except: pass
+
+    def _on_popup(self, page):
+        """Handle new popup windows (e.g. OAuth login)"""
+        logger.info(f"New popup detected! Switching focus.")
+        self.page = page
+        
+        # Ensure viewport matches for consistency
+        try:
+            # We can't await here directly in sync callback easily, but page.set_viewport_size is async.
+            # However, Playwright event handlers can be async.
+            asyncio.create_task(self._setup_popup(page))
+        except Exception as e:
+            logger.error(f"Error handling popup: {e}")
+
+    async def _setup_popup(self, page):
+        try:
+            await page.set_viewport_size({"width": 1280, "height": 720})
+            
+            # Listen for close
+            page.on("close", self._on_popup_close)
+        except Exception as e:
+            logger.error(f"Setup popup failed: {e}")
+
+    def _on_popup_close(self, page):
+        logger.info("Popup closed. Reverting to main page.")
+        self.page = self.main_page
 
     async def start_session(self, background_tasks: BackgroundTasks, url="https://pwobs.com/login"):
         if self.is_active:
