@@ -233,3 +233,9 @@ async def get_debug_screenshot():
     return FileResponse(screenshot_path, media_type="image/png")
 
 
+
+@router.post("/api/scan/players")
+async def force_player_scan(background_tasks: BackgroundTasks):
+    from scripts.pwobs_scraper import run_scraper
+    background_tasks.add_task(run_scraper, headless=True, only_unknown=True)
+    return {"status": "ok", "message": "Player scan triggered in background"}
