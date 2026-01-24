@@ -8,7 +8,6 @@ services:
       - ./guild_bot.db:/app/guild_bot.db
       - ./backups:/app/backups
       - ./credentials.json:/app/credentials.json:ro
-      - ./credentials.json:/app/credentials.json:ro
       - ./pwobs_auth.json:/app/pwobs_auth.json
     env_file:
       - .env
