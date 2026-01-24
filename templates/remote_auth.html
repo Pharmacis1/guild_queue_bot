@@ -87,6 +87,7 @@
         <button class="btn btn-secondary" onclick="sendKey('Tab')">Tab</button>
 
         <button class="btn btn-info" onclick="triggerScan()">🔍 Run Scan</button>
+        <button class="btn btn-success" onclick="saveOnly()">💾 SAVE</button>
         <button class="btn btn-danger" onclick="stopSession()">⏹ SAVE & STOP</button>
     </div>
 
@@ -178,6 +179,14 @@
             if (refreshInterval) clearInterval(refreshInterval);
             refreshImage();
             refreshInterval = setInterval(refreshImage, 1000);
+        }
+
+        async function saveOnly() {
+            try {
+                const res = await fetch('/api/browser/save', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+            } catch (e) { alert('Network Error: ' + e); }
         }
 
         async function triggerScan() {
