@@ -61,10 +61,22 @@ class RemoteBrowserSession:
                         state = None
                     else:
                         try:
-                            state = AUTH_FILE
-                            logger.info(f"Loading state from {AUTH_FILE}")
+                            # Pre-validate JSON to avoid crashing Playwright
+                            with open(AUTH_FILE, 'r', encoding='utf-8') as f:
+                                content = f.read().strip()
+                                if not content:
+                                    logger.warning(f"{AUTH_FILE} is empty. Starting fresh session.")
+                                    state = None
+                                else:
+                                    json.loads(content) # Verify valid JSON
+                                    state = AUTH_FILE
+                                    logger.info(f"Loading state from {AUTH_FILE}")
+                        except json.JSONDecodeError as je:
+                            logger.error(f"Corrupted auth file (JSON error): {je}. Starting fresh.")
+                            state = None
                         except Exception as e:
-                            logger.error(f"Failed to load state: {e}")
+                            logger.error(f"Failed to validate state file: {e}")
+                            state = None
 
                 self.context = await self.browser.new_context(storage_state=state)
                 

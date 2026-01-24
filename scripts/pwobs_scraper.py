@@ -69,8 +69,16 @@ async def run_scraper(server="capella", dry_run=False, headless=True, only_unkno
             context_args = {}
             import os
             if os.path.exists(AUTH_FILE):
-                logger.info(f"Loading auth state from {AUTH_FILE}")
-                context_args["storage_state"] = AUTH_FILE
+                try:
+                    with open(AUTH_FILE, 'r', encoding='utf-8') as f:
+                        if f.read().strip(): # Check if not empty
+                            # Basic check, Playwright might still complain if invalid JSON but we try
+                            context_args["storage_state"] = AUTH_FILE
+                            logger.info(f"Loading auth state from {AUTH_FILE}")
+                        else:
+                            logger.warning(f"Auth file {AUTH_FILE} is empty, ignoring.")
+                except Exception as e:
+                    logger.error(f"Error checking auth file: {e}")
             
             browser = await p.chromium.launch(headless=headless)
             context = await browser.new_context(**context_args)
