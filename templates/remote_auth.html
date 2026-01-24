@@ -58,10 +58,21 @@
 
 <body>
 
-    <div class="status-bar">REMOTE ADMIN SESSION - DO NOT SHARE THIS URL</div>
+    <div class="status-bar" id="statusBar">REMOTE ADMIN SESSION - DO NOT SHARE THIS URL</div>
 
     <div class="browser-container" id="browserContainer">
         <img id="browserStream" src="" alt="Browser Stream (Click Start)">
+        <div id="loadingOverlay"
+            style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); color:white; justify-content:center; align-items:center; flex-direction:column;">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div id="loadingText" style="margin-top:10px;">Starting...</div>
+        </div>
+        <div id="errorOverlay"
+            style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(50,0,0,0.9); color:#ff6b6b; justify-content:center; align-items:center; flex-direction:column; padding:20px; text-align:center;">
+            <h3>Session Error</h3>
+            <p id="errorText">Unknown Error</p>
+            <button class="btn btn-sm btn-outline-light mt-3" onclick="stopSession()">Reset</button>
+        </div>
     </div>
 
     <div class="controls">
@@ -81,30 +92,82 @@
     <script>
         let isRunning = false;
         let refreshInterval = null;
+        let statusInterval = null;
 
         const img = document.getElementById('browserStream');
         const container = document.getElementById('browserContainer');
+        const overlay = document.getElementById('loadingOverlay');
+        const errorOverlay = document.getElementById('errorOverlay');
+        const errorText = document.getElementById('errorText');
+        const statusBar = document.getElementById('statusBar');
 
         async function startSession() {
+            overlay.style.display = 'flex';
+            errorOverlay.style.display = 'none';
             try {
                 const res = await fetch('/api/browser/start', { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'ok') {
                     isRunning = true;
+                    // Start polling status to know when ready or failed
+                    statusInterval = setInterval(checkStatus, 1000);
                     startPolling();
-                    alert('Session Started! Wait a few seconds for image.');
                 } else {
                     alert('Error: ' + data.message);
+                    overlay.style.display = 'none';
                 }
-            } catch (e) { alert('Network Error: ' + e); }
+            } catch (e) {
+                alert('Network Error: ' + e);
+                overlay.style.display = 'none';
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/browser/status');
+                const data = await res.json();
+
+                if (data.last_error) {
+                    showError(data.last_error);
+                    return;
+                }
+
+                if (data.active) {
+                    overlay.style.display = 'none';
+                    statusBar.style.background = '#2e7d32'; // Green
+                    statusBar.textContent = "SESSION ACTIVE - REMOTE CONTROL ENABLED";
+                } else if (isRunning && !data.active) {
+                    // It died unexpectedly without error?
+                    // Or just haven't started yet?
+                    // We keep waiting unless it takes too long
+                }
+            } catch (e) {
+                console.error("Status check failed", e);
+            }
+        }
+
+        function showError(msg) {
+            isRunning = false;
+            clearInterval(refreshInterval);
+            clearInterval(statusInterval);
+            overlay.style.display = 'none';
+            errorOverlay.style.display = 'flex';
+            errorText.textContent = msg;
+            statusBar.style.background = '#d32f2f';
+            statusBar.textContent = "SESSION CRASHED";
         }
 
         async function stopSession() {
             clearInterval(refreshInterval);
+            clearInterval(statusInterval);
+            overlay.style.display = 'none';
+            errorOverlay.style.display = 'none';
+
             try {
                 const res = await fetch('/api/browser/stop', { method: 'POST' });
                 const data = await res.json();
-                alert(data.message);
+                statusBar.style.background = '#d32f2f'; // Red
+                statusBar.textContent = "SESSION STOPPED";
                 img.src = "";
                 isRunning = false;
             } catch (e) { alert('Network Error: ' + e); }
@@ -112,14 +175,20 @@
 
         function startPolling() {
             if (refreshInterval) clearInterval(refreshInterval);
-            refreshImage(); // Immediate
-            refreshInterval = setInterval(refreshImage, 1000); // 1 FPS needed for login
+            refreshImage();
+            refreshInterval = setInterval(refreshImage, 1000);
         }
 
         function refreshImage() {
             if (!isRunning) return;
             // Add timestamp to prevent caching
-            img.src = '/api/browser/screenshot?t=' + new Date().getTime();
+            // We use a separate Image object to preload to avoid flickering, theoretically, 
+            // but for MJPEG style simple img src replacement is okay.
+            const newSrc = '/api/browser/screenshot?t=' + new Date().getTime();
+
+            // On error(404/503) the browser logs it to console, but image stays broken icon.
+            // We rely on checkStatus to catch the actual error reason.
+            img.src = newSrc;
         }
 
         // Click Handling

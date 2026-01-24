@@ -31,6 +31,7 @@ class RemoteBrowserSession:
     async def _launch_browser_task(self, url):
         async with self.lock:
             try:
+                self.last_error = None
                 logger.info("Starting Remote Browser Session (Background)...")
                 self.playwright = await async_playwright().start()
                 
@@ -49,11 +50,16 @@ class RemoteBrowserSession:
                 # Load auth state if exists
                 state = None
                 if os.path.exists(AUTH_FILE):
-                    try:
-                        state = AUTH_FILE
-                        logger.info(f"Loading state from {AUTH_FILE}")
-                    except Exception as e:
-                        logger.error(f"Failed to load state: {e}")
+                    if os.path.isdir(AUTH_FILE):
+                        logger.error(f"{AUTH_FILE} is a directory! Ignoring it. Please remove it manually on server.")
+                        # We cannot use it if it is a directory.
+                        state = None
+                    else:
+                        try:
+                            state = AUTH_FILE
+                            logger.info(f"Loading state from {AUTH_FILE}")
+                        except Exception as e:
+                            logger.error(f"Failed to load state: {e}")
 
                 self.context = await self.browser.new_context(storage_state=state)
                 self.page = await self.context.new_page()
@@ -65,6 +71,7 @@ class RemoteBrowserSession:
                 logger.info("Browser started successfully.")
                 
             except Exception as e:
+                self.last_error = str(e)
                 logger.error(f"Failed to start browser session: {e}")
                 try: await self.stop_session() 
                 except: pass
@@ -73,14 +80,17 @@ class RemoteBrowserSession:
         if self.is_active:
              return {"status": "ok", "message": "Session already active"}
         
+        # Reset error on new start
+        self.last_error = None
         # Schedule the heavy lifting
         background_tasks.add_task(self._launch_browser_task, url)
         return {"status": "ok", "message": "Browser initialization started..."}
 
     async def get_screenshot(self):
         if not self.is_active or not self.page:
-            # Return a simple placeholder JSON or text if not active, 
-            # but usually frontend expects image. Let's return 404 to stop polling.
+            # If we have a startup error, return 503 with info
+            if self.last_error:
+                raise HTTPException(status_code=503, detail=f"Startup Failed: {self.last_error}")
             raise HTTPException(status_code=404, detail="Session not active")
         
         try:
@@ -95,24 +105,26 @@ class RemoteBrowserSession:
 
     async def stop_session(self):
         async with self.lock:
-            if not self.is_active:
-                return {"status": "ok", "message": "Session not active"}
-            
+            # Always try to cleanup, even if is_active=False (cleanup failed start)
             try:
-                if self.browser:
-                    await self.browser.close()
-                if self.playwright:
-                    await self.playwright.stop()
+                if self.browser: await self.browser.close()
+                if self.playwright: await self.playwright.stop()
+            except Exception as e:
+                logger.error(f"Failed to stop browser session: {e}")
+            finally:
                 self.is_active = False
                 self.browser = None
                 self.context = None
                 self.page = None
                 self.playwright = None
-                logger.info("Browser session stopped.")
-                return {"status": "ok", "message": "Browser session stopped."}
-            except Exception as e:
-                logger.error(f"Failed to stop browser session: {e}")
-                return {"status": "error", "message": f"Failed to stop browser session: {e}"}
+                
+            return {"status": "ok", "message": "Browser session stopped."}
+
+    async def get_status(self):
+        return {
+            "active": self.is_active,
+            "last_error": self.last_error
+        }
 
     async def handle_input(self, action: dict):
         if not self.is_active or not self.page:
@@ -130,11 +142,20 @@ class RemoteBrowserSession:
             elif action_type == "type":
                 selector = action.get("selector")
                 text = action.get("text")
-                if selector and text is not None:
-                    await self.page.fill(selector, text)
-                    return {"status": "ok", "message": f"Typed '{text}' into '{selector}'"}
+                if text is not None:
+                    # If selector provided, type there. If not, just type (key press)
+                    if selector: await self.page.fill(selector, text)
+                    else: await self.page.keyboard.type(text)
+                    return {"status": "ok", "message": f"Typed '{text}'"}
                 else:
-                    raise HTTPException(status_code=400, detail="Missing selector or text for type action")
+                    raise HTTPException(status_code=400, detail="Missing text for type action")
+            elif action_type == "press":
+                key = action.get("key")
+                if key:
+                    await self.page.keyboard.press(key)
+                    return {"status": "ok", "message": f"Pressed {key}"}
+                else:
+                    raise HTTPException(status_code=400, detail="Missing key for press action")
             elif action_type == "goto":
                 url = action.get("url")
                 if url:
@@ -164,6 +185,10 @@ async def start_browser(background_tasks: BackgroundTasks):
 @router.get("/screenshot")
 async def get_screenshot():
     return await session_manager.get_screenshot()
+
+@router.get("/status")
+async def get_status():
+    return await session_manager.get_status()
 
 @router.post("/interact")
 async def interact(action: dict):
