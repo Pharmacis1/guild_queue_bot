@@ -46,7 +46,7 @@ async def update_player(conn, role_id, nickname, class_id):
     await conn.commit()
 
 
-AUTH_FILE = "pwobs_auth.json"
+AUTH_FILE = "sessions/pwobs_auth.json"
 
 async def run_scraper(server="capella", dry_run=False, headless=True, only_unknown=False):
     """
