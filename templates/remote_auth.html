@@ -58,6 +58,7 @@
 
 <body>
 
+    {% if is_admin %}
     <div class="status-bar" id="statusBar">REMOTE ADMIN SESSION - DO NOT SHARE THIS URL</div>
 
     <div class="browser-container" id="browserContainer">
@@ -90,6 +91,14 @@
         <button class="btn btn-success" onclick="saveOnly()">💾 SAVE</button>
         <button class="btn btn-danger" onclick="stopSession()">⏹ SAVE & STOP</button>
     </div>
+    {% else %}
+    <div class="auth-container">
+        <div class="spider-logo">🚫</div>
+        <h2>Access Denied</h2>
+        <p class="text-danger">You do not have permission to view this page.</p>
+        <a href="/" class="btn btn-outline-light mt-3">Return Home</a>
+    </div>
+    {% endif %}
 
     <script>
         let isRunning = false;

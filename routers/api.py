@@ -124,6 +124,60 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
+@router.post("/api/update_player")
+async def update_player(request: Request):
+    """
+    Consolidated endpoint to update all player data (nickname, class, status) in one go.
+    """
+    try:
+        data = await request.json()
+        role_id = data.get('role_id')
+        nickname = data.get('nickname')
+        class_id = data.get('class_id')
+        in_clan = data.get('in_clan') # Expects boolean or 0/1
+
+        if not role_id:
+            return {"status": "error", "message": "role_id is required"}
+        
+        logging.info(f"API update_player: role_id={role_id}, nick={nickname}, class={class_id}, in_clan={in_clan}")
+
+        async with aiosqlite.connect(DB_NAME) as conn:
+            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
+                if not await cursor.fetchone():
+                    return {"status": "error", "message": f"Player ID {role_id} not found"}
+            
+            # Build dynamic update query
+            updates = []
+            params = []
+            
+            if nickname is not None:
+                updates.append("nickname = ?")
+                params.append(nickname.strip() if nickname else None)
+                
+            if class_id is not None:
+                # Basic validation
+                if class_id not in CLASSES and class_id != -1:
+                     return {"status": "error", "message": f"Invalid class_id: {class_id}"}
+                updates.append("class_id = ?")
+                params.append(class_id)
+                
+            if in_clan is not None:
+                updates.append("in_clan = ?")
+                params.append(1 if in_clan else 0)
+                
+            if updates:
+                sql = f"UPDATE players SET {', '.join(updates)} WHERE role_id = ?"
+                params.append(role_id)
+                await conn.execute(sql, tuple(params))
+                await conn.commit()
+                return {"status": "ok", "message": f"Updated {len(updates)} fields for player {role_id}"}
+            else:
+                return {"status": "ok", "message": "No changes requested"}
+
+    except Exception as e:
+        logging.error(f"Error in update_player: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
 @router.post("/api/update_nickname")
 async def update_nickname(request: Request):
     """API endpoint to update player nickname"""
@@ -185,6 +239,8 @@ async def update_status(request: Request):
         data = await request.json()
         role_id = data.get('role_id')
         in_clan = data.get('in_clan') # Expects boolean or 0/1
+        
+        logging.info(f"API update_status: role_id={role_id}, in_clan={in_clan}")
         
         if not role_id:
             return {"status": "error", "message": "role_id is required"}

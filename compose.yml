@@ -9,6 +9,7 @@ services:
       - ./backups:/app/backups
       - ./credentials.json:/app/credentials.json:ro
       - ./pwobs_auth.json:/app/pwobs_auth.json
+      - ./:/app
     env_file:
       - .env
     environment:

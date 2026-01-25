@@ -43,6 +43,17 @@ app.include_router(auth.router)
 from routers import admin_browser
 app.include_router(admin_browser.router)
 
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.error(f"Global Exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": f"Internal Server Error: {str(exc)}"}
+    )
+
 
 async def on_startup():
     # 1. Init Web DB

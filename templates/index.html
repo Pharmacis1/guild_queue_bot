@@ -170,7 +170,55 @@
         #khTable tbody tr:hover td:first-child,
         #moneyTable tbody tr:hover td:first-child {
             background-color: #1a1a1a !important;
+            background-color: #1a1a1a !important;
             cursor: pointer;
+        }
+
+        /* 10. EDIT BUTTON & MODAL FIXES */
+        .edit-player-btn {
+            opacity: 0.1 !important;
+            color: #aaa !important;
+            /* Subtle gray */
+            transition: opacity 0.2s, color 0.2s;
+            font-size: 1.1em;
+        }
+
+        .edit-player-btn:hover {
+            opacity: 1 !important;
+            color: #d4af37 !important;
+            /* Gold on hover only */
+        }
+
+        /* Modal Inputs - Dark Theme Override */
+        .modal-content {
+            background-color: #121212 !important;
+            border: 1px solid #333;
+            color: #e0e0e0;
+        }
+
+        .modal-header,
+        .modal-footer {
+            border-color: #333 !important;
+        }
+
+        .form-control,
+        .form-select {
+            background-color: #2b2b2b !important;
+            border: 1px solid #444 !important;
+            color: #fff !important;
+        }
+
+        .form-control:focus,
+        .form-select:focus {
+            background-color: #333 !important;
+            color: #fff !important;
+            border-color: #d11e32 !important;
+            box-shadow: 0 0 0 0.25rem rgba(209, 30, 50, 0.25);
+        }
+
+        .form-control:disabled {
+            background-color: #1a1a1a !important;
+            color: #888 !important;
         }
     </style>
 
@@ -205,7 +253,8 @@
             <!-- Right: Guest/User Profile -->
             <div class="thin-header-right">
                 <div class="guest-profile">
-                    <img src="{{ user_avatar }}" alt="{{ user_nickname }}" class="guest-avatar">
+                    <img src="{{ user_avatar }}" alt="{{ user_nickname }}" class="guest-avatar"
+                        onerror="this.src='/static/img/spider_arcane_ruby_transparent.png'">
                     <span class="guest-name">{{ user_nickname }}</span>
                     <button class="guest-menu-btn" data-bs-toggle="modal" data-bs-target="#menuModal">▼</button>
                     <!-- Login Button for Guests (if preferred inline, but menu is cleaner) -->
@@ -910,7 +959,7 @@
     <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
 
     <iframe id="telegram-post-placeholder" style="display:none;"></iframe>
-    <script src="/static/js/script.js?v=161"></script>
+    <script src="/static/js/script.js?v=163"></script>
 </body>
 
 </html>

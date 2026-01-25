@@ -471,7 +471,7 @@ $(document).on('click', '.edit-player-btn', function (e) {
     try {
         e.preventDefault();
         e.stopPropagation(); // Stop table row click
-        
+
         const roleId = $(this).data('role-id');
         const currentName = $(this).data('name');
         const classIcon = $(this).data('class-icon'); // path like /static/icons/3.png
@@ -488,10 +488,10 @@ $(document).on('click', '.edit-player-btn', function (e) {
         const nickname = currentName.startsWith('ID ') ? '' : currentName;
         $('#editNickname').val(nickname);
         $('#editClass').val(currentClassId);
-        
+
         // Reset In Clan to checked by default (since we are editing visible list)
         $('#editInClan').prop('checked', true);
-        
+
         $('#saveStatus').hide();
         new bootstrap.Modal($('#editPlayerModal')[0]).show();
     } catch (e) { console.error('Error opening modal:', e); }
@@ -502,41 +502,40 @@ async function savePlayerData() {
     const nickname = $('#editNickname').val().trim();
     const classId = parseInt($('#editClass').val());
     const inClan = $('#editInClan').is(':checked');
-    
+
     const statusDiv = $('#saveStatus');
 
     statusDiv.show().removeClass().addClass('alert alert-info py-2 small').text('💾 Сохранение...');
 
     try {
-        // 1. Nickname
-        const nicknameResponse = await fetch('/api/update_nickname', {
+        // Consolidated Call
+        const response = await fetch('/api/update_player', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role_id: roleId, nickname: nickname })
+            body: JSON.stringify({
+                role_id: roleId,
+                nickname: nickname,
+                class_id: classId,
+                in_clan: inClan
+            })
         });
-        const nicknameResult = await nicknameResponse.json();
-        if (nicknameResult.status !== 'ok') throw new Error(nicknameResult.message);
 
-        // 2. Class
-        const classResponse = await fetch('/api/update_class', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role_id: roleId, class_id: classId })
-        });
-        const classResult = await classResponse.json();
-        if (classResult.status !== 'ok') throw new Error(classResult.message);
-        
-        // 3. Status (In Clan)
-        const statusResponse = await fetch('/api/update_status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role_id: roleId, in_clan: inClan })
-        });
-        const statusResult = await statusResponse.json();
-        if (statusResult.status !== 'ok') throw new Error(statusResult.message);
+        let result;
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            result = await response.json();
+        } else {
+            // Fallback for HTML error pages if Global Exception Handler fails or something else intercepts
+            const text = await response.text();
+            throw new Error(`Server Error (${response.status}): ${text.substring(0, 100)}...`);
+        }
+
+        if (result.status !== 'ok') throw new Error(result.message);
 
         statusDiv.removeClass().addClass('alert alert-success py-2 small').text('✅ Данные успешно сохранены!');
-        setTimeout(() => window.location.reload(), 1000);
+
+        // Reload immediately
+        setTimeout(() => window.location.reload(), 500);
 
     } catch (error) {
         statusDiv.removeClass().addClass('alert alert-danger py-2 small').text('❌ Ошибка: ' + error.message);

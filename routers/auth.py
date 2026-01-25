@@ -65,6 +65,7 @@ async def login_telegram_redirect(request: Request):
                 await conn.commit()
          
          request.session['user_id'] = tg_id
+         logging.info(f"SETTING SESSION USER_ID: {tg_id}")
          return RedirectResponse(url="/")
          
     except Exception as e:

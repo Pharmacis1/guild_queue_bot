@@ -50,6 +50,8 @@ async def read_root(
     
     # Default values for public access (Guest Mode)
     user_id = request.session.get('user_id')
+    import logging
+    logging.info(f"DEBUG VIEWS: Session Retrieved user_id: {user_id}")
     u = None
     my_nicks = set()
     is_authenticated = False
@@ -66,8 +68,21 @@ async def read_root(
             user_avatar = u.avatar_url or user_avatar
             is_admin = u.is_master # Admin if is_master is True
             
+            # Debug Chars
+            import logging
+            logging.info(f"DEBUG AUTH: User {u.username} ({user_id}) - Chars: {[c.nickname for c in u.characters]}")
+            
             # Load characters for highlighting
             my_nicks = {c.nickname.lower().strip() for c in u.characters if c.nickname}
+            
+            # Find main character for display name
+            main_char = next((c for c in u.characters if c.is_main), None)
+            if main_char:
+                user_nickname = main_char.nickname
+            elif u.characters:
+                 # Fallback to first character if no main is explicitly set but chars exist
+                 user_nickname = u.characters[0].nickname
+            # Else keep telegram username/id
         else:
             # Session exists but user not in DB (weird), treat as guest
             request.session.pop('user_id', None)
