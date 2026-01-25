@@ -178,6 +178,32 @@ async def update_class(request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@router.post("/api/update_status")
+async def update_status(request: Request):
+    """API endpoint to update player in_clan status"""
+    try:
+        data = await request.json()
+        role_id = data.get('role_id')
+        in_clan = data.get('in_clan') # Expects boolean or 0/1
+        
+        if not role_id:
+            return {"status": "error", "message": "role_id is required"}
+        
+        # Convert to int (0 or 1)
+        in_clan_val = 1 if in_clan else 0
+        
+        async with aiosqlite.connect(DB_NAME) as conn:
+            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
+                if not await cursor.fetchone():
+                    return {"status": "error", "message": f"Player ID {role_id} not found"}
+            
+            await conn.execute("UPDATE players SET in_clan = ? WHERE role_id = ?", (in_clan_val, role_id))
+            await conn.commit()
+            
+        return {"status": "ok", "message": f"Status updated for ID {role_id} to {in_clan_val}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # --- SCRAPER INTEGRATION ---
 from fastapi import BackgroundTasks
 import asyncio

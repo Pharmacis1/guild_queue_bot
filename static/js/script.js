@@ -470,17 +470,28 @@ $(document).ready(function () {
 $(document).on('click', '.edit-player-btn', function (e) {
     try {
         e.preventDefault();
+        e.stopPropagation(); // Stop table row click
+        
         const roleId = $(this).data('role-id');
         const currentName = $(this).data('name');
-        const classIcon = $(this).data('class-icon');
+        const classIcon = $(this).data('class-icon'); // path like /static/icons/3.png
 
-        const currentClassId = (typeof classIconMap !== 'undefined' && classIconMap[classIcon]) || -1;
+        // Extract class ID from icon path if possible, or use fallback map
+        let currentClassId = -1;
+        if (classIcon) {
+            const match = classIcon.match(/\/(\d+)\.png/);
+            if (match && match[1]) currentClassId = match[1];
+        }
 
         $('#editRoleId').val(roleId);
         $('#displayRoleId').val(roleId);
         const nickname = currentName.startsWith('ID ') ? '' : currentName;
         $('#editNickname').val(nickname);
         $('#editClass').val(currentClassId);
+        
+        // Reset In Clan to checked by default (since we are editing visible list)
+        $('#editInClan').prop('checked', true);
+        
         $('#saveStatus').hide();
         new bootstrap.Modal($('#editPlayerModal')[0]).show();
     } catch (e) { console.error('Error opening modal:', e); }
@@ -490,11 +501,14 @@ async function savePlayerData() {
     const roleId = $('#editRoleId').val();
     const nickname = $('#editNickname').val().trim();
     const classId = parseInt($('#editClass').val());
+    const inClan = $('#editInClan').is(':checked');
+    
     const statusDiv = $('#saveStatus');
 
     statusDiv.show().removeClass().addClass('alert alert-info py-2 small').text('💾 Сохранение...');
 
     try {
+        // 1. Nickname
         const nicknameResponse = await fetch('/api/update_nickname', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -503,6 +517,7 @@ async function savePlayerData() {
         const nicknameResult = await nicknameResponse.json();
         if (nicknameResult.status !== 'ok') throw new Error(nicknameResult.message);
 
+        // 2. Class
         const classResponse = await fetch('/api/update_class', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -510,6 +525,15 @@ async function savePlayerData() {
         });
         const classResult = await classResponse.json();
         if (classResult.status !== 'ok') throw new Error(classResult.message);
+        
+        // 3. Status (In Clan)
+        const statusResponse = await fetch('/api/update_status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role_id: roleId, in_clan: inClan })
+        });
+        const statusResult = await statusResponse.json();
+        if (statusResult.status !== 'ok') throw new Error(statusResult.message);
 
         statusDiv.removeClass().addClass('alert alert-success py-2 small').text('✅ Данные успешно сохранены!');
         setTimeout(() => window.location.reload(), 1000);

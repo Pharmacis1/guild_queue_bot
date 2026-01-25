@@ -337,6 +337,7 @@ async def read_root(
     return templates.TemplateResponse("index.html", {
         "request": request,
         "is_authenticated": False, # Temporarily disabled
+        "is_admin": (request.query_params.get("admin") == "1"), 
         "bot_username": BOT_USERNAME,
         "last_updated": last_upd,
         "user_nickname": "Guest",

@@ -281,6 +281,13 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="editInClan" checked>
+                                <label class="form-check-label text-silver" for="editInClan">Состоит в клане</label>
+                            </div>
+                            <div class="form-text text-muted small">Если снять галочку, игрок пропадет из таблиц.</div>
+                        </div>
                         <div class="alert alert-info py-2 small" id="saveStatus" style="display: none;"></div>
                     </div>
                     <div class="modal-footer">
@@ -470,6 +477,14 @@
                                             width="24">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>
                                         {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif %}
+
+                                        <!-- Edit Trigger -->
+                                        {% if is_admin %}
+                                        <span class="edit-player-btn ms-2 text-muted"
+                                            style="cursor: pointer; opacity: 0.5;" data-role-id="{{ row.role_id }}"
+                                            data-name="{{ row.name }}" data-class-icon="{{ row.class_icon }}"
+                                            title="Edit Player">✎</span>
+                                        {% endif %}
                                     </td>
                                     {% for s in [row.s1, row.s2, row.s3, row.s4, row.s5, row.s6, row.s7] %}
                                     <td class="text-center stage-cell">
@@ -642,6 +657,14 @@
                                             width="20">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>
                                         {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif %}
+
+                                        <!-- Edit Trigger -->
+                                        {% if is_admin %}
+                                        <span class="edit-player-btn ms-2 text-muted"
+                                            style="cursor: pointer; opacity: 0.5;" data-role-id="{{ row.role_id }}"
+                                            data-name="{{ row.name }}" data-class-icon="{{ row.class_icon }}"
+                                            title="Edit Player">✎</span>
+                                        {% endif %}
                                     </td>
 
                                     {% if intervals %}
