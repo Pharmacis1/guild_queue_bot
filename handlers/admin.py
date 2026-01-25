@@ -106,12 +106,48 @@ async def m_user_manage(callback: types.CallbackQuery):
     ban_text = "🕊 Разбанить" if user.is_banned else "🔨 ЗАБАНИТЬ"
     
     text = f"👤 <b>Управление профилем:</b>\nИгрок: {user_link}\nСтатус: <b>{status_emoji}</b>\n\n👇 <b>Выберите персонажа:</b>"
-    kb = [[types.InlineKeyboardButton(text=ban_text, callback_data=f"m_ban_toggle_{uid}_{page}")]]
+    
+    # Buttons
+    kb = []
+    
+    # 1. Ban/Unban
+    kb.append([types.InlineKeyboardButton(text=ban_text, callback_data=f"m_ban_toggle_{uid}_{page}")])
+    
+    # 2. Master Toggle (New)
+    if user.is_master:
+        kb.append([types.InlineKeyboardButton(text="⚡ Разжаловать из Мастеров", callback_data=f"m_master_toggle_{uid}_{page}")])
+    else:
+        kb.append([types.InlineKeyboardButton(text="👑 Сделать Мастером", callback_data=f"m_master_toggle_{uid}_{page}")])
+
+    # 3. Characters
     for c in chars:
         kb.append([types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"m_char_menu_{c.id}_{uid}_{page}")])
+    
     kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data=f"m_users_list:{page}")])
     
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data.startswith("m_master_toggle_"))
+async def m_master_toggle_handler(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    uid, page = int(parts[3]), int(parts[4])
+    
+    user = session.get(User, uid)
+    if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
+    
+    # Self-protection
+    if user.telegram_id == callback.from_user.id:
+         return await callback.answer("❌ Нельзя изменить статус самому себе!", show_alert=True)
+
+    user.is_master = not user.is_master
+    session.commit()
+    
+    status = "👑 ТЕПЕРЬ МАСТЕР" if user.is_master else "⚡ БОЛЬШЕ НЕ МАСТЕР"
+    await callback.answer(f"Статус изменен: {status}")
+    
+    # Refresh view
+    callback.data = f"m_u_manage_{uid}_{page}"
+    await m_user_manage(callback)
 
 @router.callback_query(F.data.startswith("m_ban_toggle_"))
 async def m_toggle_ban(callback: types.CallbackQuery):
