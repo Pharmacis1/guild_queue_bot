@@ -100,7 +100,15 @@ function toggleMyChars() {
     try {
         if ($.fn.DataTable.isDataTable('#khTable')) $('#khTable').DataTable().draw();
         if ($.fn.DataTable.isDataTable('#moneyTable')) $('#moneyTable').DataTable().draw();
-        if ($.fn.DataTable.isDataTable('#historyTable')) $('#historyTable').DataTable().draw();
+        if ($.fn.DataTable.isDataTable('#historyTable')) $('#historyTable').DataTable().draw(); // Keep this for legacy
+
+        // Filter Timeline (History)
+        if (myCharsOnly) {
+            $('.history-entry').hide();
+            $('.history-entry[data-is-mine="true"]').show();
+        } else {
+            $('.history-entry').show();
+        }
     } catch (e) { }
 }
 

@@ -891,7 +891,7 @@
                     <!-- History Timeline Feed -->
                     <div class="history-timeline">
                         {% for date, name, icon, cname, desc, etype, rid, is_mine, item_name in history_rows %}
-                        <div class="history-entry">
+                        <div class="history-entry" data-is-mine="{{ 'true' if is_mine else 'false' }}">
                             <div class="history-entry-date">
                                 <span class="history-date-day">{{ date.split(' ')[0] }}</span>
                                 <span class="history-date-time">{{ date.split(' ')[1] if ' ' in date else '' }}</span>
