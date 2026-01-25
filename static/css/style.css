@@ -724,77 +724,76 @@ table.dataTable tbody td:last-child {
 /* --- Mobile Responsiveness --- */
 @media (max-width: 768px) {
 
-    /* Shrink the Hero Section significantly */
-    .hero-section {
-        height: 25vh;
-        min-height: 200px;
+    /* SHOW STUB, HIDE CONTENTS */
+    .mobile-stub {
+        display: flex !important;
     }
 
-    .hero-title {
-        font-size: 1.5rem;
-        margin: 5px 0;
-    }
-
-    .hero-subtitle {
-        font-size: 0.8rem;
-        letter-spacing: 2px;
-    }
-
-    .spider-main-logo {
-        font-size: 50px;
-        margin-bottom: 5px;
-    }
-
-    .spider-eyes {
-        width: 16px;
-        height: 8px;
-        top: 45%;
-    }
-
-    .eye {
-        width: 5px;
-        height: 5px;
-    }
-
-    /* Hide the sidebar scroll tracker on mobile to prevent overlap */
+    .app-container,
+    .hero-section,
+    .thin-header,
     .spider-scroll-track {
-        display: none;
+        display: none !important;
     }
 
-    /* Compact Navigation */
-    .brand-title {
-        font-size: 18px;
-    }
-
-    .top-nav {
-        padding: 8px 10px;
-    }
-
-    /* Compact & SCROLLABLE Tables */
-    table.dataTable thead th {
-        font-size: 0.7rem;
-        padding: 8px 4px !important;
-        white-space: nowrap;
-        /* Prevent headers from breaking awkwardly */
-    }
-
-    table.dataTable tbody td {
-        font-size: 0.8rem;
-        padding: 8px 4px !important;
-    }
-
-    /* Allow horizontal scroll for tables without breaking layout */
-    .table-responsive {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    /* Adjust container padding */
-    .app-container {
-        padding-left: 0 !important;
-        padding-right: 0 !important;
+    body {
+        overflow: hidden;
     }
 }
+
+/* --- Mobile Stub Styles --- */
+.mobile-stub {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--bg-onyx);
+    background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)), url('../img/bg_obsidian_web.png');
+    background-size: cover;
+    background-position: center;
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.mobile-stub-content {
+    background: rgba(20, 20, 20, 0.9);
+    border: 1px solid var(--accent-ruby);
+    padding: 40px;
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.mobile-stub .spider-main-logo {
+    margin: 0 0 20px 0;
+    width: auto;
+    display: inline-block;
+}
+
+.mobile-stub h2 {
+    color: var(--accent-ruby);
+    font-family: 'Cinzel', serif;
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+}
+
+.mobile-stub p {
+    color: var(--text-silver);
+    font-family: 'Montserrat', sans-serif;
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+/* Existing Mobile Overrides updated to be irrelevant but kept for safety reference */
+/* @media (max-width: 768px) { ... } */
 
 /* --- Control Deck (Filter Bar) --- */
 .control-deck-container {
