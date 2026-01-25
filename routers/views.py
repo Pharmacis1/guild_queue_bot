@@ -45,34 +45,34 @@ async def read_root(
     history_classes: List[int] = Query(None),
     history_types: List[str] = Query(None),
 ):
-    # --- AUTH CHECK DISABLED ---
+    # --- AUTH CHECK RESTORED ---
     from database import session, User
     
-    # Default values for public access
-    user_id = None
+    # Default values for public access (Guest Mode)
+    user_id = request.session.get('user_id')
     u = None
     my_nicks = set()
+    is_authenticated = False
+    is_admin = False
+    user_nickname = "Guest"
+    user_avatar = "/static/img/spider_arcane_ruby_transparent.png"
     
-    # # Original auth code (disabled):
-    # user_id = request.session.get('user_id')
-    # 
-    # if not user_id:
-    #     return templates.TemplateResponse("login.html", {"request": request, "bot_username": BOT_USERNAME})
-    #
-    # # Check if user has characters
-    # u = session.query(User).filter_by(telegram_id=user_id).first()
-    # my_nicks = {c.nickname.lower().strip() for c in u.characters if c.nickname} if u else set()
-    # 
-    # if not u or not my_nicks:
-    #     request.session.pop('user_id', None)
-    #     return templates.TemplateResponse("login.html", {
-    #         "request": request, 
-    #         "bot_username": BOT_USERNAME, 
-    #         "error_message": "У вас нет персонажей в гильдии. Доступ запрещен."
-    #     })
+    if user_id:
+        # Check if user exists in DB
+        u = session.query(User).filter_by(telegram_id=user_id).first()
+        if u:
+            is_authenticated = True
+            user_nickname = u.username or f"User {user_id}"
+            user_avatar = u.avatar_url or user_avatar
+            is_admin = u.is_master # Admin if is_master is True
+            
+            # Load characters for highlighting
+            my_nicks = {c.nickname.lower().strip() for c in u.characters if c.nickname}
+        else:
+            # Session exists but user not in DB (weird), treat as guest
+            request.session.pop('user_id', None)
 
-    
-    # Auth OK
+    # Auth OK (or Guest OK)
     
     # DEBUG
     print(f"DEBUG: history_types={history_types}")
@@ -336,12 +336,12 @@ async def read_root(
 
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "is_authenticated": False, # Temporarily disabled
-        "is_admin": (request.query_params.get("admin") == "1"), 
+        "is_authenticated": is_authenticated,
+        "is_admin": is_admin, 
         "bot_username": BOT_USERNAME,
         "last_updated": last_upd,
-        "user_nickname": "Guest",
-        "user_avatar": "/static/img/spider_arcane_ruby_transparent.png",
+        "user_nickname": user_nickname,
+        "user_avatar": user_avatar,
         
         # KH Context
         "kh_rows": final_kh_rows,
@@ -373,7 +373,15 @@ async def read_root(
 async def remote_auth_page(request: Request):
     """
     Secret admin page for remote browser authentication.
-    In production, this should be protected by a password or Telegram Auth.
-    For now, relying on obscurity + explicit user request.
     """
-    return templates.TemplateResponse("remote_auth.html", {"request": request})
+    # Auth Logic Reuse
+    from database import session, User
+    user_id = request.session.get('user_id')
+    is_admin = False
+    
+    if user_id:
+        u = session.query(User).filter_by(telegram_id=user_id).first()
+        if u and u.is_master:
+            is_admin = True
+            
+    return templates.TemplateResponse("remote_auth.html", {"request": request, "is_admin": is_admin})

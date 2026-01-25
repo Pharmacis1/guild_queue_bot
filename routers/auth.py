@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 import logging
 import os
 import secrets
@@ -11,6 +12,7 @@ import aiosqlite
 from web_database import DB_NAME
 
 router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -25,6 +27,49 @@ class WidgetLoginRequest(BaseModel):
     photo_url: Optional[str] = None
     auth_date: int
     hash: str
+    
+@router.get("/login/telegram")
+async def login_telegram_redirect(request: Request):
+    """
+    Handle the redirect from Telegram Login Widget.
+    It returns query params: id, first_name, username, photo_url, auth_date, hash
+    """
+    params = dict(request.query_params)
+    logging.info(f"Telegram Redirect params: {params}")
+    
+    if not BOT_TOKEN:
+         return templates.TemplateResponse("login.html", {"request": request, "error_message": "Server Config Error"})
+
+    try:
+         validate_widget_auth(params.copy(), BOT_TOKEN)
+         
+         tg_id = int(params.get('id'))
+         
+         # Check DB
+         async with aiosqlite.connect(DB_NAME) as conn:
+            cursor = await conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,))
+            user_row = await cursor.fetchone()
+            
+            if not user_row:
+                 # Optional: Create user on fly? Or reject.
+                 # Policy: Reject if not in DB (must start bot first)
+                 # Actually, for better UX, maybe just show error page or redirect to index with error.
+                 # For now, let's redirect to index and let index handle 'not authenticated' look but maybe flash a message?
+                 # Since we use session, we just won't set the session.
+                 return RedirectResponse(url="/?error=not_registered")
+
+            # Update Avatar
+            avatar_url = params.get('photo_url')
+            if avatar_url:
+                await conn.execute("UPDATE users SET avatar_url = ? WHERE telegram_id = ?", (avatar_url, tg_id))
+                await conn.commit()
+         
+         request.session['user_id'] = tg_id
+         return RedirectResponse(url="/")
+         
+    except Exception as e:
+        logging.error(f"Redirect Login Failed: {e}")
+        return RedirectResponse(url="/?error=auth_failed")
 
 @router.post("/api/login")
 async def login(data: LoginRequest, request: Request, response: Response):
