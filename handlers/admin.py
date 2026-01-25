@@ -9,7 +9,7 @@ from apscheduler.jobstores.base import JobLookupError
 
 # Импорты из других файлов проекта
 from loader import bot, scheduler, MSK
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player
 from keyboards import get_master_menu, get_back_btn, get_weekdays_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
@@ -23,6 +23,53 @@ PAGE_SIZE = 10
 def is_master(telegram_id):
     user = session.query(User).filter_by(telegram_id=telegram_id).first()
     return user and user.is_master
+
+def get_weekly_valor_map(nicknames):
+    """
+    Calculates weekly valor (from Monday) for a list of nicknames.
+    Returns: {nickname: total_valor}
+    """
+    if not nicknames: return {}
+    
+    from datetime import timedelta
+    today = datetime.now()
+    monday = today - timedelta(days=today.weekday())
+    start_date = monday.strftime('%Y-%m-%d')
+    
+    # We need to find role_ids for these nicknames first (from Players table)
+    # This assumes nicknames in QueueEntry match Players table exactly (case sensitive-ish)
+    
+    players = session.query(Player).filter(Player.nickname.in_(nicknames)).all()
+    if not players: return {}
+    
+    role_map = {p.role_id: p.nickname for p in players}
+    role_ids = list(role_map.keys())
+    
+    # Query Events (Type 1 = Valor)
+    # Using substr for date comparison as Event.event_date is String "YYYY-MM-DD HH:MM:SS"
+    from sqlalchemy import func
+    
+    events = session.query(Event.role_id, func.sum(Event.value)).filter(
+        Event.event_type == 1,
+        Event.role_id.in_(role_ids),
+        func.substr(Event.event_date, 1, 10) >= start_date
+    ).group_by(Event.role_id).all()
+    
+    result = {}
+    
+    # Fill with 0 for found players
+    for nick in nicknames:
+        result[nick] = -1 # Mark as not found initially
+        
+    for p in players:
+        result[p.nickname] = 0
+        
+    for rid, total in events:
+        if rid in role_map:
+            nick = role_map[rid]
+            result[nick] = total or 0
+            
+    return result
 
 # --- ПАНЕЛЬ МАСТЕРА ---
 @router.callback_query(F.data == "menu_master")
@@ -296,9 +343,24 @@ async def m_show_dist_list(callback: types.CallbackQuery):
     
     if not entries: return await callback.message.edit_text(f"✅ Очередь <b>{q.name}</b> пуста.", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")]]))
     
+    # Fetch Valor Stats
+    nicks = [e.character_name for e in entries]
+    valor_map = get_weekly_valor_map(nicks)
+    
     nick_list = "\n".join([e.character_name for e in entries])
-    text = f"🎁 <b>Раздача: {q.name}</b>\nСписок:\n<code>{nick_list}</code>\n\n👇 Нажми на ник, после того, как выдашь награду в игре. Я отправлю игроку уведомление:"
-    kb = [[types.InlineKeyboardButton(text=f"💰 {e.character_name}", callback_data=f"issue_{e.id}")] for e in entries]
+    text = f"🎁 <b>Раздача: {q.name}</b>\nСписок:\n<code>{nick_list}</code>\n\n👇 Нажми на ник, после того, как выдашь награду в игре. В скобках указана доблесть за текущую неделю:"
+    
+    kb = []
+    for e in entries:
+        val = valor_map.get(e.character_name, -1)
+        if val == -1:
+            val_str = "(нет инфы)"
+        else:
+            val_str = f"({val} добл.)"
+            
+        btn_text = f"💰 {e.character_name} {val_str}"
+        kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"issue_{e.id}")])
+        
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")])
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
