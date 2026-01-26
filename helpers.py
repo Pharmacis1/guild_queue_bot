@@ -29,6 +29,7 @@ def get_user_weekly_valor_map(user):
     # 3. Суммируем события за неделю с группировкой по role_id
     start_ts = get_start_of_week()
     events = session.query(Event.role_id, func.sum(Event.value)).filter(
+        Event.event_type == 1,
         Event.role_id.in_(role_ids),
         Event.timestamp >= start_ts
     ).group_by(Event.role_id).all()
