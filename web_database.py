@@ -226,13 +226,28 @@ async def get_data_from_db(start_date: str = None, end_date: str = None, classes
                 # (interval start/end are datetime objects, events have unix ts or need conversion?)
                 # Wait, events have `ts` (unix timestamp)
                 
-                # Convert interval dates to timestamps
-                # Use timezone.utc? DB timestamps are usually unix secs.
-                # Assuming simple comparison
-                ts_start = interval['start'].timestamp()
-                # interval['end'] is at 00:00 of that day? No, our logic made it end date.
-                # To capture the full end day, we need end_date + 23:59:59 or simply < next_day
-                ts_end = (interval['end'] + timedelta(days=1)).timestamp()
+                # Use pytz to ensure MSK timezone consistency if available, else UTC fallback?
+                # Actually, the simplest way is to ensure we constructed intervals with the same assumption.
+                # Let's rely on string comparison or naive-to-naive if possible, but events are TS.
+                # Aligning with api.py: MSK (UTC+3)
+                
+                # Naive to Timestamp uses system local time. We want strict control.
+                # If we assume 00:00 MSK for the start of the day:
+                # TS = (dt - 1970).total_seconds() - but need correct offset.
+                
+                # Easy fix: Make interval dates explicit MSK before timestamping
+                from datetime import timezone
+                msk_offset = timedelta(hours=3)
+                tz_msk = timezone(msk_offset)
+                
+                # Make them aware (interpreting them AS MSK)
+                dt_start_msk = interval['start'].replace(tzinfo=tz_msk) 
+                
+                # End date + 1 day to cover full day up to 00:00 next day
+                dt_end_msk = (interval['end'] + timedelta(days=1)).replace(tzinfo=tz_msk)
+                
+                ts_start = dt_start_msk.timestamp()
+                ts_end = dt_end_msk.timestamp()
                 
                 interval_events = [
                     ev for ev in data["events"] 
