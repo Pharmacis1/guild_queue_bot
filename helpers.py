@@ -1,4 +1,55 @@
-from database import get_user_active_queues, get_effective_limit_logic
+from database import get_user_active_queues, get_effective_limit_logic, session, QueueEntry, Character, Player, Event
+from sqlalchemy import func
+import datetime
+
+def get_start_of_week():
+    """Возвращает timestamp (int) начала текущей недели (понедельник 00:00)."""
+    now = datetime.datetime.now()
+    start_of_week = now - datetime.timedelta(days=now.weekday())
+    start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(start_of_week.timestamp())
+
+def get_user_weekly_valor_map(user):
+    """Возвращает словарь {nickname: valor} для персонажей пользователя за текущую неделю."""
+    # 1. Собираем ники и мапим их структуру для быстрого доступа
+    char_map = {c.nickname: 0 for c in user.characters}
+    if not char_map: return {}
+    
+    nicks = list(char_map.keys())
+
+    # 2. Ищем role_id этих персонажей
+    players = session.query(Player).filter(Player.nickname.in_(nicks)).all()
+    if not players: return char_map
+    
+    player_map = {p.role_id: p.nickname for p in players}
+    role_ids = list(player_map.keys())
+    
+    if not role_ids: return char_map
+
+    # 3. Суммируем события за неделю с группировкой по role_id
+    start_ts = get_start_of_week()
+    events = session.query(Event.role_id, func.sum(Event.value)).filter(
+        Event.role_id.in_(role_ids),
+        Event.timestamp >= start_ts
+    ).group_by(Event.role_id).all()
+    
+    # 4. Заполняем результат
+    for rid, total in events:
+        if rid in player_map:
+            nick = player_map[rid]
+            if nick in char_map:
+                char_map[nick] = total or 0
+                
+    return char_map
+
+def get_queue_position(entry):
+    """Возвращает позицию персонажа в очереди (1-based)."""
+    # Считаем количество записей в ТОЙ ЖЕ очереди, у которых id МЕНЬШЕ текущего
+    position = session.query(QueueEntry).filter(
+        QueueEntry.queue_type_id == entry.queue_type_id,
+        QueueEntry.id < entry.id
+    ).count()
+    return position + 1
 
 def get_menu_text(user, custom_title=None):
     """
@@ -24,14 +75,25 @@ def get_menu_text(user, custom_title=None):
     available_slots = limit - current_count
     if available_slots < 0: available_slots = 0
     
-    chars_names = [char.nickname for char in user.characters]
-    chars_str = ", ".join(chars_names)
+    # Считаем доблесть по персонажам
+    valor_map = get_user_weekly_valor_map(user)
+
+    chars_display_list = []
+    for char in user.characters:
+        val = valor_map.get(char.nickname, 0)
+        # Формат: Ник (10 добл.)
+        chars_display_list.append(f"{char.nickname} ({val} добл.)")
+    
+    chars_str = ", ".join(chars_display_list)
     
     if active_queues:
-        q_list = [f"- {q.queue.name} ({q.character_name})" for q in active_queues]
-        queues_display = "\n".join(q_list)
+        q_list_lines = []
+        for q in active_queues:
+            pos = get_queue_position(q)
+            q_list_lines.append(f"- <b>{q.queue.name}</b> ({q.character_name}) — {pos}-й в очереди")
+        queues_display = "\n".join(q_list_lines)
     else:
-        queues_display = "Нет активных записей"
+        queues_display = "<i>Нет активных записей</i>"
 
     # --- ФОРМИРОВАНИЕ ЗАГОЛОВКА ---
     # Если заголовок передали — используем его, иначе — стандартное приветствие

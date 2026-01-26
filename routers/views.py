@@ -279,7 +279,7 @@ async def read_root(
     
     # History Query Construction
     sql_history = """
-        SELECT e.event_date, COALESCE(p.nickname, 'ID '||e.role_id), p.class_id, e.raw_desc, e.event_type, e.role_id, i.name 
+        SELECT e.event_date, COALESCE(p.nickname, 'ID '||e.role_id), p.class_id, e.raw_desc, e.event_type, e.role_id, i.name, e.timestamp 
         FROM events e 
         LEFT JOIN players p ON e.role_id = p.role_id 
         LEFT JOIN items i ON (e.event_type = 0 AND e.value = i.id)
@@ -328,12 +328,12 @@ async def read_root(
     # Helper for fast newcomer check context
     h_s_date = current_history_start if current_history_start else date.today().strftime('%Y-%m-%d')
 
-    for date_evt, name, cid, desc, etype, role_id, item_name in raw_history:
+    for date_evt, name, cid, desc, etype, role_id, item_name, timestamp in raw_history:
         icon = f"/static/icons/{cid}.png" if cid in CLASSES else ""
         cname = CLASSES[cid][0] if cid in CLASSES else ""
         is_mine = (name and name.lower().strip() in my_nicks)
         
-        history_rows.append((date_evt, name, icon, cname, desc, etype, role_id, is_mine, item_name))
+        history_rows.append((date_evt, name, icon, cname, desc, etype, role_id, is_mine, item_name, timestamp))
 
 
     # --- CLASS LISTS ---

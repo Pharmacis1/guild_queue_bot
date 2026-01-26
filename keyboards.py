@@ -14,27 +14,62 @@ def get_main_menu(user):
         kb.append([types.InlineKeyboardButton(text="👑 Панель Мастера", callback_data="menu_master")])
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
+def get_unauthorized_menu():
+    kb = [
+        [types.InlineKeyboardButton(text="➕ Добавить основу", callback_data="add_main")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_pending_menu(nick):
+    kb = [
+        [types.InlineKeyboardButton(text="✏️ Исправить заявку", callback_data="add_main")],
+        [types.InlineKeyboardButton(text="❌ Отменить заявку", callback_data="cancel_request")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
 def get_master_menu():
     kb = [
-        [types.InlineKeyboardButton(text="🎁 Выдать награды", callback_data="m_distribute")],
-        [types.InlineKeyboardButton(text="👥 Список игроков", callback_data="m_users_list")],
-        [types.InlineKeyboardButton(text="⚙️ Управлять лимитами очередей", callback_data="m_limits_menu")],
-        [types.InlineKeyboardButton(text="🔐 Код верификации", callback_data="m_verification")],
+        [types.InlineKeyboardButton(text="🛡 Управление очередями", callback_data="m_menu_queues")],
+        [types.InlineKeyboardButton(text="👥 Сообщество и игроки", callback_data="m_menu_community")],
+        [types.InlineKeyboardButton(text="📢 Объявления", callback_data="m_menu_announce")],
+        [types.InlineKeyboardButton(text="💾 Система и Бэкапы", callback_data="m_menu_system")],
+        [types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
-        [types.InlineKeyboardButton(text="🔒 Блокировка очередей для записи", callback_data="m_lock_menu")],
-        
-        [types.InlineKeyboardButton(text="✏️ Ред. описание очередей", callback_data="m_edit_desc")],
-        [types.InlineKeyboardButton(text="🗓 Расписание объявлений", callback_data="m_schedule")],
-         
-        [types.InlineKeyboardButton(text="📢 Создать объявление", callback_data="m_announce")],
-        
+def get_master_queues_menu():
+    kb = [
+        [types.InlineKeyboardButton(text="🎁 Выдать награды", callback_data="m_distribute")],
         [types.InlineKeyboardButton(text="➕ Добавить персонажа в очередь (любого)", callback_data="m_force_add")],
         [types.InlineKeyboardButton(text="❌ Удалить персонажа из очереди (любого)", callback_data="m_force_del")],
-         
+        [types.InlineKeyboardButton(text="⚙️ Управлять лимитами очередей", callback_data="m_limits_menu")],
+        [types.InlineKeyboardButton(text="🔒 Блокировка очередей для записи", callback_data="m_lock_menu")],
+        [types.InlineKeyboardButton(text="✏️ Ред. описание очередей", callback_data="m_edit_desc")],
+        [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_master_community_menu():
+    kb = [
+        [types.InlineKeyboardButton(text="👥 Список игроков", callback_data="m_users_list")],
+        [types.InlineKeyboardButton(text="🔐 Код верификации", callback_data="m_verification")],
         [types.InlineKeyboardButton(text="📜 Общий Архив выдачи наград", callback_data="m_global_log")],
-        # [types.InlineKeyboardButton(text="👑 Добавить Мастера", callback_data="m_add_admin_start")], # Moved to User List
+        [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_master_announce_menu():
+    kb = [
+        [types.InlineKeyboardButton(text="📢 Создать объявление", callback_data="m_announce")],
+        [types.InlineKeyboardButton(text="🗓 Расписание объявлений", callback_data="m_schedule")],
+        [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_master_system_menu():
+    kb = [
         [types.InlineKeyboardButton(text="💾 Скачать Бэкап БД", callback_data="m_backup")],
-        [types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")]
+        [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 

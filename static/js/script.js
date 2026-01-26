@@ -596,13 +596,32 @@ async function onTelegramAuth(user) {
     }
 }
 
-async function logout() {
+async function editEventDate(roleId, oldDateStr, oldTimestamp) {
+    const newDateStr = prompt("Изменить дату события (YYYY-MM-DD HH:MM:SS):", oldDateStr);
+    if (!newDateStr || newDateStr === oldDateStr) return;
+
+    if (!confirm(`Изменить дату на ${newDateStr}?`)) return;
+
     try {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.reload();
-    } catch (error) {
-        console.error('Logout failed:', error);
-        window.location.reload();
+        const response = await fetch('/api/update_event_date', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                role_id: roleId,
+                old_timestamp: oldTimestamp,
+                new_date_str: newDateStr
+            })
+        });
+
+        const result = await response.json();
+        if (result.status === 'ok') {
+            alert('✅ Дата успешно обновлена!');
+            window.location.reload();
+        } else {
+            alert('❌ Ошибка: ' + result.message);
+        }
+    } catch (e) {
+        alert('❌ Ошибка сети: ' + e.message);
     }
 }
 

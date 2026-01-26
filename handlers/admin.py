@@ -10,9 +10,11 @@ from apscheduler.jobstores.base import JobLookupError
 # Импорты из других файлов проекта
 from loader import bot, scheduler, MSK
 from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player
-from keyboards import get_master_menu, get_back_btn, get_weekdays_kb
+from keyboards import get_master_menu, get_master_queues_menu, get_master_community_menu, get_master_announce_menu, get_master_system_menu, get_back_btn, get_weekdays_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
+from helpers import get_menu_text
+from keyboards import get_main_menu # Explicitly ensuring it's available
 
 from aiogram.types import FSInputFile
 
@@ -76,6 +78,26 @@ def get_weekly_valor_map(nicknames):
 async def master_menu(callback: types.CallbackQuery):
     if not is_master(callback.from_user.id): return
     await callback.message.edit_text("👑 **Панель Мастера**", reply_markup=get_master_menu(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "m_menu_queues")
+async def open_queues_menu(callback: types.CallbackQuery):
+    if not is_master(callback.from_user.id): return
+    await callback.message.edit_text("🛡 **Управление очередями**", reply_markup=get_master_queues_menu(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "m_menu_community")
+async def open_community_menu(callback: types.CallbackQuery):
+    if not is_master(callback.from_user.id): return
+    await callback.message.edit_text("👥 **Сообщество и игроки**", reply_markup=get_master_community_menu(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "m_menu_announce")
+async def open_announce_menu(callback: types.CallbackQuery):
+    if not is_master(callback.from_user.id): return
+    await callback.message.edit_text("📢 **Объявления**", reply_markup=get_master_announce_menu(), parse_mode="Markdown")
+
+@router.callback_query(F.data == "m_menu_system")
+async def open_system_menu(callback: types.CallbackQuery):
+    if not is_master(callback.from_user.id): return
+    await callback.message.edit_text("💾 **Система и Бэкапы**", reply_markup=get_master_system_menu(), parse_mode="Markdown")
 
 # --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ---
 @router.callback_query(F.data.startswith("m_users_list"))
@@ -144,8 +166,16 @@ async def m_users_list(callback: types.CallbackQuery):
 async def m_user_manage(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     uid, page = int(parts[3]), int(parts[4])
+    await render_user_manage(callback, uid, page)
+
+async def render_user_manage(event, uid, page):
+    # Support both CallbackQuery and Message (if needed, though mostly callback here)
+    message = event.message if isinstance(event, types.CallbackQuery) else event
+    
     user = session.get(User, uid)
-    if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
+    if not user: 
+        if isinstance(event, types.CallbackQuery): await event.answer("Пользователь не найден.", show_alert=True)
+        return
     
     chars = session.query(Character).filter_by(user_id=user.id).all()
     user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без юзернейма'}</a>"
@@ -172,7 +202,7 @@ async def m_user_manage(callback: types.CallbackQuery):
     
     kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data=f"m_users_list:{page}")])
     
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @router.callback_query(F.data.startswith("m_master_toggle_"))
 async def m_master_toggle_handler(callback: types.CallbackQuery):
@@ -193,8 +223,7 @@ async def m_master_toggle_handler(callback: types.CallbackQuery):
     await callback.answer(f"Статус изменен: {status}")
     
     # Refresh view
-    callback.data = f"m_u_manage_{uid}_{page}"
-    await m_user_manage(callback)
+    await render_user_manage(callback, uid, page)
 
 @router.callback_query(F.data.startswith("m_ban_toggle_"))
 async def m_toggle_ban(callback: types.CallbackQuery):
@@ -207,8 +236,7 @@ async def m_toggle_ban(callback: types.CallbackQuery):
         if user.is_banned: session.query(QueueEntry).filter_by(user_id=uid).delete()
         session.commit()
         await callback.answer(f"Пользователь {'забанен' if user.is_banned else 'разбанен'}.")
-        callback.data = f"m_u_manage_{uid}_{page}"
-        await m_user_manage(callback)
+        await render_user_manage(callback, uid, page)
 
 @router.callback_query(F.data.startswith("m_char_menu_"))
 async def m_char_menu(callback: types.CallbackQuery):
@@ -304,8 +332,7 @@ async def m_delete_char_admin(callback: types.CallbackQuery):
             
     else: await callback.answer("Уже удален.")
     
-    callback.data = f"m_u_manage_{uid}_{page}"
-    await m_user_manage(callback)
+    await render_user_manage(callback, uid, page)
 
 # --- ДОБАВЛЕНИЕ АДМИНА ---
 @router.callback_query(F.data == "m_add_admin_start")
@@ -338,10 +365,16 @@ async def m_dist_start(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("dist_"))
 async def m_show_dist_list(callback: types.CallbackQuery):
     qid = int(callback.data.split("_")[1])
+    await render_dist_list(callback, qid)
+
+async def render_dist_list(event, qid):
+    message = event.message if isinstance(event, types.CallbackQuery) else event
+    
     q = session.get(QueueType, qid)
     entries = session.query(QueueEntry).filter_by(queue_type_id=qid).all()
     
-    if not entries: return await callback.message.edit_text(f"✅ Очередь <b>{q.name}</b> пуста.", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")]]))
+    if not entries: 
+        return await message.edit_text(f"✅ Очередь <b>{q.name}</b> пуста.", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")]]))
     
     # Fetch Valor Stats
     nicks = [e.character_name for e in entries]
@@ -362,7 +395,7 @@ async def m_show_dist_list(callback: types.CallbackQuery):
         kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"issue_{e.id}")])
         
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")])
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @router.callback_query(F.data.startswith("issue_"))
 async def m_issue_reward(callback: types.CallbackQuery):
@@ -396,8 +429,9 @@ async def m_issue_reward(callback: types.CallbackQuery):
     session.commit()
     await callback.answer(f"✅ Выдано: {char_nick}")
     
-    callback.data = f"dist_{qid}"
-    await m_show_dist_list(callback)
+    await callback.answer(f"✅ Выдано: {char_nick}")
+    
+    await render_dist_list(callback, qid)
 
 # --- ЛИМИТЫ, ОПИСАНИЕ, LOCKS ---
 @router.callback_query(F.data == "m_limits_menu")
@@ -573,10 +607,14 @@ async def m_force_del(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("sel_del_"))
 async def m_force_del_list(callback: types.CallbackQuery):
     qid = int(callback.data.split("_")[2])
+    await render_force_del_list(callback, qid)
+
+async def render_force_del_list(event, qid):
+    message = event.message if isinstance(event, types.CallbackQuery) else event
     entries = session.query(QueueEntry).filter_by(queue_type_id=qid).all()
     kb = [[types.InlineKeyboardButton(text=f"❌ {e.character_name}", callback_data=f"kill_{e.id}")] for e in entries]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
-    await callback.message.edit_text("Кого удалить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await message.edit_text("Кого удалить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @router.callback_query(F.data.startswith("kill_"))
 async def m_kill(callback: types.CallbackQuery):
@@ -588,8 +626,8 @@ async def m_kill(callback: types.CallbackQuery):
         session.delete(e)
         session.commit()
         await callback.answer("✅ Удалено.")
-        callback.data = f"sel_del_{qid}"
-        await m_force_del_list(callback)
+        await callback.answer("✅ Удалено.")
+        await render_force_del_list(callback, qid)
     else: await callback.answer("Уже удален.")
 
 @router.callback_query(F.data == "m_global_log")
@@ -781,15 +819,27 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
     if action == "no":
         try: await bot.send_message(target_user.telegram_id, "❌ <b>Ваша заявка отклонена Мастером.</b>", parse_mode="HTML")
         except: pass
+        
+        # Clear pending state
+        target_user.pending_request_nick = None
+        session.commit()
+        
         await callback.message.answer(f"❌ Заявка отклонена ({target_user.username}).")
         await callback.answer()
         return
 
     # 2. Approve OK (Direct)
     if action == "ok":
-        # Nick starts at index 4. It might contain colons? Probably not, but let's join.
-        # Actually user.py creates it simple. But to be safe:
         nick = ":".join(parts[4:]) 
+        
+        # VALIDATION: Check if request was cancelled (main_input only)
+        if reg_type == "main_input":
+            if target_user.pending_request_nick != nick:
+                try: await callback.message.edit_text(f"⚠️ <b>Заявка неактуальна.</b>\nПользователь отменил её или изменил ник.\n(Запрос: {nick}, Текущий: {target_user.pending_request_nick})")
+                except: pass
+                await callback.answer("Заявка отменена пользователем.", show_alert=True)
+                return
+
         await finalize_approval(callback, target_user, nick, reg_type)
     
     # 3. Approve Edit (Ask for nick)
@@ -865,17 +915,40 @@ async def finalize_approval(event, target_user, nick, reg_type):
             session.add(Character(user_id=target_user.id, nickname=nick, is_main=False))
             msg = f"✅ Твин добавлен: <b>{nick}</b> (Одобрено Мастером)"
 
+    # Clear pending state
+    target_user.pending_request_nick = None
     session.commit()
     
-    # Notify User
-    try: await bot.send_message(target_user.telegram_id, msg, parse_mode="HTML")
+    # Notify User with Main Menu
+    try:
+        # Generate the main menu text with the approval message as header
+        menu_text = get_menu_text(target_user, custom_title=msg)
+        main_menu_kb = get_main_menu(target_user)
+        
+        await bot.send_message(target_user.telegram_id, menu_text, parse_mode="HTML", reply_markup=main_menu_kb)
     except: pass
     
     # Notify Master
+    kb_master_nav = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")],
+        [types.InlineKeyboardButton(text="👑 Панель Мастера", callback_data="menu_master")]
+    ])
+
     if isinstance(event, types.CallbackQuery):
-        await event.message.answer(f"✅ Успешно: {target_user.username} -> {nick}")
+        await event.message.answer(f"✅ Успешно: {target_user.username} -> {nick}", reply_markup=kb_master_nav)
     else:
-        await event.answer(f"✅ Успешно: {target_user.username} -> {nick}", reply_markup=get_master_menu())
+        await event.answer(f"✅ Успешно: {target_user.username} -> {nick}", reply_markup=kb_master_nav)
+
+    # Notify Other Masters
+    approver_id = event.from_user.id
+    approver_user = session.query(User).filter_by(telegram_id=approver_id).first()
+    approver_name = f"@{approver_user.username}" if (approver_user and approver_user.username) else "Мастер"
+    
+    other_masters = session.query(User).filter(User.is_master == True, User.telegram_id != approver_id).all()
+    for m in other_masters:
+        try:
+             await event.bot.send_message(m.telegram_id, f"ℹ️ <b>{approver_name} одобрил заявку:</b>\nИгрок: {target_user.username or 'ID '+str(target_user.id)}\nНик: {nick}", parse_mode="HTML")
+        except: pass
 
 # --- ГРУППА КЛАНА ---
 @router.message(Command("set_clan_group"))

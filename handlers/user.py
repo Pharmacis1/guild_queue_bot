@@ -5,7 +5,7 @@ import asyncio
 
 # Импорты из корня проекта
 from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting
-from keyboards import get_main_menu, get_back_btn, get_persistent_menu
+from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu
 from helpers import get_menu_text
 from states import Registration
 from utils import check_google_sheet, log_reward_to_sheet
@@ -18,6 +18,27 @@ async def cmd_start(message: types.Message):
     user = ensure_user(message.from_user.id, message.from_user.username)
     if user.is_banned:
         return await message.answer("⛔ <b>Вы забанены.</b>", parse_mode="HTML")
+
+    # Check for main character
+    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    
+    if not main_char:
+        # Check for pending request
+        if user.pending_request_nick:
+            text = (
+                f"🛡 <b>Заявка отправлена Мастеру.</b>\n\n"
+                f"Вы подали заявку на привязку персонажа: <b>{user.pending_request_nick}</b>.\n"
+                "Ожидайте подтверждения, либо вы можете исправить/отменить заявку ниже."
+            )
+            return await message.answer(text, parse_mode="HTML", reply_markup=get_pending_menu(user.pending_request_nick))
+
+        text = (
+            "🛡 <b>Добро пожаловать в бота гильдии arahnius!</b>\n\n"
+            "Для того, чтобы начать пользоваться ботом, нужно состоять в клане <b>arahnius</b> и пройти авторизацию.\n\n"
+            "👇 Если вы вступили в клан, нажмите на кнопку ниже <b>«Добавить основу»</b> и введите никнейм персонажа (точный, как в игре), который состоит в гильдии. "
+            "Бот проверит его наличие в составе."
+        )
+        return await message.answer(text, parse_mode="HTML", reply_markup=get_unauthorized_menu())
 
     text = get_menu_text(user)
     # Send persistent keyboard separately or attach? usually attach to answer.
@@ -32,6 +53,29 @@ async def cmd_start(message: types.Message):
 @router.message(F.text == "🏠 Главное меню")
 async def main_menu_text(message: types.Message):
     await cmd_start(message)
+
+# ... (rest of simple handlers)
+
+@router.callback_query(F.data == "cancel_request")
+async def cancel_pending_request(callback: types.CallbackQuery, state: FSMContext):
+    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    cancelled_nick = user.pending_request_nick
+    user.pending_request_nick = None
+    session.commit()
+    
+    # Notify Masters about cancellation
+    if cancelled_nick:
+        masters = session.query(User).filter_by(is_master=True).all()
+        user_desc = f"@{user.username}" if user.username else f"ID {user.telegram_id}"
+        for m in masters:
+            try:
+                await bot.send_message(m.telegram_id, f"❌ <b>Пользователь отменил заявку!</b>\nИгрок: {user_desc}\nНик: {cancelled_nick}\n\n<i>Не нажимайте «Принять» на предыдущем сообщении.</i>", parse_mode="HTML")
+            except: pass
+
+    await callback.answer("Заявка отменена.")
+    # Show welcome again
+    await cmd_start(callback.message) # Reuse start logic for simplicity
+
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -244,9 +288,15 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
         except: pass
         
     if count > 0:
-        await message.answer("⏳ <b>Заявка отправлена Мастеру.</b>\nОжидайте подтверждения.", parse_mode="HTML", reply_markup=get_main_menu(user))
+        # Save pending state ONLY if it's a main char request (unauthorized user flow)
+        if action == "main_input":
+            user.pending_request_nick = nick
+            session.commit()
+            await message.answer(f"⏳ <b>Заявка на {nick} отправлена Мастеру.</b>\nОжидайте подтверждения.", parse_mode="HTML", reply_markup=get_pending_menu(nick))
+        else:
+            await message.answer("⏳ <b>Заявка отправлена Мастеру.</b>\nОжидайте подтверждения.", parse_mode="HTML", reply_markup=get_unauthorized_menu())
     else:
-        await message.answer("⚠️ Не удалось связаться с Мастером.", reply_markup=get_main_menu(user))
+        await message.answer("⚠️ Не удалось связаться с Мастером.", reply_markup=get_unauthorized_menu())
     
     await state.clear()
 

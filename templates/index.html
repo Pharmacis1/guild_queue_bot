@@ -890,11 +890,17 @@
 
                     <!-- History Timeline Feed -->
                     <div class="history-timeline">
-                        {% for date, name, icon, cname, desc, etype, rid, is_mine, item_name in history_rows %}
+                        {% for date, name, icon, cname, desc, etype, rid, is_mine, item_name, timestamp in history_rows
+                        %}
                         <div class="history-entry" data-is-mine="{{ 'true' if is_mine else 'false' }}">
                             <div class="history-entry-date">
                                 <span class="history-date-day">{{ date.split(' ')[0] }}</span>
                                 <span class="history-date-time">{{ date.split(' ')[1] if ' ' in date else '' }}</span>
+                                {% if is_admin %}
+                                <span class="edit-player-btn ms-2"
+                                    onclick="editEventDate('{{ rid }}', '{{ date }}', '{{ timestamp }}')"
+                                    title="Edit Date" style="cursor:pointer; opacity:0.5;">✎</span>
+                                {% endif %}
                             </div>
                             <div class="history-entry-content">
                                 <div class="history-player">

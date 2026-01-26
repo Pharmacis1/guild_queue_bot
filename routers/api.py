@@ -260,6 +260,56 @@ async def update_status(request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@router.post("/api/update_event_date")
+async def update_event_date(request: Request):
+    """API endpoint to update event date"""
+    try:
+        from datetime import datetime
+        import pytz
+        msk_tz = pytz.timezone('Europe/Moscow')
+        
+        data = await request.json()
+        role_id = data.get('role_id')
+        old_val = data.get('old_val') # For WHERE clause to find specific event? Or assume one event per second?
+        # Events doesn't have a unique ID. Composite key: role_id, timestamp
+        # But user sends original string or timestamp?
+        # Let's use old_timestamp (int) + role_id to identify.
+        old_ts = int(data.get('old_timestamp'))
+        new_date_str = data.get('new_date_str') # "YYYY-MM-DD HH:MM:SS"
+        
+        if not role_id or not old_ts or not new_date_str:
+            return {"status": "error", "message": "Missing params"}
+
+        # Calculate new timestamp from string (assuming input is MSK)
+        # Parse logic:
+        try:
+             # Assume input format YYYY-MM-DD HH:MM:SS
+             dt_naive = datetime.strptime(new_date_str, "%Y-%m-%d %H:%M:%S")
+             dt_msk = msk_tz.localize(dt_naive)
+             new_ts = int(dt_msk.timestamp())
+        except Exception as date_e:
+             return {"status": "error", "message": f"Invalid date format: {date_e}"}
+        
+        logging.info(f"Updating event: {role_id} from {old_ts} to {new_ts} ({new_date_str})")
+
+        async with aiosqlite.connect(DB_NAME) as conn:
+            # We match by role_id and specific timestamp (or approx if needed, but precise is better)
+            # Risk: duplicates. But LIMIT 1 helps.
+            async with conn.execute("SELECT 1 FROM events WHERE role_id = ? AND timestamp = ?", (role_id, old_ts)) as cursor:
+                 if not await cursor.fetchone():
+                     return {"status": "error", "message": "Event not found"}
+            
+            await conn.execute("""
+                UPDATE events 
+                SET timestamp = ?, event_date = ? 
+                WHERE role_id = ? AND timestamp = ?
+            """, (new_ts, new_date_str, role_id, old_ts))
+            await conn.commit()
+            
+        return {"status": "ok", "message": "Date updated"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # --- SCRAPER INTEGRATION ---
 from fastapi import BackgroundTasks
 import asyncio

@@ -1,6 +1,14 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
+import pytz
+
+# Timezone Helper
+MSK = pytz.timezone('Europe/Moscow')
+
+def get_msk_now():
+    """Returns current time in MSK as naive datetime (for SQLite compatibility)"""
+    return datetime.now(MSK).replace(tzinfo=None) # Make naive so SQLite doesn't complain
 
 Base = declarative_base()
 
@@ -12,6 +20,7 @@ class User(Base):
     telegram_id = Column(Integer, unique=True)
     username = Column(String)
     avatar_url = Column(String, nullable=True)
+    pending_request_nick = Column(String, nullable=True) # For unauthorized users waiting approval
     is_master = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
     personal_limit = Column(Integer, nullable=True) 
@@ -54,7 +63,7 @@ class RewardHistory(Base):
     character_name = Column(String)
     queue_name = Column(String)
     issued_by = Column(String)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=get_msk_now)
 
 class ScheduledAnnouncement(Base):
     __tablename__ = 'announcements'
@@ -69,7 +78,7 @@ class Player(Base):
     __tablename__ = 'players'
     role_id = Column(Integer, primary_key=True)
     nickname = Column(String, default=None)
-    first_seen = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=get_msk_now)
     in_clan = Column(Integer, default=1)
     class_id = Column(Integer, default=-1)
 
@@ -88,8 +97,6 @@ class Item(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     icon_url = Column(String, nullable=True)
-    # UniqueConstraint is implicit via logic or can be added if using strict ORM enforcement, 
-    # but for now simple class definition is enough. uniqueness is handled by scraper usually.
 
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
@@ -99,6 +106,21 @@ session = Session()
 
 def init_db():
     Base.metadata.create_all(engine)
+    
+    # --- AUTO MIGRATION (Pending Nick) ---
+    with engine.connect() as conn:
+        try:
+            from sqlalchemy import text
+            # Check if column exists by trying to select it. SQLite has no easy "IF COLUMN EXISTS"
+            conn.execute(text("SELECT pending_request_nick FROM users LIMIT 1"))
+        except:
+            print("⚠️ Column 'pending_request_nick' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN pending_request_nick VARCHAR"))
+                print("✅ Migration successful: Added pending_request_nick")
+            except Exception as e:
+                print(f"❌ Migration failed: {e}")
+    # -------------------------------------
     
     queues = [
         "Камень доблести", "Метеориты", "Жемчужины Фу Си", "Опыт в диск",
