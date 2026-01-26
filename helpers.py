@@ -99,11 +99,16 @@ def get_menu_text(user, custom_title=None):
     # --- ФОРМИРОВАНИЕ ЗАГОЛОВКА ---
     # Если заголовок передали — используем его, иначе — стандартное приветствие
     header = custom_title if custom_title else "👋 <b>С возвращением!</b>"
+    
+    afk_info = ""
+    if user.afk_start and user.afk_end:
+         afk_info = f"🛌 <b>Режим AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}\n\n"
 
     return (
         f"{header}\n\n"
         f"👤 <b>Твои персонажи:</b>\n{chars_str}\n\n"
         f"📋 <b>Твои очереди на КХ ресы:</b>\n{queues_display}\n\n"
         f"📊 <b>Лимит записей в очереди:</b> {current_count}/{limit} (доступно: {available_slots})\n\n"
+        f"{afk_info}"
         f"👇 <b>Выбери действие:</b>"
     )

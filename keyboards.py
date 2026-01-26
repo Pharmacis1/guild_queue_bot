@@ -8,6 +8,7 @@ def get_main_menu(user):
         [types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")],
         [types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")],
         [types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")],
+        [types.InlineKeyboardButton(text="🛌 Отсутствие(AFK)", callback_data="menu_afk")],
         [types.InlineKeyboardButton(text="🏃 Управление записями в очереди", callback_data="my_active_queues")]
     ]
     if user.is_master:
@@ -52,6 +53,7 @@ def get_master_queues_menu():
 def get_master_community_menu():
     kb = [
         [types.InlineKeyboardButton(text="👥 Список игроков", callback_data="m_users_list")],
+        [types.InlineKeyboardButton(text="🛌 Список AFK", callback_data="m_afk_list")],
         [types.InlineKeyboardButton(text="🔐 Код верификации", callback_data="m_verification")],
         [types.InlineKeyboardButton(text="📜 Общий Архив выдачи наград", callback_data="m_global_log")],
         [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
@@ -100,3 +102,30 @@ def get_persistent_menu():
         [types.KeyboardButton(text="🏠 Главное меню")]
     ]
     return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+def get_afk_menu(user):
+    kb = [
+        [types.InlineKeyboardButton(text="🛌 Установить период AFK", callback_data="afk_set")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
+    ]
+    if user.afk_start and user.afk_end:
+        kb.insert(1, [types.InlineKeyboardButton(text="❌ Снять режим AFK", callback_data="afk_clear")])
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_afk_start_kb():
+    kb = [
+        [types.InlineKeyboardButton(text="Сегодня", callback_data="afk_date_today"),
+         types.InlineKeyboardButton(text="Завтра", callback_data="afk_date_tomorrow")],
+        [types.InlineKeyboardButton(text="🔙 Отмена", callback_data="menu_afk")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_afk_end_kb():
+    kb = [
+        [types.InlineKeyboardButton(text="+3 Дня", callback_data="afk_dur_3"),
+         types.InlineKeyboardButton(text="+7 Дней", callback_data="afk_dur_7"),
+         types.InlineKeyboardButton(text="+14 Дней", callback_data="afk_dur_14")],
+        [types.InlineKeyboardButton(text="До конца месяца", callback_data="afk_dur_month")],
+        [types.InlineKeyboardButton(text="🔙 Отмена", callback_data="menu_afk")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)

@@ -24,6 +24,8 @@ class User(Base):
     is_master = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
     personal_limit = Column(Integer, nullable=True) 
+    afk_start = Column(DateTime, nullable=True)
+    afk_end = Column(DateTime, nullable=True)
     characters = relationship("Character", back_populates="user", cascade="all, delete-orphan")
 
 class Settings(Base):
@@ -98,6 +100,14 @@ class Item(Base):
     name = Column(String)
     icon_url = Column(String, nullable=True)
 
+class AFKHistory(Base):
+    __tablename__ = 'afk_history'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    is_active_record = Column(Boolean, default=True) # True if this was a finalized period
+
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
 engine = create_engine('sqlite:///guild_bot.db', echo=False)
@@ -107,11 +117,12 @@ session = Session()
 def init_db():
     Base.metadata.create_all(engine)
     
-    # --- AUTO MIGRATION (Pending Nick) ---
+    # --- AUTO MIGRATION (Pending Nick & AFK) ---
     with engine.connect() as conn:
+        from sqlalchemy import text
+        
+        # 1. Pending Request Nick
         try:
-            from sqlalchemy import text
-            # Check if column exists by trying to select it. SQLite has no easy "IF COLUMN EXISTS"
             conn.execute(text("SELECT pending_request_nick FROM users LIMIT 1"))
         except:
             print("⚠️ Column 'pending_request_nick' missing. Migrating...")
@@ -119,7 +130,20 @@ def init_db():
                 conn.execute(text("ALTER TABLE users ADD COLUMN pending_request_nick VARCHAR"))
                 print("✅ Migration successful: Added pending_request_nick")
             except Exception as e:
-                print(f"❌ Migration failed: {e}")
+                print(f"❌ Migration failed (pending_request_nick): {e}")
+
+        # 2. AFK Columns
+        try:
+            conn.execute(text("SELECT afk_start FROM users LIMIT 1"))
+        except:
+            print("⚠️ Column 'afk_start' missing. Migrating...")
+            try:
+                # SQLite usually allows only one ADD COLUMN per statement, so we do two
+                conn.execute(text("ALTER TABLE users ADD COLUMN afk_start DATETIME"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN afk_end DATETIME"))
+                print("✅ Migration successful: Added afk_start/end")
+            except Exception as e:
+                print(f"❌ Migration failed (afk): {e}")
     # -------------------------------------
     
     queues = [

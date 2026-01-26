@@ -4,10 +4,10 @@ from aiogram.fsm.context import FSMContext
 import asyncio
 
 # Импорты из корня проекта
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting
-from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory
+from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu, get_afk_menu, get_afk_start_kb, get_afk_end_kb
 from helpers import get_menu_text
-from states import Registration
+from states import Registration, AFKState
 from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
@@ -573,3 +573,164 @@ async def info_queues(callback: types.CallbackQuery):
     text = "ℹ️ <b>Справка:</b>\n\n"
     for q in queues: text += f"🔹 <b>{q.name}</b>\n{q.description}\n\n"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn())
+
+# --- AFK MENU ---
+
+@router.callback_query(F.data == "menu_afk")
+async def afk_menu(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    
+    text = "🛌 <b>Режим AFK</b>\n\n"
+    if user.afk_start and user.afk_end:
+        s = user.afk_start.strftime("%d.%m.%Y")
+        e = user.afk_end.strftime("%d.%m.%Y")
+        text += f"✅ <b>Включен:</b>\nC {s} по {e}\n\n<i>В этот период на вас не будет распределяться награда из очередей.</i>"
+    else:
+        text += "❌ <b>Выключен</b>\n\n<i>Включите этот режим, если планируете отсутствовать в игре длительное время (отпуск, командировка и т.д.).</i>"
+        
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_afk_menu(user))
+
+@router.callback_query(F.data == "afk_clear")
+async def afk_clear(callback: types.CallbackQuery):
+    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user.afk_start = None
+    user.afk_end = None
+    session.commit()
+    await callback.answer("Режим AFK отключен.")
+    await afk_menu(callback, None) # Passing None as state is safe here or we can just ignore it if we don't use it
+
+@router.callback_query(F.data == "afk_set")
+async def afk_set_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "📅 <b>Дата НАЧАЛА отсутствия:</b>\n\n"
+        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code> (например, 25.01).",
+        parse_mode="HTML", reply_markup=get_afk_start_kb()
+    )
+    await state.set_state(AFKState.waiting_for_start)
+
+# Helper for date parsing
+from datetime import timedelta, datetime
+
+def parse_date_input(text):
+    text = text.strip()
+    now = get_msk_now()
+    
+    # Try DD.MM
+    try:
+        d_str = text + f".{now.year}"
+        dt = datetime.strptime(d_str, "%d.%m.%Y")
+        
+        # If date is in the past (e.g. user typed 01.01 but it's now 26.01), maybe they meant next year?
+        # Or maybe they just made a mistake. Let's assume current year. 
+        # But if it's December and they type 01.01, they mean next year.
+        if dt.month < now.month:
+             dt = dt.replace(year=now.year + 1)
+             
+        return dt
+    except:
+        return None
+
+@router.callback_query(AFKState.waiting_for_start, F.data.startswith("afk_date_"))
+async def afk_start_quick(callback: types.CallbackQuery, state: FSMContext):
+    action = callback.data.split("_")[2]
+    now = get_msk_now()
+    
+    if action == "today":
+        dt = now
+    elif action == "tomorrow":
+        dt = now + timedelta(days=1)
+        
+    await state.update_data(start_date=dt)
+    await ask_afk_end(callback.message, state)
+
+@router.message(AFKState.waiting_for_start)
+async def afk_start_manual(message: types.Message, state: FSMContext):
+    dt = parse_date_input(message.text)
+    if not dt:
+        return await message.answer("⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code> (например 25.01)", parse_mode="HTML", reply_markup=get_afk_start_kb())
+        
+    await state.update_data(start_date=dt)
+    await ask_afk_end(message, state)
+
+async def ask_afk_end(message: types.Message, state: FSMContext):
+    # This might be called from callback (message is accessible) or message
+    msg = message if isinstance(message, types.Message) else message.message
+    
+    # If it was callback, we might need to edit. If message, answer.
+    # For simplicity, let's always answer fresh message or edit if possible?
+    # Mixing is tricky. Let's just use msg.answer if it was a message, or edit if callback.
+    
+    func = msg.edit_text if isinstance(message, types.CallbackQuery) else msg.answer
+    
+    await func(
+        "🏁 <b>Дата ОКОНЧАНИЯ отсутствия:</b>\n\n"
+        "Выберите длительность или напишите дату окончания вручную (<code>ДД.ММ</code>).",
+        parse_mode="HTML", reply_markup=get_afk_end_kb()
+    )
+    await state.set_state(AFKState.waiting_for_end)
+
+@router.callback_query(AFKState.waiting_for_end, F.data.startswith("afk_dur_"))
+async def afk_end_quick(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    action = callback.data.split("_")[2]
+    
+    if action == "month":
+        # End of current month of start_date?
+        # Or end of current real month?
+        # Let's assume end of current real month.
+        import calendar
+        now = start_dt
+        last_day = calendar.monthrange(now.year, now.month)[1]
+        end_dt = now.replace(day=last_day)
+    else:
+        days = int(action)
+        end_dt = start_dt + timedelta(days=days)
+        
+    await finish_afk_setup(callback, state, start_dt, end_dt)
+
+@router.message(AFKState.waiting_for_end)
+async def afk_end_manual(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    
+    end_dt = parse_date_input(message.text)
+    if not end_dt:
+        return await message.answer("⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code>", parse_mode="HTML", reply_markup=get_afk_end_kb())
+        
+    if end_dt < start_dt:
+         return await message.answer("⚠️ Дата окончания не может быть раньше начала!", reply_markup=get_afk_end_kb())
+         
+    # Mock callback for consistency in finish function, or refactor
+    # We can't easily mock callback. Let's make finish_afk_setup accept message too.
+    user = ensure_user(message.from_user.id, message.from_user.username)
+    user.afk_start = start_dt
+    user.afk_end = end_dt
+    
+    # History
+    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
+    session.commit()
+    
+    await message.answer(
+        f"✅ <b>Режим AFK установлен!</b>\n\n📅 {start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')}", 
+        parse_mode="HTML", 
+        reply_markup=get_afk_menu(user)
+    )
+    await state.clear()
+
+async def finish_afk_setup(callback: types.CallbackQuery, state: FSMContext, start_dt, end_dt):
+    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user.afk_start = start_dt
+    user.afk_end = end_dt
+    
+    # History
+    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
+    session.commit()
+    
+    await callback.message.edit_text(
+        f"✅ <b>Режим AFK установлен!</b>\n\n📅 {start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')}", 
+        parse_mode="HTML", 
+        reply_markup=get_afk_menu(user)
+    )
+    await state.clear()

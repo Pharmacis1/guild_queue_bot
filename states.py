@@ -29,3 +29,7 @@ class LimitStates(StatesGroup):
     waiting_for_global_limit = State()
     waiting_for_nick_limit = State()
     waiting_for_personal_limit_value = State()
+
+class AFKState(StatesGroup):
+    waiting_for_start = State()
+    waiting_for_end = State()

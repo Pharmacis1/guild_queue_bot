@@ -9,7 +9,7 @@ from apscheduler.jobstores.base import JobLookupError
 
 # Импорты из других файлов проекта
 from loader import bot, scheduler, MSK
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player, get_msk_now, AFKHistory
 from keyboards import get_master_menu, get_master_queues_menu, get_master_community_menu, get_master_announce_menu, get_master_system_menu, get_back_btn, get_weekdays_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
@@ -182,7 +182,18 @@ async def render_user_manage(event, uid, page):
     status_emoji = "⛔ ЗАБАНЕН" if user.is_banned else "✅ Активен"
     ban_text = "🕊 Разбанить" if user.is_banned else "🔨 ЗАБАНИТЬ"
     
-    text = f"👤 <b>Управление профилем:</b>\nИгрок: {user_link}\nСтатус: <b>{status_emoji}</b>\n\n👇 <b>Выберите персонажа:</b>"
+    afk_info = ""
+    if user.afk_start and user.afk_end:
+        afk_info = f"\n🛌 <b>Текущий AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}"
+    
+    # History text
+    history_recs = session.query(AFKHistory).filter_by(user_id=user.id).order_by(AFKHistory.start_date.desc()).limit(5).all()
+    if history_recs:
+        afk_info += "\n\n📜 <b>История AFK:</b>"
+        for h in history_recs:
+            afk_info += f"\n• {h.start_date.strftime('%d.%m')} - {h.end_date.strftime('%d.%m')}"
+    
+    text = f"👤 <b>Управление профилем:</b>\nИгрок: {user_link}\nСтатус: <b>{status_emoji}</b>{afk_info}\n\n👇 <b>Выберите персонажа:</b>"
     
     # Buttons
     kb = []
@@ -384,6 +395,8 @@ async def render_dist_list(event, qid):
     text = f"🎁 <b>Раздача: {q.name}</b>\nСписок:\n<code>{nick_list}</code>\n\n👇 Нажми на ник, после того, как выдашь награду в игре. В скобках указана доблесть за текущую неделю:"
     
     kb = []
+    now = get_msk_now()
+    
     for e in entries:
         val = valor_map.get(e.character_name, -1)
         if val == -1:
@@ -391,7 +404,18 @@ async def render_dist_list(event, qid):
         else:
             val_str = f"({val} добл.)"
             
-        btn_text = f"💰 {e.character_name} {val_str}"
+        # AFK Check
+        afk_mark = ""
+        u = e.user
+        if u and u.afk_start and u.afk_end:
+            # Check if NOW is inside range
+            # We compare dates. remove time or just compare datetimes (afk_start is usually 00:00 or current time)
+            # Users set it via date, so likely just compare dates.
+            # But DB stores DateTime.
+            if u.afk_start <= now <= u.afk_end.replace(hour=23, minute=59, second=59):
+                afk_mark = " 🛌 (AFK)"
+            
+        btn_text = f"💰 {e.character_name} {val_str}{afk_mark}"
         kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"issue_{e.id}")])
         
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")])
@@ -670,6 +694,37 @@ def schedule_job(ann, bot_instance):
 async def m_ann_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("📢 Текст объявления:", reply_markup=get_back_btn("menu_master"))
     await state.set_state(AnnounceStates.waiting_for_text)
+
+# --- AFK LIST ---
+@router.callback_query(F.data == "m_afk_list")
+async def m_afk_list(callback: types.CallbackQuery):
+    now = get_msk_now()
+    # Find active AFKs
+    # Ideally logic: end_date >= now or (start <= now <= end) ? 
+    # Let's show all valid future/present periods.
+    # filter(User.afk_end >= now) basically.
+    
+    users = session.query(User).filter(User.afk_end >= now).all()
+    
+    text = "🛌 <b>Список текущих и будущих AFK:</b>\n\n"
+    if not users:
+        text += "<i>Никого нет.</i>"
+    else:
+        for u in users:
+            main_char = next((c for c in u.characters if c.is_main), None)
+            name = main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}")
+            
+            # Status icon
+            if u.afk_start <= now <= u.afk_end:
+                 status = "🔴 Сейчас AFK"
+            else:
+                 status = "🟡 Скоро"
+            
+            text += f"• <b>{name}</b>: {u.afk_start.strftime('%d.%m')} - {u.afk_end.strftime('%d.%m')} ({status})\n"
+            
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("m_menu_community"))
+
+# --- ОБЪЯВЛЕНИЯ (BROADCAST) ---
 
 @router.message(AnnounceStates.waiting_for_text)
 async def m_ann_text(message: types.Message, state: FSMContext):
