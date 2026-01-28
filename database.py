@@ -108,6 +108,13 @@ class AFKHistory(Base):
     end_date = Column(DateTime)
     is_active_record = Column(Boolean, default=True) # True if this was a finalized period
 
+class ObserverCache(Base):
+    __tablename__ = 'observer_cache'
+    role_id = Column(Integer, primary_key=True)
+    html_content = Column(String)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
 engine = create_engine('sqlite:///guild_bot.db', echo=False)

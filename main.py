@@ -42,6 +42,9 @@ app.include_router(auth.router)
 # Remote Admin Browser
 from routers import admin_browser
 app.include_router(admin_browser.router)
+from routers import observer
+app.include_router(observer.router)
+
 
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
@@ -59,6 +62,10 @@ async def on_startup():
     # 1. Init Web DB
     # 1. Web DB init removed (handled by sync init_db)
     pass
+
+    # 1.1 Observer Browser Init
+    await observer.init_browser()
+
     
     # 2. Bot Setup - Menu
     from aiogram.types import BotCommand

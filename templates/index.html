@@ -220,6 +220,31 @@
             background-color: #1a1a1a !important;
             color: #888 !important;
         }
+
+        /* OBSERVER MODAL STYLES */
+        .observer-iframe-container {
+            width: 100%;
+            min-height: 400px;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .observer-content {
+            width: 100%;
+            color: #fff;
+        }
+
+        /* Fix some PWOBS styles leaks if needed */
+        .player-equipment {
+            margin: 0 auto;
+            transform: scale(0.9);
+            transform-origin: top center;
+        }
     </style>
 
 </head>
@@ -369,6 +394,26 @@
                                 data-telegram-login="{{ bot_username }}" data-size="medium" data-radius="5"
                                 data-auth-url="/login/telegram" data-request-access="write"></script>
                             {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- OBSERVER MODAL -->
+        <div class="modal fade" id="observerModal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-secondary bg-dark">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title text-light">👁️ <span id="observerTitle">Equipment</span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-0">
+                        <div id="observerBody" class="observer-iframe-container">
+                            <div class="text-center">
+                                <div class="spinner-border text-danger" role="status"></div>
+                                <div class="mt-2 text-muted">Summoning Eye of Observer...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -538,6 +583,11 @@
 
                                         <!-- Edit Trigger -->
                                         {% if is_admin %}
+                                        <span class="observer-btn ms-2 text-info" style="cursor: pointer; opacity: 0.7;"
+                                            onclick="showObserver('{{ row.role_id }}', '{{ row.name }}')"
+                                            title="View Equipment">
+                                            <img src="/static/img/spider_obs.png" width="16" height="16" alt="Obs"
+                                                style="vertical-align: middle;"></span>
                                         <span class="edit-player-btn ms-2 text-muted"
                                             style="cursor: pointer; opacity: 0.5;" data-role-id="{{ row.role_id }}"
                                             data-name="{{ row.name }}" data-class-icon="{{ row.class_icon }}"
@@ -718,6 +768,11 @@
 
                                         <!-- Edit Trigger -->
                                         {% if is_admin %}
+                                        <span class="observer-btn ms-2 text-info" style="cursor: pointer; opacity: 0.7;"
+                                            onclick="showObserver('{{ row.role_id }}', '{{ row.name }}')"
+                                            title="View Equipment">
+                                            <img src="/static/img/spider_obs.png" width="16" height="16" alt="Obs"
+                                                style="vertical-align: middle;"></span>
                                         <span class="edit-player-btn ms-2 text-muted"
                                             style="cursor: pointer; opacity: 0.5;" data-role-id="{{ row.role_id }}"
                                             data-name="{{ row.name }}" data-class-icon="{{ row.class_icon }}"
@@ -966,6 +1021,85 @@
 
     <iframe id="telegram-post-placeholder" style="display:none;"></iframe>
     <script src="/static/js/script.js?v=163"></script>
+    <script>
+        async function showObserver(roleId, name) {
+            const modalEl = document.getElementById('observerModal');
+            const titleEl = document.getElementById('observerTitle');
+            const bodyEl = document.getElementById('observerBody');
+
+            // Set Title
+            titleEl.textContent = `Equipment: ${name}`;
+
+            // Show Modal
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+
+            // Show Loading
+            bodyEl.innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border text-danger" role="status"></div>
+                    <div class="mt-2 text-muted">Summoning Eye of Observer...</div>
+                </div>
+            `;
+
+            try {
+                // Fetch Data
+                const response = await fetch(`/api/observer/${roleId}`);
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    // Inject Content using Iframe (Better Isolation)
+                    bodyEl.innerHTML = '';
+
+                    const iframe = document.createElement('iframe');
+                    iframe.style.width = "100%";
+                    iframe.style.height = "500px"; // Default height
+                    iframe.style.border = "none";
+                    iframe.style.display = "block";
+                    iframe.style.background = "transparent";
+
+                    // Sandbox for security, but allow same-origin if needed for styles?
+                    // Actually, we just need to render HTML.
+                    iframe.setAttribute('sandbox', 'allow-same-origin allow-popups');
+
+                    // We need to write to the doc to ensure styles apply correctly
+                    bodyEl.appendChild(iframe);
+
+                    const doc = iframe.contentWindow.document;
+                    doc.open();
+                    doc.write(data.html);
+                    doc.close();
+
+                    // Set fixed height to prevent infinite loops and simpler management
+                    iframe.onload = function () {
+                        // Just set a fixed safe height. The content is scaled (0.9) and centered.
+                        iframe.style.height = '600px';
+                        // Optional: we can try to get scrollHeight ONCE.
+                        try {
+                            const h = iframe.contentWindow.document.body.scrollHeight;
+                            if (h > 100 && h < 1000) iframe.style.height = (h + 30) + 'px';
+                        } catch (e) { }
+                    };
+
+                } else {
+                    bodyEl.innerHTML = `
+                        <div class="text-center text-warning p-5">
+                            <h4>⚠️ Failed to Observe</h4>
+                            <p>${data.message}</p>
+                        </div>
+                     `;
+                }
+            } catch (error) {
+                console.error(error);
+                bodyEl.innerHTML = `
+                    <div class="text-center text-danger p-5">
+                        <h4>❌ Connection Error</h4>
+                        <p>Could not reach the Observer.</p>
+                    </div>
+                `;
+            }
+        }
+    </script>
 </body>
 
 </html>
