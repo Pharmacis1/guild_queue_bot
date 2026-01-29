@@ -58,34 +58,86 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
         async with aiosqlite.connect(DB_NAME) as conn:
             cursor = await conn.cursor()
             
+            # Pre-fetch known nicknames for description replacement
+            # We collect all IDs mentioned in descriptions or acting
+            all_involved_ids = set()
+            for row in data:
+                all_involved_ids.add(row['role_id'])
+                if row['raw_params']:
+                    try:
+                        p0 = int(row['raw_params'].split(',')[0])
+                        all_involved_ids.add(p0)
+                    except: pass
+            
+            # Fetch existing nicknames
+            id_to_nick = {}
+            if all_involved_ids:
+                q_placeholders = ','.join(['?'] * len(all_involved_ids))
+                async with conn.execute(f"SELECT role_id, nickname FROM players WHERE role_id IN ({q_placeholders})", list(all_involved_ids)) as cursor:
+                    rows = await cursor.fetchall()
+                    for r_id, r_nick in rows:
+                        if r_nick:
+                            id_to_nick[r_id] = r_nick
+
             for row in data:
                 rid = row['role_id']
+                
+                # [FIX] Filter invalid IDs (like ID 1)
+                if rid < 16:
+                    continue
+
                 etype = row['action_type']
-                desc = row['description'].lower()
+                desc = row['description'] # keep original case for display or lower? user said "ID не заменятеся"
+                # Let's keep original string but replace ID if found
+                
                 val = 0
+                target_id = None
+                
                 if row['raw_params']:
                     try:
                         val = int(row['raw_params'].split(',')[0])
+                        target_id = val # p0 is often the target
                         if etype == 0: # Item event
                             item_ids.add(val)
                     except: pass
 
+                # [FIX] Resolve ID in description
+                # If description contains "ID 12345", try to replace it
+                # The board_parser might produce "Изгнал ID 12345"
+                if target_id and f"ID {target_id}" in desc:
+                   # Try to find nickname
+                   t_nick = id_to_nick.get(target_id)
+                   if t_nick:
+                       desc = desc.replace(f"ID {target_id}", f"{t_nick}")
+                   # else: leave as ID {val}
 
-                # Player
+                # Ensure actor exists
                 await cursor.execute("INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (rid,))
                 
-                # Status
-                is_leave = "покинул" in desc or "изгнан" in desc or "вышел" in desc
-                if is_leave:
+                # [FIX] Status Updates
+                is_leave_self = (etype == 8) # Покинул гильдию
+                is_kick = (etype == 10)      # Изгнал ID ...
+                is_join = (etype == 6)       # Вступил (or 1, 2 for contrib means they are in) or "принят" in desc
+                
+                if is_leave_self:
+                    # Actor left
                     await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (rid,))
-                elif etype in [1, 2] or "принят" in desc or "joined" in desc:
+                
+                elif is_kick:
+                    # Actor KICKED someone. The TARGET (val) left.
+                    # Ensure target exists in DB first (so we can update them)
+                    if target_id:
+                        await cursor.execute("INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (target_id,))
+                        await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (target_id,))
+                        
+                elif etype in [1, 2, 6] or "принят" in desc.lower() or "joined" in desc.lower():
                     await cursor.execute("UPDATE players SET in_clan = 1 WHERE role_id = ?", (rid,))
                 
                 # Event
                 await cursor.execute("""
                     INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (rid, row['timestamp'], row['date'], etype, val, row['description']))
+                """, (rid, row['timestamp'], row['date'], etype, val, desc))
                 
                 if cursor.rowcount > 0:
                     new_events += 1
