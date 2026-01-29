@@ -73,8 +73,8 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
             id_to_nick = {}
             if all_involved_ids:
                 q_placeholders = ','.join(['?'] * len(all_involved_ids))
-                async with conn.execute(f"SELECT role_id, nickname FROM players WHERE role_id IN ({q_placeholders})", list(all_involved_ids)) as cursor:
-                    rows = await cursor.fetchall()
+                async with conn.execute(f"SELECT role_id, nickname FROM players WHERE role_id IN ({q_placeholders})", list(all_involved_ids)) as fetch_cursor:
+                    rows = await fetch_cursor.fetchall()
                     for r_id, r_nick in rows:
                         if r_nick:
                             id_to_nick[r_id] = r_nick
