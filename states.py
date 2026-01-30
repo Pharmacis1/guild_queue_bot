@@ -14,9 +14,10 @@ class MasterManageStates(StatesGroup):
     waiting_for_queue_add = State()
     waiting_for_admin_username = State()
     waiting_for_code_setting = State()
-    waiting_for_code_setting = State()
     waiting_for_approve_edit = State()
     waiting_for_rename = State()
+    waiting_for_afk_start = State()
+    waiting_for_afk_end = State()
 
 class AnnounceStates(StatesGroup):
     waiting_for_text = State()

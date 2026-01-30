@@ -55,6 +55,7 @@ class QueueEntry(Base):
     user_id = Column(Integer, ForeignKey('users.id'))
     queue_type_id = Column(Integer, ForeignKey('queue_types.id'))
     character_name = Column(String)
+    auto_requeue = Column(Boolean, default=False)
     user = relationship("User")
     queue = relationship("QueueType")
 
@@ -65,6 +66,8 @@ class RewardHistory(Base):
     character_name = Column(String)
     queue_name = Column(String)
     issued_by = Column(String)
+    is_notified = Column(Boolean, default=True) # Default True for old records/backwards compat if immediately sent
+    record_type = Column(String, default="reward") # "reward" or "warning"
     timestamp = Column(DateTime, default=get_msk_now)
 
 class ScheduledAnnouncement(Base):
@@ -132,26 +135,58 @@ def init_db():
         try:
             conn.execute(text("SELECT pending_request_nick FROM users LIMIT 1"))
         except:
-            print("⚠️ Column 'pending_request_nick' missing. Migrating...")
+            print("Column 'pending_request_nick' missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE users ADD COLUMN pending_request_nick VARCHAR"))
-                print("✅ Migration successful: Added pending_request_nick")
+                print("Migration successful: Added pending_request_nick")
             except Exception as e:
-                print(f"❌ Migration failed (pending_request_nick): {e}")
+                print(f"Migration failed (pending_request_nick): {e}")
 
         # 2. AFK Columns
         try:
             conn.execute(text("SELECT afk_start FROM users LIMIT 1"))
         except:
-            print("⚠️ Column 'afk_start' missing. Migrating...")
+            print("Column 'afk_start' missing. Migrating...")
             try:
                 # SQLite usually allows only one ADD COLUMN per statement, so we do two
                 conn.execute(text("ALTER TABLE users ADD COLUMN afk_start DATETIME"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN afk_end DATETIME"))
-                print("✅ Migration successful: Added afk_start/end")
+                print("Migration successful: Added afk_start/end")
             except Exception as e:
-                print(f"❌ Migration failed (afk): {e}")
+                print(f"Migration failed (afk): {e}")
     # -------------------------------------
+
+        try:
+            conn.execute(text("SELECT auto_requeue FROM queue_entries LIMIT 1"))
+        except:
+            print("Column 'auto_requeue' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE queue_entries ADD COLUMN auto_requeue BOOLEAN DEFAULT 0"))
+                print("Migration successful: Added auto_requeue")
+            except Exception as e:
+                print(f"Migration failed (auto_requeue): {e}")
+
+        # 4. RewardHistory Is Notified
+        try:
+            conn.execute(text("SELECT is_notified FROM reward_history LIMIT 1"))
+        except:
+            print("Column 'is_notified' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE reward_history ADD COLUMN is_notified BOOLEAN DEFAULT 1"))
+                print("Migration successful: Added is_notified")
+            except Exception as e:
+                print(f"Migration failed (is_notified): {e}")
+
+        # 5. RewardHistory Record Type
+        try:
+            conn.execute(text("SELECT record_type FROM reward_history LIMIT 1"))
+        except:
+            print("Column 'record_type' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE reward_history ADD COLUMN record_type VARCHAR DEFAULT 'reward'"))
+                print("Migration successful: Added record_type")
+            except Exception as e:
+                print(f"Migration failed (record_type): {e}")
     
     queues = [
         "Камень доблести", "Метеориты", "Жемчужины Фу Си", "Опыт в диск",

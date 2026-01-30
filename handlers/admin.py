@@ -207,7 +207,10 @@ async def render_user_manage(event, uid, page):
     else:
         kb.append([types.InlineKeyboardButton(text="👑 Сделать Мастером", callback_data=f"m_master_toggle_{uid}_{page}")])
 
-    # 3. Characters
+    # 3. AFK Set (New)
+    kb.append([types.InlineKeyboardButton(text="💤 Установить AFK", callback_data=f"m_afk_set_{uid}_{page}")])
+
+    # 4. Characters
     for c in chars:
         kb.append([types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"m_char_menu_{c.id}_{uid}_{page}")])
     
@@ -367,6 +370,12 @@ async def m_add_admin_save(message: types.Message, state: FSMContext):
 async def m_dist_start(callback: types.CallbackQuery):
     queues = session.query(QueueType).all()
     kb = []
+    
+    # Check pending notifications
+    pending_count = session.query(RewardHistory).filter_by(is_notified=False).count()
+    if pending_count > 0:
+        kb.append([types.InlineKeyboardButton(text=f"📧 Разослать уведомления ({pending_count})", callback_data="m_send_batch")])
+
     for q in queues:
         count = session.query(QueueEntry).filter_by(queue_type_id=q.id).count()
         kb.append([types.InlineKeyboardButton(text=f"{q.name} ({count})", callback_data=f"dist_{q.id}")])
@@ -382,7 +391,11 @@ async def render_dist_list(event, qid):
     message = event.message if isinstance(event, types.CallbackQuery) else event
     
     q = session.get(QueueType, qid)
-    entries = session.query(QueueEntry).filter_by(queue_type_id=qid).all()
+    entries = session.query(QueueEntry)\
+        .outerjoin(Player, QueueEntry.character_name == Player.nickname)\
+        .filter(QueueEntry.queue_type_id == qid)\
+        .filter((Player.in_clan == 1) | (Player.in_clan == None))\
+        .all()
     
     if not entries: 
         return await message.edit_text(f"✅ Очередь <b>{q.name}</b> пуста.", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")]]))
@@ -391,32 +404,37 @@ async def render_dist_list(event, qid):
     nicks = [e.character_name for e in entries]
     valor_map = get_weekly_valor_map(nicks)
     
-    nick_list = "\n".join([e.character_name for e in entries])
-    text = f"🎁 <b>Раздача: {q.name}</b>\nСписок:\n<code>{nick_list}</code>\n\n👇 Нажми на ник, после того, как выдашь награду в игре. В скобках указана доблесть за текущую неделю:"
+    nick_list = ""
+    now = get_msk_now()
     
     kb = []
-    now = get_msk_now()
     
     for e in entries:
         val = valor_map.get(e.character_name, -1)
-        if val == -1:
-            val_str = "(нет инфы)"
-        else:
-            val_str = f"({val} добл.)"
+        val_str = f"{val} добл." if val != -1 else "нет инфы"
             
         # AFK Check
         afk_mark = ""
         u = e.user
         if u and u.afk_start and u.afk_end:
-            # Check if NOW is inside range
-            # We compare dates. remove time or just compare datetimes (afk_start is usually 00:00 or current time)
-            # Users set it via date, so likely just compare dates.
-            # But DB stores DateTime.
             if u.afk_start <= now <= u.afk_end.replace(hour=23, minute=59, second=59):
-                afk_mark = " 🛌 (AFK)"
-            
-        btn_text = f"💰 {e.character_name} {val_str}{afk_mark}"
-        kb.append([types.InlineKeyboardButton(text=btn_text, callback_data=f"issue_{e.id}")])
+                afk_mark = " 🛌 AFK"
+        
+        auto_mark = " ♾" if e.auto_requeue else ""
+        
+        # Add to text list
+        nick_list += f"• <code>{e.character_name}</code> ({val_str}){afk_mark}{auto_mark}\n"
+        
+        # Button: simplified
+        btn_text = f"💰 {e.character_name}"
+        
+        # Row with Reward and Warn buttons
+        kb.append([
+            types.InlineKeyboardButton(text=btn_text, callback_data=f"issue_{e.id}"),
+            types.InlineKeyboardButton(text="⚠️", callback_data=f"warn_{e.id}")
+        ])
+
+    text = f"🎁 <b>Раздача: {q.name}</b>\nСписок:\n{nick_list}\n\n👇 Нажми на ник (кнопку), после того, как выдашь награду в игре."
         
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_distribute")])
     await message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -438,24 +456,111 @@ async def m_issue_reward(callback: types.CallbackQuery):
         main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
         if main_char: main_nick = main_char.nickname
     
-    # 1. История
-    session.add(RewardHistory(user_id=entry.user_id, character_name=char_nick, queue_name=q_name, issued_by=master.username))
+    # 1. История (is_notified=False)
+    session.add(RewardHistory(user_id=entry.user_id, character_name=char_nick, queue_name=q_name, issued_by=master.username, is_notified=False))
+    
     # 2. Гугл таблица
     asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
-    # 3. Уведомление
-    if user:
-        try:
-            kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔄 Записаться в эту же очередь", callback_data=f"pre_join_{qid}")], [types.InlineKeyboardButton(text="📋 Выбрать новую очередь", callback_data="menu_join")]])
-            await bot.send_message(user.telegram_id, f"🎉 <b>Мастер выдал тебе награду:</b> {q_name} ({char_nick})\nЗабери из Клан листа до Вс 23:30 и снова запишись в эту или другую очередь:", parse_mode="HTML", reply_markup=kb_notify)
-        except: pass
     
+    # 3. Auto-Requeue Logic
+    if entry.auto_requeue:
+        # Create new entry at the end suitable for re-queue
+        # Check limits? Usually auto-requeue bypasses manual signup limits or respects them?
+        # User requirement: "automatically requeued to end of same queue".
+        # Let's just add it.
+        session.add(QueueEntry(user_id=entry.user_id, queue_type_id=qid, character_name=char_nick, auto_requeue=True))
+        status_msg = f"✅ Выдано: {char_nick} (Перезаписан)"
+    else:
+        status_msg = f"✅ Выдано: {char_nick} (Ушел)"
+
+    # 4. Удаляем старую запись
     session.delete(entry)
     session.commit()
-    await callback.answer(f"✅ Выдано: {char_nick}")
     
-    await callback.answer(f"✅ Выдано: {char_nick}")
-    
+    await callback.answer(status_msg)
     await render_dist_list(callback, qid)
+
+@router.callback_query(F.data.startswith("warn_"))
+async def m_warn_user(callback: types.CallbackQuery):
+    try: eid = int(callback.data.split("_")[1])
+    except: return
+    entry = session.get(QueueEntry, eid)
+    if not entry: return await callback.answer("Запись не найдена.", show_alert=True)
+    
+    user = session.get(User, entry.user_id)
+    master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
+    
+    if user:
+        # Save as delayed warning
+        session.add(RewardHistory(
+            user_id=entry.user_id, 
+            character_name=entry.character_name, 
+            queue_name=entry.queue.name, 
+            issued_by=master.username, 
+            is_notified=False,
+            record_type="warning"
+        ))
+        session.commit()
+        await callback.answer("⚠️ Предупреждение отложено (в список рассылки).")
+    else:
+        await callback.answer("Ошибка пользователя.")
+
+@router.callback_query(F.data == "m_send_batch")
+async def m_send_batch_notifications(callback: types.CallbackQuery):
+    pending = session.query(RewardHistory).filter_by(is_notified=False).all()
+    if not pending: return await callback.answer("Нет уведомлений для отправки.", show_alert=True)
+    
+    # Group by User ID
+    user_map = {}
+    for item in pending:
+        if item.user_id not in user_map: user_map[item.user_id] = []
+        user_map[item.user_id].append(item)
+        
+    count_users = 0
+    for uid, items in user_map.items():
+        user = session.get(User, uid)
+        if not user: 
+             # Mark as processed if user gone? Or keep pending? 
+             # Better to mark processed to avoid stuck loop
+             for i in items: i.is_notified = True
+             continue
+        
+        rewards = [i for i in items if i.record_type != "warning"]
+        warnings = [i for i in items if i.record_type == "warning"]
+        
+        msg_text = ""
+        
+        if rewards:
+            msg_text += "🎉 <b>Вам выданы награды!</b>\n\n"
+            for item in rewards:
+                msg_text += f"🔹 <b>{item.queue_name}</b> ({item.character_name})\n"
+                item.is_notified = True
+            msg_text += "\n⚠️ <i>Заберите награды из Клан листа в ближайшее время, пока не пропали.</i>\n\n"
+            
+        if warnings:
+            if rewards: msg_text += "───────────────\n\n"
+            msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
+            for item in warnings:
+                msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
+                item.is_notified = True
+
+        msg_text += "👇 <b>Выберите действие:</b>"
+        
+        kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[
+             types.InlineKeyboardButton(text="📋 Перейти к очередям", callback_data="menu_join"),
+             types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")
+        ]])
+        
+        try:
+            await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
+            count_users += 1
+        except: pass
+        
+    session.commit()
+    await callback.answer(f"✅ Отправлено {count_users} пользователям.")
+    
+    # Refresh menu to hide button if empty
+    await m_dist_start(callback)
 
 # --- ЛИМИТЫ, ОПИСАНИЕ, LOCKS ---
 @router.callback_query(F.data == "m_limits_menu")
@@ -707,6 +812,123 @@ async def m_afk_list(callback: types.CallbackQuery):
     users = session.query(User).filter(User.afk_end >= now).all()
     
     text = "🛌 <b>Список текущих и будущих AFK:</b>\n\n"
+    if not users:
+        text += "<i>Никого нет.</i>"
+    else:
+        for u in users:
+            start = u.afk_start.strftime("%d.%m") if u.afk_start else "??"
+            end = u.afk_end.strftime("%d.%m") if u.afk_end else "??"
+            text += f"👤 <b>{u.nickname}</b> ({u.username}): {start} - {end}\n"
+            
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("menu_master"))
+
+# --- ADMIN AFK SETTING ---
+from keyboards import get_afk_start_kb, get_afk_end_kb
+from handlers.user import parse_date_input # Reuse parser
+from datetime import timedelta
+
+@router.callback_query(F.data.startswith("m_afk_set_"))
+async def m_afk_admin_start(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    uid, page = int(parts[3]), int(parts[4])
+    user = session.get(User, uid)
+    if not user: return await callback.answer("Ошибка user")
+    
+    await state.update_data(target_uid=uid, page=page)
+    await callback.message.edit_text(
+        f"📅 <b>AFK для {user.username}: Дата НАЧАЛА</b>\n\n"
+        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code>.",
+        parse_mode="HTML", reply_markup=get_afk_start_kb()
+    )
+    await state.set_state(MasterManageStates.waiting_for_afk_start)
+
+@router.callback_query(MasterManageStates.waiting_for_afk_start, F.data.startswith("afk_date_"))
+async def m_afk_admin_date_click(callback: types.CallbackQuery, state: FSMContext):
+    action = callback.data.split("_")[2]
+    now = get_msk_now()
+    if action == "today": dt = now
+    elif action == "tomorrow": dt = now + timedelta(days=1)
+    
+    await state.update_data(start_date=dt)
+    await m_afk_admin_ask_end(callback.message, state)
+
+@router.message(MasterManageStates.waiting_for_afk_start)
+async def m_afk_admin_date_manual(message: types.Message, state: FSMContext):
+    dt = parse_date_input(message.text)
+    if not dt: return await message.answer("⚠️ Неверный формат (ДД.ММ)", reply_markup=get_afk_start_kb())
+    await state.update_data(start_date=dt)
+    await m_afk_admin_ask_end(message, state)
+
+async def m_afk_admin_ask_end(message, state):
+    msg = message if isinstance(message, types.Message) else message.message
+    func = msg.edit_text if isinstance(message, types.CallbackQuery) else msg.answer
+    await func(
+        "🏁 <b>Дата ОКОНЧАНИЯ отсутствия:</b>",
+        parse_mode="HTML", reply_markup=get_afk_end_kb()
+    )
+    await state.set_state(MasterManageStates.waiting_for_afk_end)
+
+@router.callback_query(MasterManageStates.waiting_for_afk_end, F.data.startswith("afk_dur_"))
+async def m_afk_admin_dur_click(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    action = callback.data.split("_")[2]
+    
+    if action == "month":
+        import calendar
+        now = start_dt
+        last_day = calendar.monthrange(now.year, now.month)[1]
+        end_dt = now.replace(day=last_day)
+    else:
+        days = int(action)
+        end_dt = start_dt + timedelta(days=days)
+        
+    await m_afk_admin_finish(callback, state, start_dt, end_dt)
+
+@router.message(MasterManageStates.waiting_for_afk_end)
+async def m_afk_admin_dur_manual(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    end_dt = parse_date_input(message.text)
+    
+    # Validation logic same as user
+    if not end_dt: return await message.answer("⚠️ Неверный формат.", reply_markup=get_afk_end_kb())
+    if end_dt < start_dt: return await message.answer("⚠️ Дата окончания раньше начала.", reply_markup=get_afk_end_kb())
+    
+    # Determine context for reply usually callback, here message
+    # We call finish but finish expects callback for edit. We should handle message properly.
+    # Let's adapt finish.
+    
+    uid = data['target_uid']
+    page = data['page']
+    user = session.get(User, uid)
+    
+    user.afk_start = start_dt
+    user.afk_end = end_dt
+    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
+    session.commit()
+    
+    await message.answer(f"✅ AFK установлен для {user.username}.")
+    # We need to render user manage again. We need a callback object or fake it.
+    # It's cleaner to just show text and clear state, as we can't easily jump back to inline menu from reply message without sending a fresh one.
+    kb = [[types.InlineKeyboardButton(text="🔙 К профилю", callback_data=f"m_u_manage_{uid}_{page}")]]
+    await message.answer("Вернуться:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    await state.clear()
+
+async def m_afk_admin_finish(callback, state, start_dt, end_dt):
+    data = await state.get_data()
+    uid = data['target_uid']
+    page = data['page']
+    user = session.get(User, uid)
+    
+    user.afk_start = start_dt
+    user.afk_end = end_dt
+    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
+    session.commit()
+    
+    await callback.answer(f"✅ AFK установлен.")
+    await render_user_manage(callback, uid, page)
+    await state.clear()
     if not users:
         text += "<i>Никого нет.</i>"
     else:

@@ -4,7 +4,8 @@ from aiogram.fsm.context import FSMContext
 import asyncio
 
 # Импорты из корня проекта
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory, Player
+from sqlalchemy import or_
 from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu, get_afk_menu, get_afk_start_kb, get_afk_end_kb
 from helpers import get_menu_text
 from states import Registration, AFKState
@@ -417,7 +418,11 @@ async def view_queue(callback: types.CallbackQuery):
     qid = int(callback.data.split("_")[2])
     q = session.get(QueueType, qid)
     user = ensure_user(callback.from_user.id, callback.from_user.username)
-    entries = session.query(QueueEntry).filter_by(queue_type_id=qid).all()
+    entries = session.query(QueueEntry)\
+        .outerjoin(Player, QueueEntry.character_name == Player.nickname)\
+        .filter(QueueEntry.queue_type_id == qid)\
+        .filter((Player.in_clan == 1) | (Player.in_clan == None))\
+        .all()
     
     text = f"🛡 <b>Очередь: {q.name}</b>\n\n"
     if not entries: text += "<i>Пока пусто.</i>"
@@ -426,30 +431,58 @@ async def view_queue(callback: types.CallbackQuery):
     
     kb = []
     user_entry = session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first()
-    if user_entry: kb.append([types.InlineKeyboardButton(text="🏃 Выйти из очереди", callback_data=f"leave_q_{qid}")])
-    else: kb.append([types.InlineKeyboardButton(text="✍️ Записаться", callback_data=f"pre_join_{qid}")])
+    if user_entry: 
+        kb.append([types.InlineKeyboardButton(text="🏃 Выйти из очереди", callback_data=f"leave_q_{qid}")])
+    else: 
+        # Restriction for Цилинь
+        if q.name == "Цилинь":
+            text += "\n\n👇 <b>Запись в эту очередь доступна только в разовом режиме.</b>"
+            kb.append([types.InlineKeyboardButton(text="1️⃣ Записаться (Разово)", callback_data=f"pre_join_{qid}_once")])
+        else:
+            # New buttons: Once / Auto
+            text += "\n\n👇 <b>Выберите режим записи:</b>\n"
+            text += "• <b>1️⃣ Разово</b> — после получения награды вы покинете очередь.\n"
+            text += "• <b>🔄 Авто</b> — после получения награды бот <u>автоматически</u> запишет вас в конец этой же очереди."
+            
+            kb.append([
+                types.InlineKeyboardButton(text="1️⃣ Разово", callback_data=f"pre_join_{qid}_once"),
+                types.InlineKeyboardButton(text="🔄 Авто", callback_data=f"pre_join_{qid}_auto")
+            ])
+
     kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data="menu_join")])
     try: await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
     except: pass
 
 @router.callback_query(F.data.startswith("pre_join_"))
 async def pre_join(callback: types.CallbackQuery):
-    qid = int(callback.data.split("_")[2])
+    parts = callback.data.split("_")
+    qid = int(parts[2])
+    # Check for mode in callback data (pre_join_{qid}_{mode})
+    mode = parts[3] if len(parts) > 3 else "once" 
+    
     q = session.get(QueueType, qid)
     if q.is_locked: return await callback.answer("⛔ Очередь закрыта Мастером!", show_alert=True)
+    
+    # Force single mode for restricted queue
+    if q.name == "Цилинь" and mode == "auto":
+        mode = "once"
     
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     chars = session.query(Character).filter_by(user_id=user.id).all()
     if not chars: return await callback.answer("Нет персонажей!", show_alert=True)
     
-    kb = [[types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"do_join_{qid}_{c.id}")] for c in chars]
+    # Direct to join_final with selected mode
+    kb = [[types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"join_final_{qid}_{c.id}_{mode}")] for c in chars]
     kb.append([types.InlineKeyboardButton(text="🔙 Отмена", callback_data=f"view_q_{qid}")])
-    await callback.message.edit_text("Кем записаться?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    
+    mode_text = "🔄 АВТО" if mode == "auto" else "1️⃣ РАЗОВО"
+    await callback.message.edit_text(f"Кем записаться? ({mode_text})", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
-@router.callback_query(F.data.startswith("do_join_"))
-async def do_join(callback: types.CallbackQuery):
+@router.callback_query(F.data.startswith("join_final_"))
+async def join_final(callback: types.CallbackQuery):
     parts = callback.data.split("_")
-    qid, cid = int(parts[2]), int(parts[3])
+    qid, cid, mode = int(parts[2]), int(parts[3]), parts[4]
+    
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     char = session.get(Character, cid)
     
@@ -461,14 +494,17 @@ async def do_join(callback: types.CallbackQuery):
     current_count = session.query(QueueEntry).filter_by(user_id=user.id).count()
     if current_count >= limit: return await callback.answer(f"⛔ Лимит записей исчерпан! ({current_count}/{limit})", show_alert=True)
     
-    session.add(QueueEntry(user_id=user.id, queue_type_id=qid, character_name=char.nickname))
+    is_auto = (mode == "auto")
+    session.add(QueueEntry(user_id=user.id, queue_type_id=qid, character_name=char.nickname, auto_requeue=is_auto))
     session.commit()
     
     main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
     main_nick = main_char.nickname if main_char else char.nickname
-    asyncio.create_task(log_reward_to_sheet(queue_name=session.get(QueueType, qid).name, main_nick=main_nick, char_nick=char.nickname, manager_name=user.username, status="В очереди"))
     
-    await callback.answer(f"Записан: {char.nickname}")
+    log_status = "В очереди (Авто)" if is_auto else "В очереди"
+    asyncio.create_task(log_reward_to_sheet(queue_name=session.get(QueueType, qid).name, main_nick=main_nick, char_nick=char.nickname, manager_name=user.username, status=log_status))
+    
+    await callback.answer(f"Записан: {char.nickname} ({'Авто' if is_auto else '1 раз'})")
     await view_queue(callback)
 
 @router.callback_query(F.data.startswith("leave_q_"))
@@ -499,27 +535,49 @@ async def show_my_active_queues(callback: types.CallbackQuery):
     kb = []
     
     for e in entries:
-        text += f"🔹 <b>{e.queue.name}</b> — {e.character_name}\n"
+        mode_icon = "♾" if e.auto_requeue else "1️⃣"
+        text += f"🔹 <b>{e.queue.name}</b> — {e.character_name} ({mode_icon})\n"
         
         q_name = e.queue.name
-        short_name = (q_name[:12] + '..') if len(q_name) > 12 else q_name
+        short_name = (q_name[:10] + '..') if len(q_name) > 10 else q_name
         
-        row = [
-            types.InlineKeyboardButton(text=f"🔄 {short_name}", callback_data=f"swap_start_{e.id}"),
-            types.InlineKeyboardButton(text="❌ Выйти", callback_data=f"leave_q_{e.queue_type_id}")
-        ]
+        row = [types.InlineKeyboardButton(text=f"🔄 {short_name}", callback_data=f"swap_start_{e.id}")]
+        
+        # Toggle button (Skip for Цилинь or other restricted if any)
+        if e.queue.name != "Цилинь":
+            row.append(types.InlineKeyboardButton(text=f"🔀 {mode_icon}", callback_data=f"toggle_mode_{e.id}"))
+            
+        row.append(types.InlineKeyboardButton(text="❌ Выйти", callback_data=f"leave_q_{e.queue_type_id}"))
         kb.append(row)
         
     # --- ДОБАВЛЯЕМ РАСШИФРОВКУ (LEGEND) ---
     text += "\n───────────────\n"
     text += "💡 <b>Подсказка:</b>\n"
     text += "🔄 — Сменить персонажа в этой очереди\n"
+    text += "🔀 — Сменить режим (1️⃣ Разово / ♾ Авто)\n"
     text += "❌ — Покинуть эту очередь"
     # ---------------------------------------
 
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
     
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data.startswith("toggle_mode_"))
+async def toggle_mode_handler(callback: types.CallbackQuery):
+    try: eid = int(callback.data.split("_")[2])
+    except: return
+    entry = session.get(QueueEntry, eid)
+    if not entry: return await callback.answer("Запись не найдена.", show_alert=True)
+    
+    if entry.queue.name == "Цилинь":
+        return await callback.answer("Для этой очереди доступна только разовая запись.", show_alert=True)
+        
+    entry.auto_requeue = not entry.auto_requeue
+    session.commit()
+    
+    status = "♾ Авто-запись" if entry.auto_requeue else "1️⃣ Разовая запись"
+    await callback.answer(f"Режим изменен: {status}")
+    await show_my_active_queues(callback)
 
 @router.callback_query(F.data.startswith("swap_start_"))
 async def swap_start(callback: types.CallbackQuery):
