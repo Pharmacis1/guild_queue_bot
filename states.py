@@ -18,6 +18,7 @@ class MasterManageStates(StatesGroup):
     waiting_for_rename = State()
     waiting_for_afk_start = State()
     waiting_for_afk_end = State()
+    waiting_for_bulk_list = State()
 
 class AnnounceStates(StatesGroup):
     waiting_for_text = State()

@@ -693,7 +693,16 @@ async def m_edit_save(message: types.Message, state: FSMContext):
 # --- FORCE ADD/DEL & LOGS ---
 @router.callback_query(F.data == "m_force_add")
 async def m_force_add(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("➕ Никнейм:", reply_markup=get_back_btn("menu_master"))
+    kb = [
+        [types.InlineKeyboardButton(text="➕ Ввести 1 ник", callback_data="m_force_single")],
+        [types.InlineKeyboardButton(text="📝 Добавить списком", callback_data="m_force_bulk")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")]
+    ]
+    await callback.message.edit_text("Выбери режим добавления:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data == "m_force_single")
+async def m_force_single_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("➕ Никнейм:", reply_markup=get_back_btn("m_force_add"))
     await state.set_state(MasterManageStates.waiting_for_nickname_add)
 
 @router.message(MasterManageStates.waiting_for_nickname_add)
@@ -724,6 +733,64 @@ async def m_force_add_final(callback: types.CallbackQuery, state: FSMContext):
     q_name = session.get(QueueType, qid).name
     asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, callback.from_user.username, "👑 Мастер добавил"))
     await callback.message.edit_text(f"✅ {nick} добавлен.", reply_markup=get_master_menu())
+    await state.clear()
+
+@router.callback_query(F.data == "m_force_bulk")
+async def m_bulk_add_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "📝 **Отправь список ников** (каждый с новой строки):\n\n"
+        "Ник1\nНик2\nНик3", 
+        parse_mode="Markdown", 
+        reply_markup=get_back_btn("m_force_add")
+    )
+    await state.set_state(MasterManageStates.waiting_for_bulk_list)
+
+@router.message(MasterManageStates.waiting_for_bulk_list)
+async def m_bulk_input(message: types.Message, state: FSMContext):
+    raw = message.text
+    nicks = [line.strip() for line in raw.split('\n') if line.strip()]
+    
+    if not nicks:
+        return await message.answer("❌ Список пуст.", reply_markup=get_back_btn("m_force_add"))
+
+    # Validate? Optional. Let's assume Master knows what they do.
+    await state.update_data(bulk_nicks=nicks)
+    
+    kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"f_bulk_{q.id}")] for q in session.query(QueueType).all()]
+    await message.answer(f"Найдено ников: {len(nicks)}. Куда их добавить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data.startswith("f_bulk_"))
+async def m_bulk_add_final(callback: types.CallbackQuery, state: FSMContext):
+    qid = int(callback.data.split("_")[2])
+    data = await state.get_data()
+    nicks = data['bulk_nicks']
+    
+    added_count = 0
+    q = session.get(QueueType, qid)
+    if not q: return await callback.answer("Ошибка очереди")
+    q_name = q.name
+    master_username = callback.from_user.username
+    
+    for nick in nicks:
+        # Standard Orphan Logic
+        char = session.query(Character).filter_by(nickname=nick).first()
+        if char: 
+            uid = char.user_id
+            main_char = session.query(Character).filter_by(user_id=char.user_id, is_main=True).first()
+            main_nick = main_char.nickname if main_char else nick
+        else: 
+            uid = None
+            main_nick = nick
+
+        # Prevent duplicates in same queue? Not strictly enforced by DB constraint but good for logic.
+        # But Master might want to add duplicates? Let's allow.
+        
+        session.add(QueueEntry(user_id=uid, queue_type_id=qid, character_name=nick))
+        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, master_username, "👑 Мастер (списком)"))
+        added_count += 1
+        
+    session.commit()
+    await callback.message.edit_text(f"✅ Добавлено {added_count} персонажей в {q_name}.", reply_markup=get_master_menu())
     await state.clear()
 
 @router.callback_query(F.data == "m_force_del")
