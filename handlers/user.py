@@ -176,6 +176,9 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
         session.commit()
     else:
         session.add(Character(user_id=user.id, nickname=nick, is_main=True))
+        # Adopt orphaned entries
+        orphans = session.query(QueueEntry).filter_by(character_name=nick, user_id=None).all()
+        for o in orphans: o.user_id = user.id
         session.commit()
         
     await message.answer(f"✅ Основа сохранена: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
@@ -227,6 +230,10 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
         return await message.answer("⚠️ Уже добавлен.", reply_markup=get_back_btn("menu_chars"))
 
     session.add(Character(user_id=user.id, nickname=nick, is_main=False))
+    # Adopt orphans
+    orphans = session.query(QueueEntry).filter_by(character_name=nick, user_id=None).all()
+    for o in orphans: o.user_id = user.id
+    
     session.commit()
     await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
     await state.clear()
