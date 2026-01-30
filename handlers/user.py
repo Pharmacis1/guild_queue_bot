@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 import asyncio
 
 # Импорты из корня проекта
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory, Player
+from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory, Player, DEFAULT_QUEUES
 from sqlalchemy import or_
 from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu, get_afk_menu, get_afk_start_kb, get_afk_end_kb
 from helpers import get_menu_text
@@ -399,6 +399,12 @@ async def join_menu(callback: types.CallbackQuery):
     user = ensure_user(callback.from_user.id, callback.from_user.username)
 
     queues = session.query(QueueType).filter_by(is_active=True).all()
+    
+    # Sort queues based on DEFAULT_QUEUES order
+    def get_sort_index(q):
+        try: return DEFAULT_QUEUES.index(q.name)
+        except ValueError: return 999
+    queues.sort(key=get_sort_index)
     kb = []
     
     for q in queues:
@@ -628,6 +634,12 @@ async def my_history(callback: types.CallbackQuery):
 @router.callback_query(F.data == "menu_info")
 async def info_queues(callback: types.CallbackQuery):
     queues = session.query(QueueType).filter_by(is_active=True).all()
+    
+    # Sort queues
+    def get_q_index(q):
+        try: return DEFAULT_QUEUES.index(q.name)
+        except ValueError: return 999
+    queues.sort(key=get_q_index)
     text = "ℹ️ <b>Справка:</b>\n\n"
     for q in queues: text += f"🔹 <b>{q.name}</b>\n{q.description}\n\n"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn())

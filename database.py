@@ -124,6 +124,12 @@ engine = create_engine('sqlite:///guild_bot.db', echo=False)
 Session = sessionmaker(bind=engine)
 session = Session()
 
+DEFAULT_QUEUES = [
+    "Камень доблести", "Метеориты", "Жемчужины Фу Си", "Опыт в диск",
+    "Проходки в УФ", "Знаки Единства", "Колода карт", "Сущность карты",
+    "Камень божества", "Камни бессмертных", "Драконья чешуя", "Цилинь"
+]
+
 def init_db():
     Base.metadata.create_all(engine)
     
@@ -188,12 +194,7 @@ def init_db():
             except Exception as e:
                 print(f"Migration failed (record_type): {e}")
     
-    queues = [
-        "Камень доблести", "Метеориты", "Жемчужины Фу Си", "Опыт в диск",
-        "Проходки в УФ", "Знаки Единства", "Колода карт", "Сущность карты",
-        "Камень божества", "Камни бессмертных", "Цилинь"
-    ]
-    for q_name in queues:
+    for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
             session.add(QueueType(name=q_name))
             
