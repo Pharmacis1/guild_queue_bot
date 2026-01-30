@@ -19,6 +19,7 @@ class MasterManageStates(StatesGroup):
     waiting_for_afk_start = State()
     waiting_for_afk_end = State()
     waiting_for_bulk_list = State()
+    waiting_for_mode = State()
 
 class AnnounceStates(StatesGroup):
     waiting_for_text = State()

@@ -714,26 +714,24 @@ async def m_force_nick(message: types.Message, state: FSMContext):
     await state.set_state(MasterManageStates.waiting_for_queue_add)
 
 @router.callback_query(F.data.startswith("f_add_"))
-async def m_force_add_final(callback: types.CallbackQuery, state: FSMContext):
+async def m_force_add_queue_select(callback: types.CallbackQuery, state: FSMContext):
     qid = int(callback.data.split("_")[2])
-    data = await state.get_data()
-    nick = data['nick']
+    q = session.get(QueueType, qid)
     
-    char = session.query(Character).filter_by(nickname=nick).first()
-    if char: 
-        uid = char.user_id
-        main_char = session.query(Character).filter_by(user_id=char.user_id, is_main=True).first()
-        main_nick = main_char.nickname if main_char else nick
-    else: 
-        uid = None
-        main_nick = nick
-
-    session.add(QueueEntry(user_id=uid, queue_type_id=qid, character_name=nick))
-    session.commit()
-    q_name = session.get(QueueType, qid).name
-    asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, callback.from_user.username, "👑 Мастер добавил"))
-    await callback.message.edit_text(f"✅ {nick} добавлен.", reply_markup=get_master_menu())
-    await state.clear()
+    # Store context
+    await state.update_data(qid=qid, action_type="single")
+    
+    # Ask for Mode
+    kb = [
+        [types.InlineKeyboardButton(text="1️⃣ Разовая запись", callback_data="m_mode_once")],
+        [types.InlineKeyboardButton(text="🔄 Авто-запись", callback_data="m_mode_auto")]
+    ]
+    if q.name == "Цилинь":
+         # Force Once
+         await finalize_add(callback, state, qid, "single", auto_requeue=False)
+    else:
+        await callback.message.edit_text(f"Выбрана: {q.name}.\nВыберите режим:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+        await state.set_state(MasterManageStates.waiting_for_mode)
 
 @router.callback_query(F.data == "m_force_bulk")
 async def m_bulk_add_start(callback: types.CallbackQuery, state: FSMContext):
@@ -760,19 +758,52 @@ async def m_bulk_input(message: types.Message, state: FSMContext):
     await message.answer(f"Найдено ников: {len(nicks)}. Куда их добавить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 @router.callback_query(F.data.startswith("f_bulk_"))
-async def m_bulk_add_final(callback: types.CallbackQuery, state: FSMContext):
+async def m_bulk_add_queue_select(callback: types.CallbackQuery, state: FSMContext):
     qid = int(callback.data.split("_")[2])
-    data = await state.get_data()
-    nicks = data['bulk_nicks']
-    
-    added_count = 0
     q = session.get(QueueType, qid)
-    if not q: return await callback.answer("Ошибка очереди")
-    q_name = q.name
-    master_username = callback.from_user.username
     
+    await state.update_data(qid=qid, action_type="bulk")
+    
+    # Ask for Mode
+    kb = [
+        [types.InlineKeyboardButton(text="1️⃣ Разовая запись", callback_data="m_mode_once")],
+        [types.InlineKeyboardButton(text="🔄 Авто-запись", callback_data="m_mode_auto")]
+    ]
+    
+    if q.name == "Цилинь":
+         await finalize_add(callback, state, qid, "bulk", auto_requeue=False)
+    else:
+         await callback.message.edit_text(f"Выбрана: {q.name}.\nВыберите режим для СПИСКА:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+         await state.set_state(MasterManageStates.waiting_for_mode)
+
+@router.callback_query(F.data.startswith("m_mode_"))
+async def m_force_mode_select(callback: types.CallbackQuery, state: FSMContext):
+    mode = callback.data.split("_")[2] # once / auto
+    auto_requeue = (mode == "auto")
+    
+    data = await state.get_data()
+    qid = data['qid']
+    action_type = data['action_type']
+    
+    await finalize_add(callback, state, qid, action_type, auto_requeue)
+
+async def finalize_add(event, state, qid, action_type, auto_requeue):
+    data = await state.get_data()
+    message = event.message if isinstance(event, types.CallbackQuery) else event
+    
+    q_name = session.get(QueueType, qid).name
+    master_username = event.from_user.username
+    
+    nicks = []
+    if action_type == "single":
+        nicks.append(data['nick'])
+    else:
+        nicks = data['bulk_nicks']
+        
+    added_count = 0
+    mode_str = " (Авто)" if auto_requeue else ""
+
     for nick in nicks:
-        # Standard Orphan Logic
         char = session.query(Character).filter_by(nickname=nick).first()
         if char: 
             uid = char.user_id
@@ -782,15 +813,17 @@ async def m_bulk_add_final(callback: types.CallbackQuery, state: FSMContext):
             uid = None
             main_nick = nick
 
-        # Prevent duplicates in same queue? Not strictly enforced by DB constraint but good for logic.
-        # But Master might want to add duplicates? Let's allow.
-        
-        session.add(QueueEntry(user_id=uid, queue_type_id=qid, character_name=nick))
-        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, master_username, "👑 Мастер (списком)"))
+        session.add(QueueEntry(user_id=uid, queue_type_id=qid, character_name=nick, auto_requeue=auto_requeue))
+        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, master_username, f"👑 Мастер{mode_str}"))
         added_count += 1
         
     session.commit()
-    await callback.message.edit_text(f"✅ Добавлено {added_count} персонажей в {q_name}.", reply_markup=get_master_menu())
+    
+    if isinstance(event, types.CallbackQuery):
+        await event.message.edit_text(f"✅ Добавлено {added_count} персонажей в {q_name}{mode_str}.", reply_markup=get_master_menu())
+    else:
+        await message.answer(f"✅ Добавлено {added_count} персонажей в {q_name}{mode_str}.", reply_markup=get_master_menu())
+        
     await state.clear()
 
 @router.callback_query(F.data == "m_force_del")
