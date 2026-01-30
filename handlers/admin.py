@@ -710,6 +710,7 @@ async def m_force_add_final(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     nick = data['nick']
     
+    char = session.query(Character).filter_by(nickname=nick).first()
     if char: 
         uid = char.user_id
         main_char = session.query(Character).filter_by(user_id=char.user_id, is_main=True).first()
