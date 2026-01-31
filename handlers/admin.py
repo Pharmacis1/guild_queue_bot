@@ -333,16 +333,17 @@ async def m_delete_char_admin(callback: types.CallbackQuery):
         count = session.query(Character).filter_by(user_id=user_id).count()
         chat_id = get_setting('clan_chat_id')
         
-        if count == 0 and chat_id:
-            try:
-                await bot.ban_chat_member(chat_id, user.telegram_id)
-                await bot.unban_chat_member(chat_id, user.telegram_id)
-                await bot.send_message(user.telegram_id, "⚠️ Вы были исключены из группы клана, так как администратор удалил вашего последнего персонажа.")
-                await callback.message.answer(f"👢 Игрок {user.username} был кикнут из чата (0 персонажей).")
-            except Exception as e:
-                # Ignore "chat owner" error or log silently
-                if "chat owner" not in str(e):
-                    await callback.message.answer(f"⚠️ Ошибка кика: {e}")
+        # Disabled Kick Logic
+        # if count == 0 and chat_id:
+        #     try:
+        #         await bot.ban_chat_member(chat_id, user.telegram_id)
+        #         await bot.unban_chat_member(chat_id, user.telegram_id)
+        #         await bot.send_message(user.telegram_id, "⚠️ Вы были исключены из группы клана, так как администратор удалил вашего последнего персонажа.")
+        #         await callback.message.answer(f"👢 Игрок {user.username} был кикнут из чата (0 персонажей).")
+        #     except Exception as e:
+        #         # Ignore "chat owner" error or log silently
+        #         if "chat owner" not in str(e):
+        #             await callback.message.answer(f"⚠️ Ошибка кика: {e}")
             
     else: await callback.answer("Уже удален.")
     
@@ -1259,18 +1260,18 @@ async def finalize_approval(event, target_user, nick, reg_type):
                 session.add(Character(user_id=target_user.id, nickname=nick, is_main=True))
                 msg = f"✅ Основа установлена: <b>{nick}</b> (Одобрено Мастером)"
                 
-                # Invite Link for First Char
-                count = session.query(Character).filter_by(user_id=target_user.id).count()
-                if count == 0: # It was 0 before this add
-                     chat_id = get_setting('clan_chat_id')
-                     if chat_id:
-                        try:
-                            # We need bot instance. event can be Message or Callback
-                            bot_inst = event.bot
-                            link = await bot_inst.create_chat_invite_link(chat_id, member_limit=1, name=f"For {target_user.username}")
-                            try: await bot_inst.send_message(target_user.telegram_id, f"👋 Заявка одобрена!\nВот твоя ссылка: {link.invite_link}")
-                            except: pass
-                        except Exception as e: print(f"Invite error approval: {e}")
+                # Invite Link for First Char -> DISABLED
+                # count = session.query(Character).filter_by(user_id=target_user.id).count()
+                # if count == 0: # It was 0 before this add
+                #      chat_id = get_setting('clan_chat_id')
+                #      if chat_id:
+                #         try:
+                #             # We need bot instance. event can be Message or Callback
+                #             bot_inst = event.bot
+                #             link = await bot_inst.create_chat_invite_link(chat_id, member_limit=1, name=f"For {target_user.username}")
+                #             try: await bot_inst.send_message(target_user.telegram_id, f"👋 Заявка одобрена!\nВот твоя ссылка: {link.invite_link}")
+                #             except: pass
+                #         except Exception as e: print(f"Invite error approval: {e}")
 
         else:
              # Logic for changing main is complex (confirmations etc). 
@@ -1395,7 +1396,7 @@ async def m_disable_code(callback: types.CallbackQuery):
     await m_verification_menu(callback)
 
 
-@router.chat_member()
+# @router.chat_member()
 async def on_user_join(event: ChatMemberUpdated):
     # Проверяем, что это вступление (был left/kicked/restricted -> стал member/creator/administrator)
     old = event.old_chat_member.status

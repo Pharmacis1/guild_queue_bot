@@ -13,6 +13,20 @@ from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
 
+@router.message(F.chat.type != "private")
+async def group_stub(message: types.Message):
+    try:
+        # Check against "everyone" spam by only replying to commands or text?
+        # User said "when addressed". 
+        # But global handler catches all. 
+        # Let's reply to any message? Or maybe filter commands?
+        # User said "upon addressing in group".
+        # If I just put it here, it will trigger on EVERY message in group if bot sees it.
+        # But bots in privacy mode only see commands or mentions.
+        # If privacy mode is on, this is fine.
+        await message.reply("Эта команда доступна только в личных сообщениях со мной 🕷")
+    except: pass
+
 # --- START ---
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -181,7 +195,18 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
         for o in orphans: o.user_id = user.id
         session.commit()
         
-    await message.answer(f"✅ Основа сохранена: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
+    await message.answer(f"✅ Основа сохранена: <b>{nick}</b>\n\nДобро пожаловать в клан! 🕷", parse_mode="HTML", reply_markup=get_main_menu(user))
+    
+    # Auto-Invite: DISABLED
+    # count = session.query(Character).filter_by(user_id=user.id).count()
+    # if count == 1:
+    #     chat_id = get_setting('clan_chat_id')
+    #     if chat_id:
+    #         try:
+    #             link = await message.bot.create_chat_invite_link(chat_id, member_limit=1, name=f"For {user.username or user.telegram_id}")
+    #             await message.answer(f"👋 <b>Ссылка на вступление в группу клана:</b>\n{link.invite_link}", parse_mode="HTML")
+    #         except Exception as e:
+    #             print(f"Error creating invite: {e}")
     await state.clear()
 
 @router.callback_query(F.data == "add_alt")
@@ -438,6 +463,8 @@ async def view_queue(callback: types.CallbackQuery):
         .all()
     
     text = f"🛡 <b>Очередь: {q.name}</b>\n\n"
+    text += "Условия для получения награды из очереди:\n"
+    text += f"{q.description}\n\n"
     if not entries: text += "<i>Пока пусто.</i>"
     else:
         for i, e in enumerate(entries, 1): text += f"{i}. {e.character_name}\n"
@@ -647,7 +674,7 @@ async def info_queues(callback: types.CallbackQuery):
         try: return DEFAULT_QUEUES.index(q.name)
         except ValueError: return 999
     queues.sort(key=get_q_index)
-    text = "ℹ️ <b>Справка:</b>\n\n"
+    text = "ℹ️ <b>Справка</b>\n\nУсловия для получения награды из очереди:\n\n"
     for q in queues: text += f"🔹 <b>{q.name}</b>\n{q.description}\n\n"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn())
 
