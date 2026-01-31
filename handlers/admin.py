@@ -578,7 +578,7 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             
             if queues_map:
                 # Build Message
-                log_text = "🎉 <b>Раздача наград завершена! Не забудьте забрать награду из Клан листа.</b>\n\n"
+                log_text = "🎉 <b>Награды отправлены! Не забудьте забрать из Клан листа.</b>\n\n"
                 
                 for q_name, nicks in queues_map.items():
                     log_text += f"🛡 <b>{q_name}</b>\n"

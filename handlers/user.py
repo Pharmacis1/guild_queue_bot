@@ -20,19 +20,9 @@ async def cmd_get_id(message: types.Message):
         text += f"\nID топика: <code>{message.message_thread_id}</code>"
     await message.reply(text, parse_mode="HTML")
 
-@router.message(F.chat.type != "private")
-async def group_stub(message: types.Message):
-    try:
-        # Check against "everyone" spam by only replying to commands or text?
-        # User said "when addressed". 
-        # But global handler catches all. 
-        # Let's reply to any message? Or maybe filter commands?
-        # User said "upon addressing in group".
-        # If I just put it here, it will trigger on EVERY message in group if bot sees it.
-        # But bots in privacy mode only see commands or mentions.
-        # If privacy mode is on, this is fine.
-        await message.reply("Эта команда доступна только в личных сообщениях со мной 🕷")
-    except: pass
+@router.message(Command("start"), F.chat.type != "private")
+async def group_start_stub(message: types.Message):
+    await message.reply("Эта команда доступна только в личных сообщениях со мной 🕷")
 
 # --- START ---
 @router.message(Command("start"))
