@@ -491,20 +491,24 @@ async def m_warn_user(callback: types.CallbackQuery):
     user = session.get(User, entry.user_id)
     master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
     
+    # Save as delayed warning regardless of user existence
+    # If user doesn't exist, use None (notification will be skipped, but logged)
+    safe_uid = user.id if user else None
+    
+    session.add(RewardHistory(
+        user_id=safe_uid, 
+        character_name=entry.character_name, 
+        queue_name=entry.queue.name, 
+        issued_by=master.username, 
+        is_notified=False,
+        record_type="warning"
+    ))
+    session.commit()
+    
     if user:
-        # Save as delayed warning
-        session.add(RewardHistory(
-            user_id=entry.user_id, 
-            character_name=entry.character_name, 
-            queue_name=entry.queue.name, 
-            issued_by=master.username, 
-            is_notified=False,
-            record_type="warning"
-        ))
-        session.commit()
         await callback.answer("⚠️ Предупреждение отложено (в список рассылки).")
     else:
-        await callback.answer("Ошибка пользователя.")
+        await callback.answer("⚠️ Записано (нет привязки к юзеру).")
 
 @router.callback_query(F.data == "m_send_batch")
 async def m_send_batch_notifications(callback: types.CallbackQuery):
@@ -543,8 +547,6 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
             for item in warnings:
                 msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
-                item.is_notified = True
-
         msg_text += "👇 <b>Выберите действие:</b>"
         
         kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[
@@ -556,6 +558,42 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
             count_users += 1
         except: pass
+        
+    # --- PUBLIC LOG BROADCAST ---
+    log_enabled = get_setting("public_log_enabled")
+    log_channel = get_setting("public_log_channel_id")
+    
+    if log_enabled == "true" and log_channel:
+        try:
+            queues_map = {} # {QueueName: [Nick1, Nick2]}
+            
+            all_items = []
+            for items in user_map.values():
+                all_items.extend(items)
+                
+            for item in all_items:
+                if item.record_type != "warning":
+                    if item.queue_name not in queues_map: queues_map[item.queue_name] = []
+                    queues_map[item.queue_name].append(item.character_name)
+            
+            if queues_map:
+                # Build Message
+                log_text = "🎉 <b>Раздача наград завершена! Не забудьте забрать награду из Клан листа.</b>\n\n"
+                
+                for q_name, nicks in queues_map.items():
+                    log_text += f"🛡 <b>{q_name}</b>\n"
+                    for n in nicks:
+                        log_text += f"• {n}\n"
+                    log_text += "\n"
+                    
+                # Send
+                thread_id = get_setting("public_log_thread_id")
+                await bot.send_message(log_channel, log_text, parse_mode="HTML", message_thread_id=thread_id)
+                
+        except Exception as e:
+            print(f"Failed to send public log: {e}")
+            # Don't fail the whole flow
+    # ----------------------------
         
     session.commit()
     await callback.answer(f"✅ Отправлено {count_users} пользователям.")
@@ -1178,6 +1216,84 @@ async def m_send_backup(callback: types.CallbackQuery):
         await callback.answer("Файл отправлен.")
     except Exception as e:
         await callback.answer(f"Ошибка при создании бэкапа: {e}", show_alert=True)
+
+# --- PUBLIC LOG SETTINGS ---
+@router.callback_query(F.data == "m_log_settings")
+async def m_log_settings_menu(callback: types.CallbackQuery):
+    enabled = get_setting("public_log_enabled")
+    chan_id = get_setting("public_log_channel_id")
+    thread_id = get_setting("public_log_thread_id")
+    
+    status_icon = "✅ ВКЛ" if enabled == "true" else "❌ ВЫКЛ"
+    
+    chan_display = chan_id if chan_id else "Не задан"
+    if chan_id and thread_id:
+        chan_display += f" (Топик: {thread_id})"
+    
+    text = (f"📝 <b>Настройка сводки по выдаче КХ ресов в группе клана</b>\n\n"
+            f"Статус: <b>{status_icon}</b>\n"
+            f"Канал/Группа: <code>{chan_display}</code>\n\n"
+            "При рассылке уведомлений бот будет отправлять сводный отчет в этот канал.\n\n"
+            "⚠️ <b>Важно:</b> Бот должен быть <b>Администратором</b> в этом канале/группе, чтобы писать сообщения!\n\n"
+            "❓ <b>Как узнать ID канала/группы?</b>\n"
+            "САМЫЙ ПРОСТОЙ СПОСОБ:\n"
+            "1. Добавьте бота в нужную группу/канал (как админа).\n"
+            "2. Напишите там команду <code>/id</code> (если это топик - пишите в топике).\n"
+            "3. Бот ответит ID чата и ID топика.\n"
+            "4. Введите сюда ID в формате: <code>ChatID:TopicID</code> (или просто ChatID, если нет топиков).")
+            
+    kb = [
+        [types.InlineKeyboardButton(text="✏️ Задать ID Канала/Топика", callback_data="m_set_log_chan")],
+        [types.InlineKeyboardButton(text="🔄 Вкл/Выкл", callback_data="m_toggle_log")],
+        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_menu_system")]
+    ]
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+
+@router.callback_query(F.data == "m_toggle_log")
+async def m_toggle_log(callback: types.CallbackQuery):
+    was = get_setting("public_log_enabled")
+    new_val = "false" if was == "true" else "true"
+    set_setting("public_log_enabled", new_val)
+    await m_log_settings_menu(callback)
+
+@router.callback_query(F.data == "m_set_log_chan")
+async def m_set_log_chan_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("✏️ Введите <b>ID канала</b> (начинается с -100...).\nЕсли нужно слать в топик, введите: <code>ID_Чата:ID_Топика</code>", parse_mode="HTML", reply_markup=get_back_btn("m_log_settings"))
+    await state.set_state(MasterManageStates.waiting_for_log_channel_id)
+
+@router.message(MasterManageStates.waiting_for_log_channel_id)
+async def m_set_log_chan_save(message: types.Message, state: FSMContext):
+    val = message.text.strip()
+    
+    chat_id = val
+    thread_id = None
+    
+    if ":" in val:
+        parts = val.split(":")
+        chat_id = parts[0].strip()
+        thread_id = parts[1].strip()
+    
+    # Simple validation
+    if not (chat_id.startswith("-100") or chat_id.startswith("@") or chat_id.replace("-","").isdigit()):
+         await message.answer("⚠️ Похоже, это не ID канала. Попробуйте еще раз (-100...).", reply_markup=get_back_btn("m_log_settings"))
+         return
+
+    set_setting("public_log_channel_id", chat_id)
+    if thread_id:
+        set_setting("public_log_thread_id", thread_id)
+    else:
+        # Clear thread id if not provided
+        set_setting("public_log_thread_id", "")
+        
+    await message.answer(f"✅ Канал сохранен: {chat_id}" + (f" (Топик: {thread_id})" if thread_id else ""), reply_markup=get_master_system_menu()) 
+    
+    # Try to verify?
+    try:
+        await message.bot.send_message(chat_id, "✅ Тестовое сообщение: Бот готов публиковать сводку по выдаче наград из очередей.", message_thread_id=thread_id)
+    except Exception as e:
+        await message.answer(f"⚠️ Предупреждение: Не удалось отправить тестовое сообщение.\nОшибка: {e}\nУбедитесь, что бот админ в канале.")
+        
+    await state.clear()
 
 # --- APPROVAL SYSTEM (NEW ACCESS) ---
 @router.callback_query(F.data.startswith("appr:"))

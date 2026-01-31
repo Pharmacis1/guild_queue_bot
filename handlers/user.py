@@ -13,6 +13,13 @@ from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
 
+@router.message(Command("id"))
+async def cmd_get_id(message: types.Message):
+    text = f"ID этого чата: <code>{message.chat.id}</code>"
+    if message.message_thread_id:
+        text += f"\nID топика: <code>{message.message_thread_id}</code>"
+    await message.reply(text, parse_mode="HTML")
+
 @router.message(F.chat.type != "private")
 async def group_stub(message: types.Message):
     try:

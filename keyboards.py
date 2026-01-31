@@ -71,6 +71,7 @@ def get_master_announce_menu():
 def get_master_system_menu():
     kb = [
         [types.InlineKeyboardButton(text="💾 Скачать Бэкап БД", callback_data="m_backup")],
+        [types.InlineKeyboardButton(text="📝 Настройка сводки по выдаче", callback_data="m_log_settings")],
         [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
