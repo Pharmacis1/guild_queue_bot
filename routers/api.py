@@ -423,3 +423,68 @@ async def force_player_scan(background_tasks: BackgroundTasks):
     from scripts.pwobs_scraper import run_scraper
     background_tasks.add_task(run_scraper, headless=True, only_unknown=True)
     return {"status": "ok", "message": "Player scan triggered in background"}
+
+
+@router.post("/api/add_event")
+async def add_event(request: Request):
+    """
+    API endpoint to manually add an event (Valor)
+    """
+    try:
+        from datetime import datetime
+        import pytz
+        msk_tz = pytz.timezone('Europe/Moscow')
+        
+        data = await request.json()
+        role_id = data.get('role_id')
+        event_date_str = data.get('date') # "YYYY-MM-DD HH:MM:SS" (MSK)
+        value = data.get('value')
+        description = data.get('description', '')
+        
+        if not role_id or not event_date_str or value is None:
+            return {"status": "error", "message": "Missing role_id, date, or value"}
+            
+        try:
+            val_int = int(value)
+        except:
+             return {"status": "error", "message": "Value must be an integer"}
+
+        # Parse Date
+        # Parse Date
+        try:
+             # Clean input if T exists (HTML5 datetime-local)
+             if 'T' in event_date_str:
+                 event_date_str = event_date_str.replace('T', ' ')
+             
+             # Ensure seconds exist
+             if len(event_date_str) == 16: # 2023-01-01 12:00
+                 event_date_str += ":00"
+
+             dt_naive = datetime.strptime(event_date_str, "%Y-%m-%d %H:%M:%S")
+             dt_msk = msk_tz.localize(dt_naive)
+             timestamp = int(dt_msk.timestamp())
+        except Exception as date_e:
+             return {"status": "error", "message": f"Invalid date format: {date_e}"}
+             
+        logging.info(f"Manual Event Add: {role_id}, val={val_int}, ts={timestamp} ({event_date_str})")
+        
+        async with aiosqlite.connect(DB_NAME) as conn:
+            # Check player exists
+            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
+                if not await cursor.fetchone():
+                     # Auto-create if not exists? Ideally yes for flexibility, but let's stick to existing
+                     return {"status": "error", "message": "Player not found"}
+            
+            # Insert Event (Type 1 = Valor)
+            await conn.execute("""
+                INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
+                VALUES (?, ?, ?, 1, ?, ?)
+            """, (role_id, timestamp, event_date_str, val_int, description))
+            
+            await conn.commit()
+            
+        return {"status": "ok", "message": "Event added successfully"}
+
+    except Exception as e:
+        logging.error(f"Error in add_event: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}

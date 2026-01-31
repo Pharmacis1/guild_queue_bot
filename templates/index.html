@@ -364,6 +364,46 @@
                             <div class="form-text text-muted small">Если снять галочку, игрок пропадет из таблиц.</div>
                         </div>
                         <div class="alert alert-info py-2 small" id="saveStatus" style="display: none;"></div>
+
+                        <!-- Manual Event Section -->
+                        <hr class="border-secondary my-4">
+                        <h6 class="text-silver mb-3">⚔️ Add Valor Event</h6>
+                        <div class="mb-3">
+                            <label class="form-label text-silver small">Date & Time</label>
+                            <input type="datetime-local" class="form-control" id="addEventDate">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-silver small">Select Value</label>
+                            <div class="d-grid gap-2" style="grid-template-columns: repeat(5, 1fr);">
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(2, '')">2</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(4, '')">4</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(6, '')">6</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(7, '')">7</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(8, '')">8</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(10, '')">10</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(14, '')">14</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(24, '')">24</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(40, '')">40</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
+                                    onclick="selectEventValue(70, '')">70</button>
+                            </div>
+                            <div class="input-group mt-2">
+                                <input type="number" class="form-control" id="addEventValue" placeholder="Value">
+                                <input type="text" class="form-control" id="addEventDesc" placeholder="Description">
+                                <button class="btn btn-ruby-glow" type="button" onclick="submitAddEvent()">ADD</button>
+                            </div>
+                            <div class="alert alert-info py-2 small mt-2" id="addEventStatus" style="display: none;">
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -1097,6 +1137,81 @@
                         <p>Could not reach the Observer.</p>
                     </div>
                 `;
+            }
+        }
+    </script>
+    <script>
+        // --- Manual Event Logic ---
+
+        // Initialize Date Input with Current Time (Local -> ISO format adjustment for input)
+        document.addEventListener('DOMContentLoaded', () => {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('addEventDate').value = now.toISOString().slice(0, 16);
+        });
+
+        function selectEventValue(val, desc) {
+            document.getElementById('addEventValue').value = val;
+            const descInput = document.getElementById('addEventDesc');
+            // Only set description if empty or overwriting a previous preset
+            // For now, just set it.
+            descInput.value = desc;
+
+            // Visual feedback
+            document.querySelectorAll('.event-val-btn').forEach(btn => btn.classList.remove('active', 'btn-light'));
+            event.target.classList.add('active', 'btn-light');
+        }
+
+        async function submitAddEvent() {
+            const roleId = document.getElementById('editRoleId').value;
+            const dateVal = document.getElementById('addEventDate').value; // YYYY-MM-DDTHH:MM
+            const val = document.getElementById('addEventValue').value;
+            const desc = document.getElementById('addEventDesc').value;
+            const statusEl = document.getElementById('addEventStatus');
+
+            if (!roleId || !dateVal || !val) {
+                statusEl.textContent = "Missing fields!";
+                statusEl.className = "alert alert-warning py-2 small mt-2";
+                statusEl.style.display = 'block';
+                return;
+            }
+
+            // Fix Date Format (T -> Space, adding seconds)
+            let formattedDate = dateVal.replace('T', ' ');
+            if (formattedDate.length === 16) formattedDate += ':00';
+
+            statusEl.textContent = "Adding...";
+            statusEl.className = "alert alert-info py-2 small mt-2";
+            statusEl.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/add_event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        role_id: parseInt(roleId),
+                        date: formattedDate,
+                        value: parseInt(val),
+                        description: desc || '' // Send empty string if null
+                    })
+                });
+
+                const res = await response.json();
+
+                if (res.status === 'ok') {
+                    statusEl.textContent = "✅ Added! Refreshing...";
+                    statusEl.className = "alert alert-success py-2 small mt-2";
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1000);
+                } else {
+                    statusEl.textContent = "❌ Error: " + res.message;
+                    statusEl.className = "alert alert-danger py-2 small mt-2";
+                }
+            } catch (e) {
+                statusEl.textContent = "❌ Network Error";
+                statusEl.className = "alert alert-danger py-2 small mt-2";
+                console.error(e);
             }
         }
     </script>
