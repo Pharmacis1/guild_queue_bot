@@ -1241,3 +1241,15 @@ function removeFromParty(memberRoleId, currentRoleId) {
 $(document).ready(function () {
     $('#btnAddPartyMember').on('click', addToParty);
 });
+
+/* --- Auth Logic --- */
+function logout() {
+    fetch('/api/logout', { method: 'POST' })
+        .then(() => {
+            window.location.reload();
+        })
+        .catch(err => {
+            console.error('Logout failed:', err);
+            window.location.reload(); // Reload anyway
+        });
+}
