@@ -7,7 +7,7 @@ import os
 from web_database import DB_NAME, get_data_from_db, get_last_update_time
 from consts import CLASSES
 import bisect
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")

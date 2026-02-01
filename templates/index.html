@@ -208,6 +208,11 @@
             color: #fff !important;
         }
 
+        .form-control::placeholder {
+            color: #999 !important;
+            opacity: 1;
+        }
+
         .form-control:focus,
         .form-select:focus {
             background-color: #333 !important;
@@ -216,9 +221,45 @@
             box-shadow: 0 0 0 0.25rem rgba(209, 30, 50, 0.25);
         }
 
-        .form-control:disabled {
+        .form-control:disabled,
+        .form-control[readonly] {
             background-color: #1a1a1a !important;
             color: #888 !important;
+        }
+
+        .input-group-text {
+            background-color: #222 !important;
+            border-color: #444 !important;
+            color: #ccc !important;
+        }
+
+        /* Fix Date Inputs in Dark Mode */
+        input[type="date"],
+        input[type="datetime-local"] {
+            color-scheme: dark;
+        }
+
+        /* Fix Badges Contrast */
+        .modal-body .badge.bg-dark {
+            background-color: #2b2b2b !important;
+            color: #e0e0e0 !important;
+            /* Lighter text */
+            border-color: #555 !important;
+        }
+
+        /* Fix List Groups in Modal */
+        .list-group-dark .list-group-item {
+            border-color: #333 !important;
+            color: #ddd !important;
+        }
+
+        .list-group-item.bg-transparent {
+            background-color: transparent !important;
+        }
+
+        /* Fix Text Muted in Dark Modal to be Lighter */
+        .modal-body .text-muted {
+            color: #aaa !important;
         }
 
         /* OBSERVER MODAL STYLES */
@@ -331,84 +372,288 @@
 
         <!-- Modals (Edit Player & Menu) -->
         <div class="modal fade" id="editPlayerModal" tabindex="-1">
-            <div class="modal-dialog">
+            <div class="modal-dialog" style="max-width: 480px;">
                 <div class="modal-content">
+                    <!-- Profile Hero Header -->
                     <div class="modal-header">
-                        <h5 class="modal-title">✏️ Manage Member</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <div class="profile-hero w-100">
+                            <div class="profile-hero-icon">
+                                <img src="/static/icons/0.png" alt="Class" id="profileClassIcon"
+                                    style="width: 40px; height: 40px; object-fit: contain;">
+                            </div>
+                            <div class="profile-hero-info">
+                                <h4 class="profile-hero-name" id="profileHeroName">Загрузка...</h4>
+                                <div class="profile-hero-meta">
+                                    <span id="profileClassText">Класс</span> •
+                                    <span>ID: <span id="displayRoleId"></span></span>
+                                </div>
+                            </div>
+                            <div id="profileStatusBadge" class="status-badge status-badge-active">🟢 В клане</div>
+                            <button type="button" class="btn-close btn-close-white ms-2"
+                                data-bs-dismiss="modal"></button>
+                        </div>
                     </div>
+
+                    <!-- Tab Navigation -->
+                    <nav class="profile-tab-nav nav" role="tablist">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabAccount"
+                            type="button">👤 Аккаунт</button>
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabStatus" type="button">📊
+                            Статус</button>
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLinks" type="button">🔗
+                            Связи</button>
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabQueues" type="button">📋
+                            Очереди</button>
+                    </nav>
+
+                    <!-- Modal Body with Tab Content -->
                     <div class="modal-body">
                         <input type="hidden" id="editRoleId">
-                        <div class="mb-3">
-                            <label class="form-label text-silver">Role ID</label>
-                            <input type="text" class="form-control" id="displayRoleId" disabled>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label text-silver">Nickname</label>
-                            <input type="text" class="form-control" id="editNickname">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label text-silver">Class</label>
-                            <select class="form-select" id="editClass">
-                                <option value="-1">Unknown</option>
-                                {% for cid, cdata in CLASSES.items() %}
-                                <option value="{{ cid }}">{{ cdata[1] }} {{ cdata[0] }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="editInClan" checked>
-                                <label class="form-check-label text-silver" for="editInClan">Состоит в клане</label>
-                            </div>
-                            <div class="form-text text-muted small">Если снять галочку, игрок пропадет из таблиц.</div>
-                        </div>
-                        <div class="alert alert-info py-2 small" id="saveStatus" style="display: none;"></div>
+                        <span class="d-none" id="userLinkStatus">Не привязан</span>
 
-                        <!-- Manual Event Section -->
-                        <hr class="border-secondary my-4">
-                        <h6 class="text-silver mb-3">⚔️ Add Valor Event</h6>
-                        <div class="mb-3">
-                            <label class="form-label text-silver small">Date & Time</label>
-                            <input type="datetime-local" class="form-control" id="addEventDate">
+                        <div class="tab-content profile-tab-content">
+                            <!-- TAB: Account -->
+                            <div class="tab-pane fade show active" id="tabAccount">
+                                <!-- Nick + Class in two columns -->
+                                <div class="profile-form-row">
+                                    <div class="profile-input-group">
+                                        <label>Никнейм</label>
+                                        <input type="text" id="editNickname" placeholder="Имя персонажа">
+                                    </div>
+                                    <div class="profile-input-group">
+                                        <label>Класс</label>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <img src="/static/icons/0.png" alt="" id="editClassIcon"
+                                                style="width: 24px; height: 24px;">
+                                            <select id="editClass" class="flex-grow-1" onchange="updateClassIcon()">
+                                                <option value="-1" data-icon="0">Неизвестно</option>
+                                                {% for cid, cdata in CLASSES.items() %}
+                                                <option value="{{ cid }}" data-icon="{{ cid }}">{{ cdata[0] }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- TG ID -->
+                                <div class="profile-input-group">
+                                    <label>Telegram ID</label>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <input type="text" id="editTgId" placeholder="123456789" class="flex-grow-1">
+                                        <a href="#" id="tgProfileLink"
+                                            class="btn btn-sm btn-outline-secondary py-1 px-2" target="_blank"
+                                            title="Профиль">✈️</a>
+                                    </div>
+                                </div>
+
+                                <!-- Main/Twin Toggle -->
+                                <div class="profile-section-label">Тип аккаунта</div>
+                                <div class="profile-toggle-group">
+                                    <button type="button" class="profile-toggle-btn active" id="btnStatusMain"
+                                        onclick="setCharStatus('main')">⭐ Основа</button>
+                                    <button type="button" class="profile-toggle-btn" id="btnStatusAlt"
+                                        onclick="setCharStatus('alt')">👤 Твин</button>
+                                </div>
+                                <input type="hidden" name="charStatus" id="charStatusValue" value="main">
+                                <div class="d-none">
+                                    <input type="radio" name="charStatusRadio" id="statusMain" value="main" checked>
+                                    <input type="radio" name="charStatusRadio" id="statusAlt" value="alt">
+                                </div>
+                            </div>
+
+                            <!-- TAB: Status -->
+                            <div class="tab-pane fade" id="tabStatus">
+                                <!-- In Clan Toggle -->
+                                <div class="profile-section-label">Членство в клане</div>
+                                <div class="profile-toggle-group mb-3">
+                                    <button type="button" class="profile-toggle-btn active" id="btnInClanYes"
+                                        onclick="setInClan(true)">🟢 В клане</button>
+                                    <button type="button" class="profile-toggle-btn" id="btnInClanNo"
+                                        onclick="setInClan(false)">⚫ Вне клана</button>
+                                </div>
+                                <input type="checkbox" id="editInClan" class="d-none" checked>
+
+                                <!-- AFK Section (Styled Card) -->
+                                <div class="afk-card">
+                                    <div class="afk-card-header">
+                                        <span class="afk-card-title">🛌 Режим ОТПУСК (AFK)</span>
+                                        <button type="button" class="btn-history-toggle" id="toggleAfkHistory">
+                                            📜 История
+                                        </button>
+                                    </div>
+
+                                    <div class="afk-card-content">
+                                        <!-- Add AFK Period -->
+                                        <div class="afk-date-row">
+                                            <div class="afk-date-field">
+                                                <span class="afk-date-label">С</span>
+                                                <input type="date" class="afk-date-input" id="addHistoryStart">
+                                            </div>
+                                            <div class="afk-date-field">
+                                                <span class="afk-date-label">По</span>
+                                                <input type="date" class="afk-date-input" id="addHistoryEnd">
+                                            </div>
+                                            <button class="btn-afk-add" type="button" id="btnAddHistory">
+                                                <span>+</span>
+                                            </button>
+                                        </div>
+
+                                        <!-- History List (Hidden by default) -->
+                                        <div id="afkDetails" style="display:none;" class="afk-history-panel">
+                                            <div class="afk-history-title">История отсутствия</div>
+                                            <ul class="afk-history-list" id="afkHistoryList">
+                                                <li>Загрузка...</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Section Divider -->
+                                <div class="status-section-divider"></div>
+
+                                <!-- Add Event (Styled Card) -->
+                                <details class="event-section-card">
+                                    <summary>⚔️ Добавить событие (Доблесть)</summary>
+                                    <div class="event-section-content">
+                                        <!-- Date/Time Input -->
+                                        <div class="mb-3">
+                                            <input type="datetime-local"
+                                                class="form-control form-control-sm bg-dark text-light border-secondary"
+                                                id="addEventDate">
+                                        </div>
+
+                                        <!-- Value Buttons Grid -->
+                                        <div class="valor-btn-grid">
+                                            <button type="button" class="valor-btn"
+                                                onclick="selectEventValue(2, '')">2</button>
+                                            <button type="button" class="valor-btn"
+                                                onclick="selectEventValue(4, '')">4</button>
+                                            <button type="button" class="valor-btn"
+                                                onclick="selectEventValue(6, '')">6</button>
+                                            <button type="button" class="valor-btn"
+                                                onclick="selectEventValue(7, '')">7</button>
+                                            <button type="button" class="valor-btn"
+                                                onclick="selectEventValue(8, '')">8</button>
+                                            <button type="button" class="valor-btn valor-btn-large"
+                                                onclick="selectEventValue(10, '')">10</button>
+                                            <button type="button" class="valor-btn valor-btn-large"
+                                                onclick="selectEventValue(14, '')">14</button>
+                                            <button type="button" class="valor-btn valor-btn-large"
+                                                onclick="selectEventValue(24, '')">24</button>
+                                            <button type="button" class="valor-btn valor-btn-large"
+                                                onclick="selectEventValue(40, '')">40</button>
+                                            <button type="button" class="valor-btn valor-btn-large"
+                                                onclick="selectEventValue(70, '')">70</button>
+                                        </div>
+
+                                        <!-- Manual Input Row -->
+                                        <div class="event-input-row">
+                                            <input type="number" class="form-control flex-grow-0" style="width: 80px;"
+                                                id="addEventValue" placeholder="Знач">
+                                            <input type="text" class="form-control flex-grow-1" id="addEventDesc"
+                                                placeholder="Описание (опционально)">
+                                            <button class="btn btn-add-event" type="button"
+                                                onclick="submitAddEvent()">ADD</button>
+                                        </div>
+
+                                        <!-- Status Message -->
+                                        <div class="alert alert-info py-2 small mt-2" id="addEventStatus"
+                                            style="display: none;"></div>
+                                    </div>
+                                </details>
+                            </div>
+
+                            <!-- TAB: Links (Characters Only) -->
+                            <div class="tab-pane fade" id="tabLinks">
+                                <!-- Linked Characters Section -->
+                                <div class="links-section-card">
+                                    <div class="links-section-header">
+                                        <span class="links-section-title">👥 Другие персонажи</span>
+                                    </div>
+                                    <div class="links-section-content">
+                                        <div class="char-card-grid" id="linkedCharsCards">
+                                            <!-- Filled by JS -->
+                                        </div>
+                                        <ul class="d-none" id="linkedCharsList"></ul>
+
+                                        <!-- Add Character Input -->
+                                        <div class="links-add-row">
+                                            <input type="text" class="links-input" id="addCharNick"
+                                                placeholder="Никнейм нового персонажа">
+                                            <button class="btn-links-add" type="button" id="btnAddChar">
+                                                Привязать
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- КП (Constant Party) Section -->
+                                <div class="links-section-card">
+                                    <div class="links-section-header"
+                                        style="display: flex; align-items: center; justify-content: space-between;">
+                                        <span class="links-section-title" id="partyTitle">⚔️ Констовая пати (КП)</span>
+                                        <button class="btn btn-sm" id="btnEditPartyName"
+                                            style="background: transparent; border: none; color: var(--text-muted); font-size: 0.75rem; padding: 2px 6px; display: none;"
+                                            title="Изменить название">✏️</button>
+                                    </div>
+                                    <div class="links-section-content">
+                                        <div class="char-card-grid" id="partyMembersCards">
+                                            <!-- Filled by JS -->
+                                        </div>
+
+                                        <!-- Add to Party Input -->
+                                        <div class="links-add-row">
+                                            <input type="text" class="links-input" id="addPartyMemberNick"
+                                                placeholder="Никнейм участника КП">
+                                            <button class="btn-links-add" type="button" id="btnAddPartyMember">
+                                                Добавить
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- TAB: Queues -->
+                            <div class="tab-pane fade" id="tabQueues">
+                                <!-- Active Queues Section -->
+                                <div class="links-section-card">
+                                    <div class="links-section-header">
+                                        <span class="links-section-title">📋 Активные очереди</span>
+                                    </div>
+                                    <div class="links-section-content">
+                                        <div class="queue-badge-list" id="activeQueuesCards">
+                                            <!-- Filled by JS -->
+                                        </div>
+                                        <ul class="d-none" id="activeQueuesList"></ul>
+
+                                        <!-- Add to Queue -->
+                                        <div class="links-add-row queue-add-row">
+                                            <select class="links-select" id="addQueueSelect">
+                                                <option value="" selected>Выбрать очередь...</option>
+                                            </select>
+                                            <div class="queue-mode-toggle">
+                                                <button class="queue-mode-option active" type="button"
+                                                    id="queueModeSingle" title="Разовая запись"
+                                                    onclick="setQueueMode(false)">🗓️</button>
+                                                <button class="queue-mode-option" type="button" id="queueModeAuto"
+                                                    title="Авто-запись" onclick="setQueueMode(true)">🔄</button>
+                                            </div>
+                                            <button class="btn-queue-add" type="button" id="btnAddQueue">
+                                                <span>+</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label text-silver small">Select Value</label>
-                            <div class="d-grid gap-2" style="grid-template-columns: repeat(5, 1fr);">
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(2, '')">2</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(4, '')">4</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(6, '')">6</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(7, '')">7</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(8, '')">8</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(10, '')">10</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(14, '')">14</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(24, '')">24</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(40, '')">40</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm event-val-btn"
-                                    onclick="selectEventValue(70, '')">70</button>
-                            </div>
-                            <div class="input-group mt-2">
-                                <input type="number" class="form-control" id="addEventValue" placeholder="Value">
-                                <input type="text" class="form-control" id="addEventDesc" placeholder="Description">
-                                <button class="btn btn-ruby-glow" type="button" onclick="submitAddEvent()">ADD</button>
-                            </div>
-                            <div class="alert alert-info py-2 small mt-2" id="addEventStatus" style="display: none;">
-                            </div>
+
+                        <div class="alert alert-info py-2 small mx-3 mb-0 mt-3" id="saveStatus" style="display: none;">
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="savePlayerData()">Save
-                            Changes</button>
+                        <button type="button" class="btn btn-cancel" data-bs-dismiss="modal">✕ Отмена</button>
+                        <button type="button" class="btn btn-save-premium" onclick="savePlayerData()">💾
+                            Сохранить</button>
                     </div>
                 </div>
             </div>
@@ -619,7 +864,8 @@
                                         {% if row.class_icon %}<img src="{{ row.class_icon }}" class="class-icon"
                                             width="24">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>
-                                        {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif %}
+                                        {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif
+                                        %}
 
                                         <!-- Edit Trigger -->
                                         {% if is_admin %}
@@ -732,10 +978,12 @@
                                 <select id="periodSelect">
                                     <option value="" {% if not group_period %}selected{% endif %}>NONE</option>
                                     <option value="day" {% if group_period=='day' %}selected{% endif %}>DAY</option>
-                                    <option value="week" {% if group_period=='week' %}selected{% endif %}>WEEK</option>
+                                    <option value="week" {% if group_period=='week' %}selected{% endif %}>WEEK
+                                    </option>
                                     <option value="month" {% if group_period=='month' %}selected{% endif %}>MONTH
                                     </option>
-                                    <option value="year" {% if group_period=='year' %}selected{% endif %}>YEAR</option>
+                                    <option value="year" {% if group_period=='year' %}selected{% endif %}>YEAR
+                                    </option>
                                 </select>
                                 <input type="number" id="periodCount" value="{{ group_count }}" min="1"
                                     style="max-width: 50px; text-align: center;">
@@ -810,7 +1058,8 @@
                                         {% if row.class_icon %}<img src="{{ row.class_icon }}" class="class-icon"
                                             width="20">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>
-                                        {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif %}
+                                        {% if row.is_mine %}<span class="status-dot ms-1" title="Me"></span>{% endif
+                                        %}
 
                                         <!-- Edit Trigger -->
                                         {% if is_admin %}
@@ -991,12 +1240,14 @@
 
                     <!-- History Timeline Feed -->
                     <div class="history-timeline">
-                        {% for date, name, icon, cname, desc, etype, rid, is_mine, item_name, timestamp in history_rows
+                        {% for date, name, icon, cname, desc, etype, rid, is_mine, item_name, timestamp in
+                        history_rows
                         %}
                         <div class="history-entry" data-is-mine="{{ 'true' if is_mine else 'false' }}">
                             <div class="history-entry-date">
                                 <span class="history-date-day">{{ date.split(' ')[0] }}</span>
-                                <span class="history-date-time">{{ date.split(' ')[1] if ' ' in date else '' }}</span>
+                                <span class="history-date-time">{{ date.split(' ')[1] if ' ' in date else ''
+                                    }}</span>
                                 {% if is_admin %}
                                 <span class="edit-player-btn ms-2"
                                     onclick="editEventDate('{{ rid }}', '{{ date }}', '{{ timestamp }}')"
@@ -1016,11 +1267,11 @@
                                     {% elif 'Покинул' in desc %}
                                     <span class="history-event-badge event-leave">📤 {{ desc }}</span>
                                     {% elif 'Изгнан' in desc %}
-                                    <span class="history-event-badge event-kick">🚫 {{ desc.split('ID')[0] }}ID <span
-                                            class="history-id">{{ desc.split('ID')[1].strip() }}</span></span>
+                                    <span class="history-event-badge event-kick">🚫 {{ desc.split('ID')[0] }}ID
+                                        <span class="history-id">{{ desc.split('ID')[1].strip() }}</span></span>
                                     {% elif 'Изменил' in desc or 'Изменен' in desc %}
-                                    <span class="history-event-badge event-change">🔄 {{ desc.split('ID')[0] }}ID <span
-                                            class="history-id">{{ desc.split('ID')[1].strip() }}</span></span>
+                                    <span class="history-event-badge event-change">🔄 {{ desc.split('ID')[0] }}ID
+                                        <span class="history-id">{{ desc.split('ID')[1].strip() }}</span></span>
                                     {% elif 'Получил' in desc %}
                                     <span class="history-event-badge event-gold">💰 {{ desc }}</span>
                                     {% else %}
@@ -1066,7 +1317,7 @@
     <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
 
     <iframe id="telegram-post-placeholder" style="display:none;"></iframe>
-    <script src="/static/js/script.js?v=163"></script>
+    <script src="/static/js/script.js?v=164"></script>
     <script>
         async function showObserver(roleId, name) {
             const modalEl = document.getElementById('observerModal');

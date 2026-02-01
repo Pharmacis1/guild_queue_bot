@@ -86,6 +86,10 @@ class Player(Base):
     first_seen = Column(DateTime, default=get_msk_now)
     in_clan = Column(Integer, default=1)
     class_id = Column(Integer, default=-1)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_alt = Column(Boolean, default=False)
+    # Relationship to user
+    user = relationship("User", backref="game_characters")
 
 class Event(Base):
     __tablename__ = 'events'
@@ -116,6 +120,22 @@ class ObserverCache(Base):
     role_id = Column(Integer, primary_key=True)
     html_content = Column(String)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+# КП (Constant Party) - группы для постоянной игры вместе
+class ConstantParty(Base):
+    __tablename__ = 'constant_parties'
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=True)  # Опциональное название
+    created_at = Column(DateTime, default=get_msk_now)
+    members = relationship("PartyMember", back_populates="party", cascade="all, delete-orphan")
+
+class PartyMember(Base):
+    __tablename__ = 'party_members'
+    id = Column(Integer, primary_key=True)
+    party_id = Column(Integer, ForeignKey('constant_parties.id'))
+    player_role_id = Column(Integer)  # role_id из players
+    is_leader = Column(Boolean, default=False)  # Лидер может управлять пати
+    party = relationship("ConstantParty", back_populates="members")
 
 
 # --- ИНИЦИАЛИЗАЦИЯ ---
@@ -193,6 +213,27 @@ def init_db():
                 print("Migration successful: Added record_type")
             except Exception as e:
                 print(f"Migration failed (record_type): {e}")
+
+        # 6. Player User Link & Alt Status
+        try:
+            conn.execute(text("SELECT user_id FROM players LIMIT 1"))
+        except:
+            print("Column 'user_id' in players missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)"))
+                print("Migration successful: Added players.user_id")
+            except Exception as e:
+                print(f"Migration failed (players.user_id): {e}")
+
+        try:
+            conn.execute(text("SELECT is_alt FROM players LIMIT 1"))
+        except:
+            print("Column 'is_alt' in players missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE players ADD COLUMN is_alt BOOLEAN DEFAULT 0"))
+                print("Migration successful: Added players.is_alt")
+            except Exception as e:
+                print(f"Migration failed (players.is_alt): {e}")
     
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
