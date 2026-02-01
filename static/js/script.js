@@ -382,7 +382,39 @@ $(document).ready(function () {
             "order": [[0, "asc"]],
             "drawCallback": function (settings) {
                 applyHeatmap(this.api());
+                initTopScroll();
             }
+        });
+
+        function initTopScroll() {
+            const tableWrapper = $('#moneyTableWrapper');
+            const topScroll = $('#moneyTopScroll');
+            const topScrollInner = topScroll.find('.top-scrollbar-inner');
+            const table = $('#moneyTable');
+
+            // 1. Check if scroll is needed
+            const scrollWidth = tableWrapper[0].scrollWidth;
+            const clientWidth = tableWrapper[0].clientWidth;
+
+            if (scrollWidth > clientWidth) {
+                topScroll.show();
+                topScrollInner.width(scrollWidth);
+
+                // Sync Scroll
+                topScroll.off('scroll').on('scroll', function () {
+                    tableWrapper.scrollLeft($(this).scrollLeft());
+                });
+
+                tableWrapper.off('scroll').on('scroll', function () {
+                    topScroll.scrollLeft($(this).scrollLeft());
+                });
+            } else {
+                topScroll.hide();
+            }
+        }
+
+        $(window).resize(function () {
+            initTopScroll();
         });
 
         function applyHeatmap(api) {

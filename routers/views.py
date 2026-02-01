@@ -123,17 +123,15 @@ async def read_root(
     elif group_period: # Legacy fallback
         current_money_group = group_period
     else:
-         current_money_group = 'week' # Default
+         current_money_group = 'day' # Default (User Request)
 
     current_money_classes = money_classes
     current_money_newcomers = money_newcomers if money_newcomers else None
 
-    # Money Default Dates: Last 4 Weeks
+    # Money Default Dates: Last 7 Days (User Request)
     if current_money_start is None and current_money_end is None:
-        days_to_monday = today.weekday()
-        monday = today - timedelta(days=days_to_monday)
-        start_4weeks = monday - timedelta(weeks=3)
-        current_money_start = start_4weeks.strftime('%Y-%m-%d')
+        start_7days = today - timedelta(days=6)
+        current_money_start = start_7days.strftime('%Y-%m-%d')
         current_money_end = today.strftime('%Y-%m-%d')
 
     # --- HELPER: JOIN DATES (for Newcomers) ---

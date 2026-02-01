@@ -1997,3 +1997,21 @@ button.btn-ruby-glow {
         overflow: hidden;
     }
 }
+/* --- Top Scrollbar for Tables --- */
+.top-scrollbar-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 12px;
+    margin-bottom: 0px;
+    border-radius: 4px 4px 0 0;
+    display: none; 
+}
+
+.top-scrollbar-inner {
+    height: 12px;
+}
+
+#moneyTableWrapper {
+    overflow-x: auto;
+}
