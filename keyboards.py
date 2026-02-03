@@ -70,9 +70,66 @@ def get_master_announce_menu():
 
 def get_master_system_menu():
     kb = [
-        [types.InlineKeyboardButton(text="💾 Скачать Бэкап БД", callback_data="m_backup")],
+        [types.InlineKeyboardButton(text="💾 Управление бэкапами", callback_data="m_backup_menu")],
         [types.InlineKeyboardButton(text="📝 Настройка сводки по выдаче", callback_data="m_log_settings")],
         [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_backup_menu_kb():
+    kb = [
+        [types.InlineKeyboardButton(text="➕ Создать бэкап сейчас", callback_data="m_bk_create")],
+        [types.InlineKeyboardButton(text="📂 Список бэкапов", callback_data="m_bk_list:0")],
+        [types.InlineKeyboardButton(text="🔙 Назад в Систему", callback_data="m_menu_system")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_backups_list_kb(files, page=0, page_size=5):
+    import math
+    total_pages = math.ceil(len(files) / page_size)
+    start = page * page_size
+    end = start + page_size
+    current = files[start:end]
+    
+    kb = []
+    
+    # Navigation
+    nav = []
+    if page > 0: nav.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"m_bk_list:{page-1}"))
+    if page < total_pages - 1: nav.append(types.InlineKeyboardButton(text="➡️", callback_data=f"m_bk_list:{page+1}"))
+    if nav: kb.append(nav)
+    
+    for f in current:
+        # File name example: guild_bot_2026-02-01_17-34-43.db
+        # Display: 01.02.26 17:34
+        display = f
+        if "guild_bot_" in f:
+            parts = f.replace("guild_bot_", "").replace(".db", "").split("_")
+            if len(parts) >= 2:
+                # 2026-02-01_17-34-43 -> 01.02 17:34
+                date_p = parts[0].split("-") # [2026, 02, 01]
+                time_p = parts[1].split("-") # [17, 34, 43]
+                if len(date_p)==3 and len(time_p)>=2:
+                    display = f"{date_p[2]}.{date_p[1]} {time_p[0]}:{time_p[1]}"
+                    
+        kb.append([types.InlineKeyboardButton(text=f"📄 {display}", callback_data=f"m_bk_open:{f}")])
+        
+    kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="m_backup_menu")])
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_backup_manage_kb(filename):
+    kb = [
+        [types.InlineKeyboardButton(text="📥 Скачать файл", callback_data=f"m_bk_down:{filename}")],
+        [types.InlineKeyboardButton(text="🔄 ВОССТАНОВИТЬ (Restart)", callback_data=f"m_bk_rest:{filename}")],
+        [types.InlineKeyboardButton(text="🗑 Удалить", callback_data=f"m_bk_del:{filename}")],
+        [types.InlineKeyboardButton(text="🔙 К списку", callback_data="m_bk_list:0")]
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_restore_confirm_kb(filename):
+    kb = [
+        [types.InlineKeyboardButton(text="⚠️ ДА, ВОССТАНОВИТЬ!", callback_data=f"m_bk_do_rest:{filename}")],
+        [types.InlineKeyboardButton(text="🔙 ОТМЕНА", callback_data=f"m_bk_open:{filename}")]
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 

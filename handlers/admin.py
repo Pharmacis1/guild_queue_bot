@@ -10,13 +10,19 @@ from apscheduler.jobstores.base import JobLookupError
 # Импорты из других файлов проекта
 from loader import bot, scheduler, MSK
 from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player, get_msk_now, AFKHistory
-from keyboards import get_master_menu, get_master_queues_menu, get_master_community_menu, get_master_announce_menu, get_master_system_menu, get_back_btn, get_weekdays_kb
+from keyboards import get_master_menu, get_master_queues_menu, get_master_community_menu, get_master_announce_menu, get_master_system_menu, get_back_btn, get_weekdays_kb, get_backup_menu_kb, get_backups_list_kb, get_backup_manage_kb, get_restore_confirm_kb
 from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
 from utils import check_google_sheet, log_reward_to_sheet
 from helpers import get_menu_text
 from keyboards import get_main_menu # Explicitly ensuring it's available
 
 from aiogram.types import FSInputFile
+import os
+import sys
+import subprocess
+from scripts.backup_db import perform_backup
+from scripts.restore_db import restore as restore_db_func
+import glob
 
 router = Router()
 PAGE_SIZE = 10
@@ -1194,28 +1200,141 @@ async def m_del_schedule(callback: types.CallbackQuery):
         await m_show_schedule(callback)
     else: await m_show_schedule(callback)
 
-# --- БЭКАП БД ---
-@router.callback_query(F.data == "m_backup")
-async def m_send_backup(callback: types.CallbackQuery):
-    # Формируем красивое имя файла с датой: backup_2023-10-25_14-30.db
-    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    filename = f"backup_{date_str}.db"
+# --- БЭКАП СИСТЕМА (NEW) ---
+@router.callback_query(F.data == "m_backup_menu")
+async def m_backup_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text("💾 **Управление бэкапами**\nВыберите действие:", parse_mode="Markdown", reply_markup=get_backup_menu_kb())
+
+@router.callback_query(F.data == "m_bk_create")
+async def m_bk_create(callback: types.CallbackQuery):
+    await callback.message.edit_text("⏳ Создаю бэкап...", reply_markup=None)
     
-    # Путь к файлу внутри контейнера (у тебя он лежит в корне /app/guild_bot.db)
-    db_path = "guild_bot.db"
+    # Run sync function in executor or just sync if fast
+    success = perform_backup("manual_user")
+    
+    if success:
+        await callback.message.answer("✅ Бэкап успешно создан!", reply_markup=get_backup_menu_kb())
+        # Ideally edit previous message, but "answer" creates new bottom. 
+        # Let's try to delete loading msg?
+        try: await callback.message.delete() 
+        except: pass
+    else:
+        await callback.message.edit_text("❌ Ошибка при создании бэкапа.", reply_markup=get_backup_menu_kb())
+
+@router.callback_query(F.data.startswith("m_bk_list:"))
+async def m_bk_list(callback: types.CallbackQuery):
+    try: page = int(callback.data.split(":")[1])
+    except: page = 0
+    
+    # Get files
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    files = glob.glob(os.path.join(backup_dir, "guild_bot_*.db"))
+    files.sort(key=os.path.getmtime, reverse=True) # Newest first
+    
+    files = [os.path.basename(f) for f in files]
+    
+    if not files:
+        return await callback.message.edit_text("📂 Бэкапов не найдено.", reply_markup=get_back_btn("m_backup_menu"))
+        
+    await callback.message.edit_text(
+        f"📂 **Список бэкапов** (Всего: {len(files)})", 
+        parse_mode="Markdown", 
+        reply_markup=get_backups_list_kb(files, page)
+    )
+
+@router.callback_query(F.data.startswith("m_bk_open:"))
+async def m_bk_open(callback: types.CallbackQuery):
+    filename = callback.data.split(":")[1]
+    
+    # Size info
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if not os.path.exists(filepath):
+        return await callback.answer("Файл не найден (возможно удален).", show_alert=True)
+        
+    size_mb = os.path.getsize(filepath) / (1024*1024)
+    
+    text = f"📄 **Файл:** `{filename}`\n📦 **Размер:** {size_mb:.2f} MB\n\nЧто сделать?"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_backup_manage_kb(filename))
+
+@router.callback_query(F.data.startswith("m_bk_down:"))
+async def m_bk_download(callback: types.CallbackQuery):
+    filename = callback.data.split(":")[1]
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if not os.path.exists(filepath): return await callback.answer("Файл нет.")
+    
+    await callback.message.answer_document(FSInputFile(filepath), caption=f"📦 {filename}")
+    await callback.answer("Отправлено!")
+
+@router.callback_query(F.data.startswith("m_bk_del:"))
+async def m_bk_delete(callback: types.CallbackQuery):
+    filename = callback.data.split(":")[1]
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
     
     try:
-        # Создаем объект файла для отправки
-        backup_file = FSInputFile(db_path, filename=filename)
-        
-        await callback.message.answer_document(
-            backup_file, 
-            caption=f"📦 <b>Резервная копия базы данных</b>\n📅 {date_str}\n\nСохрани этот файл в надежное место!",
-            parse_mode="HTML"
-        )
-        await callback.answer("Файл отправлен.")
+        os.remove(filepath)
+        await callback.answer("🗑 Удалено.")
+        await m_bk_list(callback) # Return to list
     except Exception as e:
-        await callback.answer(f"Ошибка при создании бэкапа: {e}", show_alert=True)
+        await callback.answer(f"Ошибка удаления: {e}", show_alert=True)
+
+@router.callback_query(F.data.startswith("m_bk_rest:"))
+async def m_bk_restore_ask(callback: types.CallbackQuery):
+    filename = callback.data.split(":")[1]
+    text = (f"⚠️ **ВНИМАНИЕ! ВОССТАНОВЛЕНИЕ БД** ⚠️\n\n"
+            f"Вы хотите восстановить базу из файла:\n`{filename}`\n\n"
+            "ПОСЛЕДСТВИЯ:\n"
+            "1. Текущая база будет перезаписана (данные после бэкапа пропадут).\n"
+            "2. Перед этим будет создан авто-бэкап текущего состояния.\n"
+            "3. **Бот будет ПЕРЕЗАГРУЖЕН**, чтобы применить изменения.\n\n"
+            "Вы уверены?")
+            
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_restore_confirm_kb(filename))
+
+@router.callback_query(F.data.startswith("m_bk_do_rest:"))
+async def m_bk_restore_do(callback: types.CallbackQuery):
+    filename = callback.data.split(":")[1]
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if not os.path.exists(filepath):
+        return await callback.answer("Ошибка: Файл бэкапа не найден.", show_alert=True)
+        
+    await callback.message.edit_text("⏳ **Восстановление...**\n1. Создаю safety-бэкап...\n2. Заменяю базу...\n3. Перезагружаюсь...", parse_mode="Markdown")
+    
+    # 1. Perform restore (it handles safety backup internally now, but our script is designed for CLI/import. 
+    # Let's call restore logic.
+    try:
+        # We need to ensure we call the function properly.
+        # scripts.restore_db.restore(target_backup) logic:
+        # It prints to stdout. We want it to be silent or log?
+        # Let's trust it.
+        
+        restore_db_func(filepath, skip_confirm=True) # This assumes it works and doesn't exit sys.
+        
+        await callback.message.answer("✅ **УСПЕШНО!**\nБот перезагружается прямо сейчас...")
+        
+        # 2. RESTART BOT
+        # We use sys.executable and sys.argv to restart the process
+        # Note: This works if running via python direct. If docker/bat, might be tricky.
+        # But 'run.bat' runs 'python main.py'. 
+        # So restarting this python process should be enough if the outer loop isn't blocking.
+        # If run via BAT loop (cmd /k), exiting python simply ends it? No, cmd /k keeps window open.
+        # We need to re-execute python.
+        
+        # Simple restart:
+        # os.execv(sys.executable, ['python'] + sys.argv)
+        # sys.argv[0] is typically the script name.
+        
+        print("RESTARTING BOT BY ADMIN REQUEST...")
+        os.execv(sys.executable, [sys.executable, "main.py"])
+        
+    except Exception as e:
+        await callback.message.answer(f"❌ **КРИТИЧЕСКАЯ ОШИБКА:** {e}")
 
 # --- PUBLIC LOG SETTINGS ---
 @router.callback_query(F.data == "m_log_settings")

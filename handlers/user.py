@@ -34,6 +34,14 @@ async def cmd_start(message: types.Message):
     # Check for main character
     main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
     
+    # Self-healing: If no main char found, but user HAS characters (e.g. main deleted), make one main.
+    if not main_char:
+        any_char = session.query(Character).filter_by(user_id=user.id).first()
+        if any_char:
+            any_char.is_main = True
+            session.commit()
+            main_char = any_char # Recovered
+    
     if not main_char:
         # Check for pending request
         if user.pending_request_nick:
