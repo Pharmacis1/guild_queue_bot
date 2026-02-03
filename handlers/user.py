@@ -441,6 +441,11 @@ async def join_menu(callback: types.CallbackQuery):
     def get_sort_index(q):
         try: return DEFAULT_QUEUES.index(q.name)
         except ValueError: return 999
+
+    # Explicitly filter out removed queues
+    REMOVED_QUEUES = ["Камень доблести", "Метеориты", "Опыт в диск", "Проходки в УФ", "Камни бессмертных"]
+    queues = [q for q in queues if q.name not in REMOVED_QUEUES]
+    
     queues.sort(key=get_sort_index)
     kb = []
     
@@ -678,6 +683,11 @@ async def info_queues(callback: types.CallbackQuery):
     def get_q_index(q):
         try: return DEFAULT_QUEUES.index(q.name)
         except ValueError: return 999
+
+    # Explicitly filter out removed queues
+    REMOVED_QUEUES = ["Камень доблести", "Метеориты", "Опыт в диск", "Проходки в УФ", "Камни бессмертных"]
+    queues = [q for q in queues if q.name not in REMOVED_QUEUES]
+    
     queues.sort(key=get_q_index)
     text = "ℹ️ <b>Справка</b>\n\nВыдаются от 120 доблести:\n- Камень доблести\n- Метеориты\n- Опыт в диск\n- Проходки в УФ\n- Камни бессмертных\n\nДля выдачи в очередь на эти ресурсы вставать не требуется.\n\n<b>Условия для получения награды из очередей на редкие ресурсы:</b>\n\n"
     for q in queues: text += f"🔹 <b>{q.name}</b>\n{q.description}\n\n"
