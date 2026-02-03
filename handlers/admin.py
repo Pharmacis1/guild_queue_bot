@@ -376,7 +376,7 @@ async def m_add_admin_save(message: types.Message, state: FSMContext):
 # --- РАЗДАЧА НАГРАД ---
 @router.callback_query(F.data == "m_distribute")
 async def m_dist_start(callback: types.CallbackQuery):
-    queues = session.query(QueueType).all()
+    queues = session.query(QueueType).filter_by(is_active=True).all()
     kb = []
     
     # Check pending notifications
@@ -714,7 +714,7 @@ async def m_toggle_lock(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "m_edit_desc")
 async def m_edit_desc(callback: types.CallbackQuery):
-    queues = session.query(QueueType).all()
+    queues = session.query(QueueType).filter_by(is_active=True).all()
     kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"edit_d_{q.id}")] for q in queues]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text("✏️ Выбери очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -755,7 +755,7 @@ async def m_force_single_start(callback: types.CallbackQuery, state: FSMContext)
 async def m_force_nick(message: types.Message, state: FSMContext):
     if not await check_google_sheet(message.text): return await message.answer("❌ Невалидный ник.")
     await state.update_data(nick=message.text)
-    kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"f_add_{q.id}")] for q in session.query(QueueType).all()]
+    kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"f_add_{q.id}")] for q in session.query(QueueType).filter_by(is_active=True).all()]
     await message.answer("Куда?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(MasterManageStates.waiting_for_queue_add)
 

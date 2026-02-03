@@ -237,7 +237,7 @@ async def get_player(request: Request):
             }
             
             # Fetch all available queues
-            async with conn.execute("SELECT id, name FROM queue_types ORDER BY name") as cursor:
+            async with conn.execute("SELECT id, name FROM queue_types WHERE is_active = 1 ORDER BY name") as cursor:
                 all_qs = await cursor.fetchall()
                 response_data["all_queues"] = [{"id": q[0], "name": q[1]} for q in all_qs]
 

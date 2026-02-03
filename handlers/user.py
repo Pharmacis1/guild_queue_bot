@@ -679,7 +679,7 @@ async def info_queues(callback: types.CallbackQuery):
         try: return DEFAULT_QUEUES.index(q.name)
         except ValueError: return 999
     queues.sort(key=get_q_index)
-    text = "ℹ️ <b>Справка</b>\n\nУсловия для получения награды из очереди:\n\n"
+    text = "ℹ️ <b>Справка</b>\n\nВыдаются от 120 доблести:\n- Камень доблести\n- Метеориты\n- Опыт в диск\n- Проходки в УФ\n- Камни бессмертных\n\nДля выдачи в очередь на эти ресурсы вставать не требуется.\n\n<b>Условия для получения награды из очередей на редкие ресурсы:</b>\n\n"
     for q in queues: text += f"🔹 <b>{q.name}</b>\n{q.description}\n\n"
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn())
 
