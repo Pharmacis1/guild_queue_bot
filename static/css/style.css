@@ -3054,3 +3054,42 @@ button.btn-ruby-glow {
     color: rgba(180, 180, 180, 0.6);
     font-size: 0.75rem;
 }
+
+/* --- Highlighting Rows (Fixed Specificity with ID Selectors) --- */
+
+/* 1. Newcomer (Electric Cyan) - First Column Only */
+#khTable tbody tr.row-newcomer td:first-child,
+#moneyTable tbody tr.row-newcomer td:first-child {
+    background-image: linear-gradient(90deg, rgba(0, 229, 255, 0.35) 0%, rgba(0, 229, 255, 0) 80%) !important;
+    border: none !important;
+    border-radius: 0 !important;
+    /* Use box-shadow for: Right Separator (Light), Top (Dark), Bottom (Black) - Left Bar Removed */
+    box-shadow:
+        inset -1px 0 0 0 rgba(229, 229, 229, 0.2),
+        inset 0 1px 0 0 #333,
+        inset 0 -1px 0 0 #000 !important;
+}
+
+/* 2. AFK (Amber/Yellow) - First Column Only */
+#khTable tbody tr.row-afk td:first-child,
+#moneyTable tbody tr.row-afk td:first-child {
+    background-image: linear-gradient(90deg, rgba(255, 179, 0, 0.35) 0%, rgba(255, 179, 0, 0) 80%) !important;
+    border: none !important;
+    border-radius: 0 !important;
+    /* Use box-shadow for: Right Separator (Light), Top (Dark), Bottom (Black) - Left Bar Removed */
+    box-shadow:
+        inset -1px 0 0 0 rgba(229, 229, 229, 0.2),
+        inset 0 1px 0 0 #333,
+        inset 0 -1px 0 0 #000 !important;
+}
+
+/* Hover Tweaks - Brighten the FIRST cell only */
+#khTable tbody tr.row-newcomer:hover td:first-child,
+#moneyTable tbody tr.row-newcomer:hover td:first-child {
+    background-image: linear-gradient(90deg, rgba(0, 229, 255, 0.45) 0%, rgba(0, 229, 255, 0) 80%) !important;
+}
+
+#khTable tbody tr.row-afk:hover td:first-child,
+#moneyTable tbody tr.row-afk:hover td:first-child {
+    background-image: linear-gradient(90deg, rgba(255, 179, 0, 0.45) 0%, rgba(255, 179, 0, 0) 80%) !important;
+}

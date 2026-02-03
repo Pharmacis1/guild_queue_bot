@@ -859,8 +859,9 @@
                             </thead>
                             <tbody>
                                 {% for row in kh_rows %}
-                                <tr>
-                                    <td class="fw-bold player-cell">
+                                <tr class="{% if row.is_afk %}row-afk{% elif row.is_newcomer %}row-newcomer{% endif %}">
+                                    <td class="fw-bold player-cell"
+                                        title="{% if row.is_afk %}AFK: {{ row.afk_dates }}{% endif %}{% if row.is_afk and row.is_newcomer %} | {% endif %}{% if row.is_newcomer %}New: {{ row.join_date }}{% endif %}">
                                         {% if row.class_icon %}<img src="{{ row.class_icon }}" class="class-icon"
                                             width="24">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>
@@ -1053,8 +1054,9 @@
                             </thead>
                             <tbody>
                                 {% for row in money_rows %}
-                                <tr>
-                                    <td class="fw-bold player-cell">
+                                <tr class="{% if row.is_afk %}row-afk{% elif row.is_newcomer %}row-newcomer{% endif %}">
+                                    <td class="fw-bold player-cell"
+                                        title="{% if row.is_afk %}AFK: {{ row.afk_dates }}{% endif %}{% if row.is_afk and row.is_newcomer %} | {% endif %}{% if row.is_newcomer %}New: {{ row.join_date }}{% endif %}">
                                         {% if row.class_icon %}<img src="{{ row.class_icon }}" class="class-icon"
                                             width="20">{% endif %}
                                         <span class="player-name">{{ row.name }}</span>

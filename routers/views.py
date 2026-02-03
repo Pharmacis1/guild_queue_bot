@@ -136,9 +136,37 @@ async def read_root(
 
     # --- HELPER: JOIN DATES (for Newcomers) ---
     async with aiosqlite.connect(DB_NAME) as conn:
-        cursor = await conn.execute("SELECT role_id, first_seen FROM players WHERE in_clan = 1")
+        cursor = await conn.execute("SELECT role_id, first_seen, user_id FROM players WHERE in_clan = 1")
         join_data = await cursor.fetchall()
-        join_dates = {role_id: first_seen for role_id, first_seen in join_data if first_seen}
+        join_dates = {role_id: first_seen for role_id, first_seen, _ in join_data if first_seen}
+        
+        # Map role_id to user_id for AFK check
+        role_user_map = {role_id: user_id for role_id, _, user_id in join_data if user_id}
+
+        # Fetch AFK Users
+        cursor = await conn.execute("SELECT id, afk_start, afk_end FROM users WHERE afk_start IS NOT NULL")
+        afk_rows = await cursor.fetchall()
+        
+    # Process AFK Data
+    afk_map = {}
+    now_ts = datetime.now()
+    for uid, start_ts, end_ts in afk_rows:
+        # SQLite returns strings usually, parse them
+        try:
+            if isinstance(start_ts, str):
+                s_dt = datetime.strptime(start_ts, "%Y-%m-%d %H:%M:%S.%f") if '.' in start_ts else datetime.strptime(start_ts, "%Y-%m-%d %H:%M:%S")
+            else: s_dt = start_ts # Assume datetime object if filtered correctly
+            
+            if isinstance(end_ts, str):
+                e_dt = datetime.strptime(end_ts, "%Y-%m-%d %H:%M:%S.%f") if '.' in end_ts else datetime.strptime(end_ts, "%Y-%m-%d %H:%M:%S")
+            else: e_dt = end_ts
+            
+            # Check if currently AFK
+            if s_dt and e_dt and s_dt <= now_ts <= e_dt:
+                afk_map[uid] = (s_dt, e_dt)
+        except Exception as e:
+            # print(f"Date parsing error for AFK: {e}")
+            pass
 
     def is_newcomer_func(role_id, ref_date_str):
         if not role_id or role_id not in join_dates: return False
@@ -151,6 +179,22 @@ async def read_root(
             ref_monday = ref_dt - timedelta(days=ref_dt.weekday())
             return (ref_monday - join_dt).days < 7
         except: return False
+        
+    def get_afk_dates(role_id):
+        if not role_id: return None
+        uid = role_user_map.get(role_id)
+        if not uid: return None
+        dates = afk_map.get(uid)
+        if dates:
+            s, e = dates
+            return f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}"
+        return None
+
+    def is_afk_func(role_id):
+        if not role_id: return False
+        uid = role_user_map.get(role_id)
+        if not uid: return False
+        return uid in afk_map
 
     # --- FETCH & PROCESS KH DATA ---
     kh_rows_raw, kh_s, kh_e, _ = await get_data_from_db(current_kh_start, current_kh_end, None, None, 1)
@@ -211,6 +255,11 @@ async def read_root(
         row = dict(r)
         row['is_mine'] = (row.get('name', '').lower().strip() in my_nicks)
         row['is_newcomer'] = is_newcomer_func(row.get('role_id'), kh_s)
+        row['is_afk'] = is_afk_func(row.get('role_id'))
+        row['afk_dates'] = get_afk_dates(row.get('role_id'))
+        
+        jd = join_dates.get(row.get('role_id'))
+        row['join_date'] = jd.split()[0] if jd else ''
 
         # Newcomer Filter
         if current_kh_newcomers == 'only' and not row['is_newcomer']: continue
@@ -264,6 +313,11 @@ async def read_root(
         row = dict(r)
         row['is_mine'] = (row.get('name', '').lower().strip() in my_nicks)
         row['is_newcomer'] = is_newcomer_func(row.get('role_id'), m_s)
+        row['is_afk'] = is_afk_func(row.get('role_id'))
+        row['afk_dates'] = get_afk_dates(row.get('role_id'))
+        
+        jd = join_dates.get(row.get('role_id'))
+        row['join_date'] = jd.split()[0] if jd else ''
         
         # Newcomer Filter
         if current_money_newcomers == 'only' and not row['is_newcomer']: continue
