@@ -233,6 +233,35 @@ def init_db():
                 print("Migration successful: Added players.is_alt")
             except Exception as e:
                 print(f"Migration failed (players.is_alt): {e}")
+
+        # 7. Disable Removed Queues
+        queues_to_disable = [
+            "Камень доблести", "Метеориты", "Опыт в диск", 
+            "Проходки в УФ", "Камни бессмертных"
+        ]
+        q_names_sql = "', '".join(queues_to_disable)
+        
+        # Check if any are still active
+        check_sql = f"SELECT count(*) FROM queue_types WHERE name IN ('{q_names_sql}') AND is_active = 1"
+        active_count = conn.execute(text(check_sql)).scalar()
+        
+        if active_count > 0:
+            print(f"Found {active_count} active queues to disable. Migrating...")
+            try:
+                # Disable queues
+                conn.execute(text(f"UPDATE queue_types SET is_active = 0 WHERE name IN ('{q_names_sql}')"))
+                
+                # Retrieve IDs of disabled queues for entry deletion
+                # (SQLite doesn't support returning clause in update widely enough to rely on it via sqlalchemy text depending on version, so query first/after)
+                # Actually, we can just delete via join or subquery logic, but SQLite simple DELETE is safest with subquery
+                
+                conn.execute(text(f"DELETE FROM queue_entries WHERE queue_type_id IN (SELECT id FROM queue_types WHERE name IN ('{q_names_sql}'))"))
+                
+                print("Migration successful: Disabled queues and removed entries.")
+                conn.commit()
+            except Exception as e:
+                print(f"Migration failed (disable queues): {e}")
+
     
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
