@@ -330,7 +330,8 @@ async def m_delete_char_admin(callback: types.CallbackQuery):
         user = session.get(User, user_id)
         
         session.delete(char)
-        session.query(QueueEntry).filter_by(character_name=nick).delete()
+        # Orphan queue entries instead of deleting
+        session.query(QueueEntry).filter_by(character_name=nick).update({"user_id": None})
         session.commit()
         await callback.answer(f"✅ Ник {nick} отвязан.")
         
