@@ -967,7 +967,10 @@ async def m_afk_list(callback: types.CallbackQuery):
         for u in users:
             start = u.afk_start.strftime("%d.%m") if u.afk_start else "??"
             end = u.afk_end.strftime("%d.%m") if u.afk_end else "??"
-            text += f"👤 <b>{u.nickname}</b> ({u.username}): {start} - {end}\n"
+            # Fix: User has no nickname, find main char
+            main_char = next((c for c in u.characters if c.is_main), None)
+            display_name = main_char.nickname if main_char else (u.characters[0].nickname if u.characters else f"User {u.id}")
+            text += f"👤 <b>{display_name}</b> (@{u.username or 'no_user'}): {start} - {end}\n"
             
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("menu_master"))
 
