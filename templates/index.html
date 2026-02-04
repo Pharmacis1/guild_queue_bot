@@ -286,6 +286,44 @@
             transform: scale(0.9);
             transform-origin: top center;
         }
+
+        /* Custom Badges for Money Table */
+        .count-turquoise {
+            background-color: #00ced1 !important;
+            box-shadow: 0 0 10px rgba(0, 206, 209, 0.4) !important;
+            color: #fff !important;
+            border: 1px solid rgba(0, 206, 209, 0.6) !important;
+        }
+
+        .count-yellow {
+            background-color: #d4af37 !important;
+            box-shadow: 0 0 10px rgba(212, 175, 55, 0.4) !important;
+            color: #fff !important;
+            border: 1px solid rgba(212, 175, 55, 0.6) !important;
+        }
+
+        /* New CSS classes for badges and text */
+        .count-badge {
+            display: inline-block;
+            padding: 0.3em 0.6em;
+            font-size: 0.85em;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 0.375rem;
+        }
+
+        .text-silver {
+            color: #c0c0c0 !important;
+            /* Silver color */
+        }
+
+        .text-muted {
+            color: #6c757d !important;
+            /* Bootstrap's default muted color */
+        }
     </style>
 
 </head>
@@ -1079,9 +1117,15 @@
 
                                     {% if intervals %}
                                     {% for istat in row.interval_stats %}
-                                    <td
-                                        class="text-center {% if istat.valor > 0 %}text-silver{% else %}text-muted{% endif %}">
-                                        {{ istat.valor }}</td>
+                                    <td class="text-center">
+                                        {% if istat.is_pre_join %}
+                                        <span class="text-muted" style="opacity: 0.3;">—</span>
+                                        {% else %}
+                                        <span
+                                            data-chip-type="{% if istat.is_newcomer_stay %}newcomer{% elif istat.is_afk_stay %}afk{% else %}normal{% endif %}">{{
+                                            istat.valor }}</span>
+                                        {% endif %}
+                                    </td>
                                     {% endfor %}
                                     {% endif %}
                                     <td class="text-danger fw-bold text-center">{{ row.total_valor }}</td>

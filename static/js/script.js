@@ -545,47 +545,77 @@ $(document).ready(function () {
                 const colData = this.data();
                 const nodes = this.nodes();
 
-                // 1. Find Max Value in Column
+                // 1. Find Max Value in Column (extract text from HTML if needed)
                 let maxVal = 0;
                 colData.each(function (value) {
-                    const num = parseFloat(String(value).replace(/\s/g, '')) || 0;
+                    // Strip HTML tags and extract text content
+                    const textContent = $('<div>').html(String(value)).text().trim();
+                    const num = parseFloat(textContent.replace(/\s/g, '')) || 0;
                     if (num > maxVal) maxVal = num;
                 });
+                // Guard against division by zero
+                if (maxVal === 0) maxVal = 1;
 
                 // 2. Apply Styles
                 this.nodes().to$().each(function (index) {
                     const cell = $(this);
-                    const valStr = String(colData[index]);
+
+                    // Skip pre-join dash cells (opacity 0.3 dash)
+                    if (cell.find('span[style*="opacity"]').length > 0 && cell.text().trim() === '—') {
+                        return; // Preserve pre-join indicator
+                    }
+
+                    // Read chip type from data attribute
+                    const chipSpan = cell.find('span[data-chip-type]');
+                    const chipType = chipSpan.length > 0 ? chipSpan.data('chip-type') : 'normal';
+
+                    // FIXED: Extract text content from cell DOM
+                    const valStr = cell.text().trim();
                     const val = parseFloat(valStr.replace(/\s/g, '')) || 0;
 
                     // Clean previous styles on the TD itself
                     cell[0].style.removeProperty('background-color');
                     cell[0].style.removeProperty('color');
 
-                    if (val === 0) {
-                        cell.html(val); // Just text
+                    // For normal cells: zeros are plain text, values get red heatmap
+                    // For newcomer/AFK cells: ALL values get colored chips (including zeros)
+
+                    if (chipType === 'normal' && val === 0) {
+                        // Normal zeros: plain text
+                        cell.html(val);
                         cell[0].style.setProperty('color', '#555', 'important');
                     } else {
-                        // Chips for values > 0
-                        // Opacity Range: 0.15 (low) - 0.4 (high)
-                        let ratio = (val / maxVal);
-
-                        // Linear interpolation: 0.15 + (ratio * (0.4 - 0.15))
-                        let opacity = 0.15 + (ratio * 0.25);
-
-                        // Create Chip with jQuery
+                        // Create Chip for: all non-zeros, AND all newcomer/AFK cells (including zeros)
                         const chip = $('<div>', {
                             class: 'heatmap-chip',
                             text: val
                         });
 
-                        // Apply Chip Styles (Background only)
-                        chip.css({
-                            'background-color': `rgba(217, 0, 34, ${opacity})`,
-                            'color': '#fff'
-                        });
+                        if (chipType === 'newcomer') {
+                            // Dark turquoise for newcomers (all values including 0)
+                            chip.css({
+                                'background-color': 'rgba(0, 128, 128, 0.5)',
+                                'color': '#e0ffff',
+                                'border': '1px solid rgba(0, 200, 200, 0.4)'
+                            });
+                        } else if (chipType === 'afk') {
+                            // Amber/Yellow for AFK (all values including 0)
+                            chip.css({
+                                'background-color': 'rgba(212, 175, 55, 0.4)',
+                                'color': '#fff8dc',
+                                'border': '1px solid rgba(212, 175, 55, 0.5)'
+                            });
+                        } else {
+                            // Normal: Red heatmap gradient (only for values > 0)
+                            let ratio = (val / maxVal);
+                            let opacity = 0.15 + (ratio * 0.25);
+                            chip.css({
+                                'background-color': `rgba(217, 0, 34, ${opacity})`,
+                                'color': '#fff'
+                            });
+                        }
 
-                        // Completely replace cell content with the chip
+                        // Replace cell content with the chip
                         cell.empty().append(chip);
                     }
                 });

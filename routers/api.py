@@ -322,14 +322,16 @@ async def afk_add(request: Request):
         user_id = data.get('user_id')
         start = data.get('start')
         end = data.get('end')
-        if not user_id or not start or not end: return {"status": "error", "message": "Missing fields"}
+        if not user_id or not start or not end: 
+            return {"status": "error", "message": "Missing fields"}
         
         async with aiosqlite.connect(DB_NAME) as conn:
              await conn.execute("INSERT INTO afk_history (user_id, start_date, end_date, is_active_record) VALUES (?, ?, ?, 0)",
                               (user_id, start, end))
              await conn.commit()
         return {"status": "ok"}
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e: 
+        return {"status": "error", "message": str(e)}
 
 @router.post("/api/afk/delete")
 async def afk_delete(request: Request):

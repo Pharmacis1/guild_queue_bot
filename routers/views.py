@@ -143,30 +143,50 @@ async def read_root(
         # Map role_id to user_id for AFK check
         role_user_map = {role_id: user_id for role_id, _, user_id in join_data if user_id}
 
-        # Fetch AFK Users
+        # Fetch AFK Users (current AFK from users table)
         cursor = await conn.execute("SELECT id, afk_start, afk_end FROM users WHERE afk_start IS NOT NULL")
         afk_rows = await cursor.fetchall()
         
-    # Process AFK Data
-    afk_map = {}
-    now_ts = datetime.now()
-    for uid, start_ts, end_ts in afk_rows:
-        # SQLite returns strings usually, parse them
+        # Also fetch from afk_history table for ALL historical AFK periods
+        cursor = await conn.execute("SELECT user_id, start_date, end_date FROM afk_history")
+        afk_history_rows = await cursor.fetchall()
+        
+    # Process AFK Data - store as list of periods per user
+    afk_map = {}  # {user_id: [(start_dt, end_dt), ...]}
+    
+    def parse_date(date_val):
+        """Parse date from various formats"""
+        if not date_val:
+            return None
+        if isinstance(date_val, datetime):
+            return date_val
         try:
-            if isinstance(start_ts, str):
-                s_dt = datetime.strptime(start_ts, "%Y-%m-%d %H:%M:%S.%f") if '.' in start_ts else datetime.strptime(start_ts, "%Y-%m-%d %H:%M:%S")
-            else: s_dt = start_ts # Assume datetime object if filtered correctly
-            
-            if isinstance(end_ts, str):
-                e_dt = datetime.strptime(end_ts, "%Y-%m-%d %H:%M:%S.%f") if '.' in end_ts else datetime.strptime(end_ts, "%Y-%m-%d %H:%M:%S")
-            else: e_dt = end_ts
-            
-            # Check if currently AFK
-            if s_dt and e_dt and s_dt <= now_ts <= e_dt:
-                afk_map[uid] = (s_dt, e_dt)
-        except Exception as e:
-            # print(f"Date parsing error for AFK: {e}")
-            pass
+            if '.' in str(date_val):
+                return datetime.strptime(str(date_val), "%Y-%m-%d %H:%M:%S.%f")
+            elif ' ' in str(date_val):
+                return datetime.strptime(str(date_val), "%Y-%m-%d %H:%M:%S")
+            else:
+                return datetime.strptime(str(date_val), "%Y-%m-%d")
+        except:
+            return None
+    
+    # Add periods from users table
+    for uid, start_ts, end_ts in afk_rows:
+        s_dt = parse_date(start_ts)
+        e_dt = parse_date(end_ts) or s_dt
+        if s_dt and e_dt:
+            if uid not in afk_map:
+                afk_map[uid] = []
+            afk_map[uid].append((s_dt, e_dt))
+    
+    # Add periods from afk_history table
+    for uid, start_ts, end_ts in afk_history_rows:
+        s_dt = parse_date(start_ts)
+        e_dt = parse_date(end_ts) or s_dt
+        if s_dt and e_dt:
+            if uid not in afk_map:
+                afk_map[uid] = []
+            afk_map[uid].append((s_dt, e_dt))
 
     def is_newcomer_func(role_id, ref_date_str):
         if not role_id or role_id not in join_dates: return False
@@ -184,9 +204,12 @@ async def read_root(
         if not role_id: return None
         uid = role_user_map.get(role_id)
         if not uid: return None
-        dates = afk_map.get(uid)
-        if dates:
-            s, e = dates
+        periods = afk_map.get(uid, [])
+        if periods:
+            # Return the most recent (or current) period
+            # Sort by end date descending and take first
+            sorted_periods = sorted(periods, key=lambda x: x[1], reverse=True)
+            s, e = sorted_periods[0]
             return f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}"
         return None
 
@@ -310,6 +333,7 @@ async def read_root(
         current_money_start, current_money_end, None, current_money_group, money_group_count
     )
 
+
     final_money_rows = []
     
     # Filter Classes (Money)
@@ -337,14 +361,63 @@ async def read_root(
         else:
             row['join_date'] = ''
         
+        
         # Newcomer Filter
         if current_money_newcomers == 'only' and not row['is_newcomer']: continue
         if current_money_newcomers == 'hide' and row['is_newcomer']: continue
         
+        # Calculate Interval Flags
+        if 'interval_stats' in row:
+             # Parse join date for calculation
+             jd_dt = None
+             if jd:
+                 try:
+                     jd_dt = datetime.strptime(jd.split()[0], "%Y-%m-%d")
+                 except: pass
+
+             # Role -> User for AFK
+             uid = role_user_map.get(row.get('role_id'))
+             u_afk_periods = afk_map.get(uid) if uid else []  # List of (start, end) tuples
+             
+             for istat in row['interval_stats']:
+                 i_s = istat.get('start')
+                 i_e = istat.get('end')
+                 
+                 istat['is_pre_join'] = False
+                 istat['is_newcomer_stay'] = False
+                 istat['is_afk_stay'] = False
+                 
+                 if i_s and i_e:
+                     # 1. Pre-Join: Interval ends before they joined
+                     if jd_dt and i_e.date() < jd_dt.date():
+                         istat['is_pre_join'] = True
+                     
+                     # 2. Newcomer stay: First 7 days
+                     # Show turquoise if interval overlaps with [join_date, join_date+7]
+                     if jd_dt:
+                         nc_end = jd_dt + timedelta(days=6) # 7 days total (0 to 6)
+                         # Simple Overlap Check
+                         # max(i_s, jd_dt) <= min(i_e, nc_end)
+                         # Dates in istat are datetime, jd_dt is datetime
+                         overlap_start = max(i_s, jd_dt)
+                         overlap_end = min(i_e, timedelta(days=1, seconds=-1) + nc_end) # end of nc day
+                         
+                         if overlap_start <= overlap_end:
+                              istat['is_newcomer_stay'] = True
+                     
+
+                     # 3. AFK stay - check against ALL AFK periods
+                     for afk_period in u_afk_periods:
+                         a_s, a_e = afk_period
+                         # Overlap check
+                         if max(i_s, a_s) <= min(i_e, a_e):
+                             istat['is_afk_stay'] = True
+                             break  # Found overlap, no need to check more
         final_money_rows.append(row)
 
 
     # --- HISTORY / LAST UPDATED ---
+
     last_upd = await get_last_update_time()
     
     # History Query Construction

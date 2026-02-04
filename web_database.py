@@ -257,6 +257,8 @@ async def get_data_from_db(start_date: str = None, end_date: str = None, classes
                 istats = analyze_stats(interval_events)
                 stats["interval_stats"].append({
                     "label": interval["label"],
+                    "start": interval["start"],
+                    "end": interval["end"],
                     "valor": istats["total_valor"],
                     "gold": istats["total_gold"]
                 })
