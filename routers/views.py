@@ -378,7 +378,7 @@ async def read_root(
 
              # Role -> User for AFK
              uid = role_user_map.get(row.get('role_id'))
-             u_afk_periods = afk_map.get(uid) if uid else []  # List of (start, end) tuples
+             u_afk_periods = afk_map.get(uid, []) if uid else []  # List of (start, end) tuples
              
              for istat in row['interval_stats']:
                  i_s = istat.get('start')
