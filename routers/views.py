@@ -39,12 +39,10 @@ async def read_root(
     group_period: str = None,
     group_count: int = 1,
 
-    # History Params
-    history_start: str = None,
-    history_end: str = None,
     history_classes: List[int] = Query(None),
     history_types: List[str] = Query(None),
 ):
+  try:
     # --- AUTH CHECK RESTORED ---
     from database import session, User
     
@@ -526,6 +524,8 @@ async def read_root(
         "current_history_types": current_history_types,
         "CLASSES": CLASSES # needed?
     })
+  except Exception as e:
+      return f"Server Error: {str(e)}"
 
 @router.get("/admin/auth", response_class=HTMLResponse)
 async def remote_auth_page(request: Request):
