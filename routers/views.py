@@ -39,6 +39,9 @@ async def read_root(
     group_period: str = None,
     group_count: int = 1,
 
+    # History Params
+    history_start: str = None,
+    history_end: str = None,
     history_classes: List[int] = Query(None),
     history_types: List[str] = Query(None),
 ):
