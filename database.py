@@ -262,6 +262,25 @@ def init_db():
             except Exception as e:
                 print(f"Migration failed (disable queues): {e}")
 
+        # 8. AFK History Table (Ensure existence)
+        try:
+            conn.execute(text("SELECT count(*) FROM afk_history LIMIT 1"))
+        except:
+            print("Table 'afk_history' missing. Migrating...")
+            try:
+                conn.execute(text("""
+                    CREATE TABLE afk_history (
+                        id INTEGER PRIMARY KEY,
+                        user_id INTEGER REFERENCES users(id),
+                        start_date DATETIME,
+                        end_date DATETIME,
+                        is_active_record BOOLEAN DEFAULT 1
+                    )
+                """))
+                print("Migration successful: Created afk_history table")
+            except Exception as e:
+                print(f"Migration failed (afk_history table): {e}")
+
     
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
