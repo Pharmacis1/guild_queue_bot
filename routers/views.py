@@ -259,7 +259,16 @@ async def read_root(
         row['afk_dates'] = get_afk_dates(row.get('role_id'))
         
         jd = join_dates.get(row.get('role_id'))
-        row['join_date'] = jd.split()[0] if jd else ''
+        if jd:
+            jd_str = jd.split()[0]
+            try:
+                jd_date = datetime.strptime(jd_str, "%Y-%m-%d")
+                diff = (today - jd_date).days
+                row['join_date'] = f"{jd_str} ({diff} дн.)"
+            except:
+                row['join_date'] = jd_str
+        else:
+            row['join_date'] = ''
 
         # Newcomer Filter
         if current_kh_newcomers == 'only' and not row['is_newcomer']: continue
@@ -317,7 +326,16 @@ async def read_root(
         row['afk_dates'] = get_afk_dates(row.get('role_id'))
         
         jd = join_dates.get(row.get('role_id'))
-        row['join_date'] = jd.split()[0] if jd else ''
+        if jd:
+            jd_str = jd.split()[0]
+            try:
+                jd_date = datetime.strptime(jd_str, "%Y-%m-%d")
+                diff = (today - jd_date).days
+                row['join_date'] = f"{jd_str} ({diff} дн.)"
+            except:
+                row['join_date'] = jd_str
+        else:
+            row['join_date'] = ''
         
         # Newcomer Filter
         if current_money_newcomers == 'only' and not row['is_newcomer']: continue
