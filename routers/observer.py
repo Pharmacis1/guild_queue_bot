@@ -1,11 +1,13 @@
-import logging
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from playwright.async_api import async_playwright, Browser, Playwright, BrowserContext
-import aiosqlite
-from datetime import datetime, timedelta
-from web_database import DB_NAME
+import logging
 import os
+from datetime import datetime, timedelta
+
+import aiosqlite
+from fastapi import APIRouter, HTTPException
+from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+
+from web_database import DB_NAME
 
 router = APIRouter()
 

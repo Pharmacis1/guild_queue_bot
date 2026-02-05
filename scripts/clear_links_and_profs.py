@@ -1,11 +1,13 @@
-import sys
 import os
+import sys
 
 # Add parent directory to path to allow importing from database.py
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import session, Character, Player
 from backup_db import perform_backup
+
+from database import Character, session
+
 
 def clear_data():
     print("WARNING: This will delete ALL linked nicknames and player professions.")

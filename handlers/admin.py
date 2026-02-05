@@ -1,28 +1,55 @@
-import math
 import asyncio
-from datetime import datetime
-from aiogram import Router, F, types
-from aiogram.types import ChatMemberUpdated
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from apscheduler.jobstores.base import JobLookupError
-
-# Импорты из других файлов проекта
-from loader import bot, scheduler, MSK
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ScheduledAnnouncement, Settings, set_setting, get_setting, Event, Player, get_msk_now, AFKHistory
-from keyboards import get_master_menu, get_master_queues_menu, get_master_community_menu, get_master_announce_menu, get_master_system_menu, get_back_btn, get_weekdays_kb, get_backup_menu_kb, get_backups_list_kb, get_backup_manage_kb, get_restore_confirm_kb
-from states import MasterManageStates, EditQueueStates, AnnounceStates, LimitStates
-from utils import check_google_sheet, log_reward_to_sheet
-from helpers import get_menu_text
-from keyboards import get_main_menu # Explicitly ensuring it's available
-
-from aiogram.types import FSInputFile
+import glob
+import math
 import os
 import sys
-import subprocess
+from datetime import datetime
+
+from aiogram import F, Router, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import ChatMemberUpdated, FSInputFile
+from apscheduler.jobstores.base import JobLookupError
+
+from database import (
+    AFKHistory,
+    Character,
+    Event,
+    Player,
+    QueueEntry,
+    QueueType,
+    RewardHistory,
+    ScheduledAnnouncement,
+    Settings,
+    User,
+    get_msk_now,
+    get_setting,
+    session,
+    set_setting,
+)
+from helpers import get_menu_text
+from keyboards import (
+    get_back_btn,
+    get_backup_manage_kb,
+    get_backup_menu_kb,
+    get_backups_list_kb,
+    get_main_menu,  # Explicitly ensuring it's available
+    get_master_announce_menu,
+    get_master_community_menu,
+    get_master_menu,
+    get_master_queues_menu,
+    get_master_system_menu,
+    get_restore_confirm_kb,
+    get_weekdays_kb,
+)
+
+# Импорты из других файлов проекта
+from loader import MSK, bot, scheduler
+from logic.reward_ops import issue_reward, warn_user
 from scripts.backup_db import perform_backup
 from scripts.restore_db import restore as restore_db_func
-import glob
+from states import AnnounceStates, EditQueueStates, LimitStates, MasterManageStates
+from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
 PAGE_SIZE = 10
@@ -464,29 +491,48 @@ async def m_issue_reward(callback: types.CallbackQuery):
         main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
         if main_char: main_nick = main_char.nickname
     
-    # 1. История (is_notified=False)
-    session.add(RewardHistory(user_id=entry.user_id, character_name=char_nick, queue_name=q_name, issued_by=master.username, is_notified=False))
+    # LOGIC CALL
+    success, msg, hist = issue_reward(session, entry.id, master.username)
     
-    # 2. Гугл таблица
-    asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
-    
-    # 3. Auto-Requeue Logic
-    if entry.auto_requeue:
-        # Create new entry at the end suitable for re-queue
-        # Check limits? Usually auto-requeue bypasses manual signup limits or respects them?
-        # User requirement: "automatically requeued to end of same queue".
-        # Let's just add it.
-        session.add(QueueEntry(user_id=entry.user_id, queue_type_id=qid, character_name=char_nick, auto_requeue=True))
-        status_msg = f"✅ Выдано: {char_nick} (Перезаписан)"
+    if success:
+        # Side Effects (Google Sheet)
+        # Note: reward_ops commits, so entry is deleted. We used cached values (qid, q_name, char_nick).
+        # We need to know if auto-requeued to log correctly? 
+        # issue_reward returns just success/msg/hist. 
+        # msg has suffix.
+        # But we want precise status for sheet?
+        # logic/reward_ops uses "reward" as type.
+        # We can deduce status from message or modify logic to return status string.
+        # Or just use the message content which is fine for UI, but Sheet needs "issued / auto"?
+        
+        # Re-check what was logged in original:
+        # if entry.auto_requeue: status="В очереди (Авто)" -> Wait, original code logged "✅ Выдано: ... (Перезаписан)" via status_msg var?
+        # No, `log_reward_to_sheet` takes `status` arg.
+        # Original:
+        # if entry.auto_requeue: status_msg = ... (Перезаписан)
+        # else: status_msg = ... (Ушел)
+        # BUT `log_reward_to_sheet` was called with what status?
+        # WAIT, original code called `log_reward_to_sheet` BEFORE delete? No.
+        
+        # Original:
+        # 2. Гугл таблица
+        # asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username)) 
+        # -> Default status? `log_reward_to_sheet` signature?
+        # Let's check `utils.py` later or assume default is "Выдано".
+        
+        # In original code line 471: `log_reward_to_sheet(q_name, ..., master.username)` 
+        # It didn't pass `status` explicitly here? 
+        # line 555 (join) passed `status`.
+        # line 569 (leave) passed `status`.
+        # line 471 (issue) did NOT pass status. So it uses default.
+        
+        # So we just call it.
+        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
+        
+        await callback.answer(msg)
+        await render_dist_list(callback, qid)
     else:
-        status_msg = f"✅ Выдано: {char_nick} (Ушел)"
-
-    # 4. Удаляем старую запись
-    session.delete(entry)
-    session.commit()
-    
-    await callback.answer(status_msg)
-    await render_dist_list(callback, qid)
+        await callback.answer(msg, show_alert=True)
 
 @router.callback_query(F.data.startswith("warn_"))
 async def m_warn_user(callback: types.CallbackQuery):
@@ -498,24 +544,11 @@ async def m_warn_user(callback: types.CallbackQuery):
     user = session.get(User, entry.user_id)
     master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
     
-    # Save as delayed warning regardless of user existence
-    # If user doesn't exist, use None (notification will be skipped, but logged)
-    safe_uid = user.id if user else None
+    master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
     
-    session.add(RewardHistory(
-        user_id=safe_uid, 
-        character_name=entry.character_name, 
-        queue_name=entry.queue.name, 
-        issued_by=master.username, 
-        is_notified=False,
-        record_type="warning"
-    ))
-    session.commit()
+    success, msg, hist = warn_user(session, entry.id, master.username)
     
-    if user:
-        await callback.answer("⚠️ Предупреждение отложено (в список рассылки).")
-    else:
-        await callback.answer("⚠️ Записано (нет привязки к юзеру).")
+    await callback.answer(msg)
 
 @router.callback_query(F.data == "m_send_batch")
 async def m_send_batch_notifications(callback: types.CallbackQuery):
@@ -616,7 +649,7 @@ async def m_limits_menu(callback: types.CallbackQuery):
     # Fetch personal limits
     p_users = session.query(User).filter(User.personal_limit != None).all()
     
-    text = f"⚙️ <b>Настройки лимитов</b>\n\n"
+    text = "⚙️ <b>Настройки лимитов</b>\n\n"
     text += f"🌐 <b>Общий лимит:</b> {g_limit} (записей на человека)\n\n"
     
     if p_users:
@@ -975,9 +1008,11 @@ async def m_afk_list(callback: types.CallbackQuery):
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_btn("menu_master"))
 
 # --- ADMIN AFK SETTING ---
-from keyboards import get_afk_start_kb, get_afk_end_kb
-from handlers.user import parse_date_input # Reuse parser
 from datetime import timedelta
+
+from handlers.user import parse_date_input  # Reuse parser
+from keyboards import get_afk_end_kb, get_afk_start_kb
+
 
 @router.callback_query(F.data.startswith("m_afk_set_"))
 async def m_afk_admin_start(callback: types.CallbackQuery, state: FSMContext):
@@ -1078,7 +1113,7 @@ async def m_afk_admin_finish(callback, state, start_dt, end_dt):
     session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
     session.commit()
     
-    await callback.answer(f"✅ AFK установлен.")
+    await callback.answer("✅ AFK установлен.")
     await render_user_manage(callback, uid, page)
     await state.clear()
     if not users:
@@ -1185,7 +1220,7 @@ async def m_show_schedule(callback: types.CallbackQuery):
     text = "🗓 <b>Активные задачи:</b>\n\n" + ("Пусто" if not tasks else "")
     kb = []
     for t in tasks:
-        desc = f"⏰ Ежедневно" if t.schedule_type == 'daily' else (f"📆 {t.days_of_week}" if t.schedule_type == 'weekly' else f"📅 {t.run_time}")
+        desc = "⏰ Ежедневно" if t.schedule_type == 'daily' else (f"📆 {t.days_of_week}" if t.schedule_type == 'weekly' else f"📅 {t.run_time}")
         text += f"{desc} в {t.run_time} — {t.text[:10]}...\n"
         kb.append([types.InlineKeyboardButton(text=f"❌ Удалить ({desc})", callback_data=f"del_sch_{t.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])

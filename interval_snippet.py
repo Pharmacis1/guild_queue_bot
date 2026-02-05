@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+
 def get_intervals(start_date_str, end_date_str, period, count=1):
     """
     Generates a list of intervals [(label, start_dt, end_dt)]

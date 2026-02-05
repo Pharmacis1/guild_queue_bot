@@ -1,6 +1,7 @@
 import asyncio
-from playwright.async_api import async_playwright
 import os
+
+from playwright.async_api import async_playwright
 
 # ID for 拉格雷克雷
 ROLE_ID = 445777

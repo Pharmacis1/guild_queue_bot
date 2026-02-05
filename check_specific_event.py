@@ -1,5 +1,7 @@
-import aiosqlite
 import asyncio
+
+import aiosqlite
+
 
 async def check_specific_event():
     async with aiosqlite.connect('guild_bot.db') as conn:

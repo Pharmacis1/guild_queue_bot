@@ -1,12 +1,12 @@
 import asyncio
-import sys
 import os
+import sys
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
-from routers.api import update_nickname, update_class, update_status
-from consts import CLASSES
+from routers.api import update_class, update_nickname, update_status
+
 
 # Mock Request class
 class MockRequest:
@@ -43,7 +43,7 @@ async def test_update():
     print(f"Result: {res}")
     
     # 4. Test Error Case (Invalid ID)
-    print(f"\n[4] Testing Invalid ID...")
+    print("\n[4] Testing Invalid ID...")
     req = MockRequest({"role_id": "9999999", "nickname": "Ghost"})
     res = await update_nickname(req)
     print(f"Result: {res}")

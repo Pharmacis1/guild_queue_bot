@@ -1,7 +1,6 @@
-import aiosqlite
 import asyncio
-import sys
-import os
+
+import aiosqlite
 
 DB_NAME = "guild_bot.db"
 

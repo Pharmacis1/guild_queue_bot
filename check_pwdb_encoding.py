@@ -1,5 +1,7 @@
-import aiohttp
 import asyncio
+
+import aiohttp
+
 
 async def check_encoding():
     url = "https://www.pwdatabase.com/ru/items/58682"

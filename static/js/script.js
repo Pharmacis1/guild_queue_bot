@@ -212,6 +212,53 @@ function toggleAllClasses(state) {
     $('.class-checkbox').prop('checked', state);
 }
 
+// Class Sorting Logic
+window.sortRowsByClass = function (iconBtn) {
+    const th = $(iconBtn).closest('th');
+    const table = th.closest('table');
+    const tbody = table.find('tbody');
+    const rows = tbody.find('tr').toArray();
+
+    // Determine current order (toggle)
+    // 0 = none/default, 1 = asc, -1 = desc
+    let currentOrder = parseInt($(iconBtn).data('order')) || 0;
+    let newOrder = currentOrder === 1 ? -1 : 1;
+    $(iconBtn).data('order', newOrder);
+
+    // Visual feedback (optional opacity or rotation)
+    $(iconBtn).css('transform', newOrder === 1 ? 'rotate(0deg)' : 'rotate(180deg)');
+
+    rows.sort((a, b) => {
+        // Extract class ID from img src
+        const getId = (row) => {
+            const img = $(row).find('img.class-icon');
+            if (img.length === 0) return 999;
+            const src = img.attr('src') || '';
+            // Expected src: /static/icons/5.png -> 5
+            const match = src.match(/\/(\d+)\.png/);
+            return match ? parseInt(match[1]) : 999;
+        };
+
+        const idA = getId(a);
+        const idB = getId(b);
+
+        if (idA === idB) return 0;
+        return newOrder * (idA - idB);
+    });
+
+    // Re-append sorted rows
+    $.each(rows, function (index, row) {
+        tbody.append(row);
+    });
+
+    // Haptic feedback
+    try {
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+            window.Telegram.WebApp.HapticFeedback.selectionChanged();
+        }
+    } catch (e) { }
+};
+
 
 function applyFilter() {
     const params = new URLSearchParams(window.location.search);

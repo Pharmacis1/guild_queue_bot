@@ -1,9 +1,7 @@
-import asyncio
-import os
-import sys
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, func
-from sqlalchemy.orm import sessionmaker, declarative_base
+
+from sqlalchemy import Column, Integer, String, create_engine, func
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 # 1. Setup Mock Models (aligned with database.py)
 Base = declarative_base()
@@ -109,8 +107,8 @@ def run_test():
     expected_valor = 50 + 25 # = 75
     actual_valor = result.get("Hero", 0)
     
-    print(f"\nRESULTS:")
-    print(f"Player: Hero")
+    print("\nRESULTS:")
+    print("Player: Hero")
     print(f"Expected: {expected_valor}")
     print(f"Actual:   {actual_valor}")
     

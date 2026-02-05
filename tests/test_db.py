@@ -1,6 +1,8 @@
 import asyncio
-from web_database import get_data_from_db
 from datetime import datetime, timedelta
+
+from web_database import get_data_from_db
+
 
 async def test():
     today = datetime.now().strftime('%Y-%m-%d')

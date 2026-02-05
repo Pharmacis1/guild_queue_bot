@@ -1,14 +1,37 @@
-from aiogram import Router, F, types
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
 import asyncio
 
+from aiogram import F, Router, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+
 # Импорты из корня проекта
-from database import session, User, Character, QueueEntry, QueueType, RewardHistory, ensure_user, get_user_active_queues, get_effective_limit_logic, get_setting, get_msk_now, AFKHistory, Player, DEFAULT_QUEUES
-from sqlalchemy import or_
-from keyboards import get_main_menu, get_back_btn, get_persistent_menu, get_unauthorized_menu, get_pending_menu, get_afk_menu, get_afk_start_kb, get_afk_end_kb
+from database import (
+    DEFAULT_QUEUES,
+    AFKHistory,
+    Character,
+    Player,
+    QueueEntry,
+    QueueType,
+    RewardHistory,
+    User,
+    ensure_user,
+    get_msk_now,
+    get_setting,
+    session,
+)
 from helpers import get_menu_text
-from states import Registration, AFKState
+from keyboards import (
+    get_afk_end_kb,
+    get_afk_menu,
+    get_afk_start_kb,
+    get_back_btn,
+    get_main_menu,
+    get_pending_menu,
+    get_persistent_menu,
+    get_unauthorized_menu,
+)
+from logic.queue_ops import join_queue, leave_queue
+from states import AFKState, Registration
 from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
@@ -305,7 +328,7 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
     type_str = "ОСНОВА" if action == "main_input" else "ТВИН"
     user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без ника'}</a>"
     
-    text = f"🛡 <b>Заявка на добавление:</b>\n"
+    text = "🛡 <b>Заявка на добавление:</b>\n"
     text += f"Игрок: {user_link}\n"
     text += f"Ник: <code>{nick}</code> ({type_str})\n"
     text += "⚠️ <i>Этого ника нет в базе. Требуется подтверждение.</i>"
@@ -534,43 +557,75 @@ async def join_final(callback: types.CallbackQuery):
     qid, cid, mode = int(parts[2]), int(parts[3]), parts[4]
     
     user = ensure_user(callback.from_user.id, callback.from_user.username)
-    char = session.get(Character, cid)
+    # char and logic checks moved to queue_ops
     
-    if not char: return await callback.answer("Ошибка чара.", show_alert=True)
-    if session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first():
-        return await callback.answer("Вы уже в очереди.", show_alert=True)
-    
-    limit = get_effective_limit_logic(user)
-    current_count = session.query(QueueEntry).filter_by(user_id=user.id).count()
-    if current_count >= limit: return await callback.answer(f"⛔ Лимит записей исчерпан! ({current_count}/{limit})", show_alert=True)
-    
+    # Logic Call
     is_auto = (mode == "auto")
-    session.add(QueueEntry(user_id=user.id, queue_type_id=qid, character_name=char.nickname, auto_requeue=is_auto))
-    session.commit()
+    success, msg, entry = join_queue(session, user.id, qid, cid, is_auto)
     
-    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
-    main_nick = main_char.nickname if main_char else char.nickname
+    if not success:
+        return await callback.answer(msg, show_alert=True)
+
+    # Logging (Sheet)
+    # Re-fetch or use entry?
+    # entry is attached to session if session is same.
+    # Note: queue_ops commits, so entry might be expired but refetchable?
+    # Actually if we committed, the ID is valid.
     
-    log_status = "В очереди (Авто)" if is_auto else "В очереди"
-    asyncio.create_task(log_reward_to_sheet(queue_name=session.get(QueueType, qid).name, main_nick=main_nick, char_nick=char.nickname, manager_name=user.username, status=log_status))
+    if entry:
+        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        main_nick = main_char.nickname if main_char else entry.character_name
+        
+        log_status = "В очереди (Авто)" if is_auto else "В очереди"
+        # We need Queue Name. Relationships should work if session is open for them.
+        # But allow for lazy load or refresh.
+        q_name = entry.queue.name
+        
+        asyncio.create_task(log_reward_to_sheet(queue_name=q_name, main_nick=main_nick, char_nick=entry.character_name, manager_name=user.username, status=log_status))
     
-    await callback.answer(f"Записан: {char.nickname} ({'Авто' if is_auto else '1 раз'})")
+    await callback.answer(msg)
     await view_queue(callback)
 
 @router.callback_query(F.data.startswith("leave_q_"))
 async def leave_queue(callback: types.CallbackQuery):
     qid = int(callback.data.split("_")[2])
     user = ensure_user(callback.from_user.id, callback.from_user.username)
-    entry = session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first()
     
-    if entry:
+    success, msg, deleted_entry = leave_queue(session, user.id, qid)
+    
+    if success and deleted_entry:
+        # Logging
+        # deleted_entry is detached but has character_name field populated?
+        # leave_queue returns the object. Attributes like character_name are string, so they persist.
+        # But relationships (deleted_entry.queue) might fail if lazy loaded from closed session or deleted row?
+        # In leave_queue we committed delete.
+        # So we can't access .queue logic attribute easily on deleted object unless it was eager loaded?
+        # But leave_queue impl: `start_q = entry.queue.name` BEFORE delete.
+        # Wait, I didn't update leave_queue to attach that info to the return object properly?
+        # I returned `entry`. 
+        # In `leave_queue`:
+        # `start_q = entry.queue.name`
+        # `session.delete(entry)`
+        # `return True, ..., entry`
+        # The `entry` object will have its columns, but relations might be gone.
+        # The `queue` relation probably fails.
+        # I should simply query Queue name by ID separately or assume it from `start_q` if I passed it.
+        # Actually I prefer `leave_queue` logic to return the summary dict or modified object with needed info.
+        
+        # IMPROVEMENT: Let's fetch Queue Name explicitly here since we have QID.
+        q_name = session.get(QueueType, qid).name
+        
         main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
-        main_nick = main_char.nickname if main_char else entry.character_name
-        asyncio.create_task(log_reward_to_sheet(queue_name=entry.queue.name, main_nick=main_nick, char_nick=entry.character_name, manager_name=user.username, status="❌ Вышел"))
-        session.delete(entry)
-        session.commit()
-        await callback.answer("Вы вышли.")
-    else: await callback.answer("Уже вышли.", show_alert=True)
+        # deleted_entry.character_name should still be available in RAM object?
+        # Yes, usually simple column attributes remain on the instance.
+        
+        main_nick = main_char.nickname if main_char else deleted_entry.character_name
+        asyncio.create_task(log_reward_to_sheet(queue_name=q_name, main_nick=main_nick, char_nick=deleted_entry.character_name, manager_name=user.username, status="❌ Вышел"))
+        
+        await callback.answer(msg)
+    else:
+        await callback.answer(msg, show_alert=True)
+        
     await view_queue(callback)
 
 @router.callback_query(F.data == "my_active_queues")
@@ -729,7 +784,8 @@ async def afk_set_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AFKState.waiting_for_start)
 
 # Helper for date parsing
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
+
 
 def parse_date_input(text):
     text = text.strip()

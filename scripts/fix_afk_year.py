@@ -1,5 +1,6 @@
 """Fix AFK dates with wrong year (2027 -> 2026)"""
 import asyncio
+
 import aiosqlite
 
 DB_NAME = "guild_bot.db"

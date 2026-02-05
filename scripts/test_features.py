@@ -1,9 +1,11 @@
-import sys
 import os
+import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from database import init_db, session, User, QueueType, QueueEntry, RewardHistory, Character
-from sqlalchemy import text
+
+from database import Character, QueueEntry, QueueType, RewardHistory, User, init_db, session
+
 
 def test_features():
     print("Starting Logic Verification...")

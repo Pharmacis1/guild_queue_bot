@@ -1,10 +1,11 @@
-import sys
 import os
+import sys
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
-from database import session, User, Character
+from database import Character, User, session
+
 
 def inspect(tg_id):
     try:

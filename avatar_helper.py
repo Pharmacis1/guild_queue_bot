@@ -1,7 +1,8 @@
-import httpx
-import os
 import logging
 from typing import Optional
+
+import httpx
+
 
 async def get_telegram_avatar_url(telegram_id: int, bot_token: str) -> Optional[str]:
     """

@@ -1,5 +1,6 @@
-import aiosqlite
 import asyncio
+
+import aiosqlite
 
 DB_NAME = "guild_bot.db"
 CHECK_IDS = [48669, 67145, 59660, 67586, 67582, 67574, 58681]

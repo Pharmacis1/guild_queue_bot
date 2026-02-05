@@ -1,6 +1,6 @@
-import requests
 import sqlite3
-import json
+
+import requests
 
 DB_NAME = "guild_bot.db"
 

@@ -1,5 +1,6 @@
-from database import init_db, session, QueueEntry, RewardHistory, engine
 from sqlalchemy import text
+
+from database import engine, init_db
 
 print("Running migration...")
 init_db()

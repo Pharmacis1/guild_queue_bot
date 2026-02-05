@@ -1,9 +1,10 @@
 import asyncio
-from datetime import datetime, timedelta, date
-from web_database import get_data_from_db, DB_NAME
+from datetime import datetime, timedelta
+
 import aiosqlite
-import bisect
-from consts import CLASSES
+
+from web_database import DB_NAME, get_data_from_db
+
 
 async def test_logic():
     print("Testing Views Logic...")

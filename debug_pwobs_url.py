@@ -1,5 +1,7 @@
 import asyncio
+
 import aiohttp
+
 
 async def check_url(url):
     print(f"Checking {url}...")

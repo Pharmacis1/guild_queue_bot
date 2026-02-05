@@ -1,14 +1,19 @@
-import shutil
-import os
 import datetime
 import logging
+import os
+import shutil
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("backup_db")
 
+import sys
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+from logic.google_drive import GoogleDriveService
+
 DB_NAME = os.path.join(BASE_DIR, "guild_bot.db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 
@@ -36,6 +41,13 @@ def perform_backup(force_suffix=None):
         shutil.copy2(DB_NAME, backup_path)
         logger.info(f"Backup created successfully: {backup_path}")
         
+        # Upload to Google Drive
+        try:
+            drive_service = GoogleDriveService()
+            drive_service.upload_file(backup_path)
+        except Exception as e:
+            logger.error(f"Google Drive upload failed: {e}")
+
         # Cleanup old backups (keep last 7 days + 5 recent)
         cleanup_old_backups()
         return True

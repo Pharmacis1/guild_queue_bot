@@ -1,7 +1,7 @@
-import shutil
-import os
-import sys
 import glob
+import os
+import shutil
+import sys
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

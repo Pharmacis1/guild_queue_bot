@@ -882,7 +882,12 @@
                             style="width:100%; border-collapse: collapse !important; border-spacing: 0 !important;">
                             <thead>
                                 <tr>
-                                    <th class="text-center">Участник</th>
+                                    <th class="text-center">
+                                        <img src="/static/img/class_icon_sort.jpg"
+                                            style="width: 20px; height: 20px; border-radius: 50%; cursor: pointer; margin-right: 5px; vertical-align: middle;"
+                                            title="Сортировать по классу" onclick="sortRowsByClass(this)">
+                                        Участник
+                                    </th>
                                     <th class="text-center" title="1 этап КХ">I</th>
                                     <th class="text-center" title="2 этап КХ">II</th>
                                     <th class="text-center" title="3 этап КХ">III</th>
@@ -1081,7 +1086,12 @@
                             style="width:100%; border-collapse: collapse !important; border-spacing: 0 !important;">
                             <thead>
                                 <tr>
-                                    <th class="text-center">Участник</th>
+                                    <th class="text-center">
+                                        <img src="/static/img/class_icon_sort.jpg"
+                                            style="width: 20px; height: 20px; border-radius: 50%; cursor: pointer; margin-right: 5px; vertical-align: middle;"
+                                            title="Сортировать по классу" onclick="sortRowsByClass(this)">
+                                        Участник
+                                    </th>
                                     {% if intervals %}
                                     {% for interval in intervals %}
                                     <th class="text-center small">{{ interval.label }}</th>

@@ -1,8 +1,9 @@
 
-import hmac
 import hashlib
+import hmac
 import json
 from urllib.parse import parse_qsl
+
 
 def validate_init_data(init_data: str, bot_token: str) -> dict:
     """

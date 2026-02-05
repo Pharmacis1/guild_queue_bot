@@ -1,6 +1,8 @@
 
-from database import engine, session
 from sqlalchemy import text
+
+from database import engine
+
 
 def migrate():
     print("Migrating database...")

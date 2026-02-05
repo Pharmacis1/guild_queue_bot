@@ -1,10 +1,12 @@
-import asyncio
-import aiosqlite
 import argparse
-from playwright.async_api import async_playwright
+import asyncio
 import logging
-import sys
 import os
+import sys
+
+import aiosqlite
+from playwright.async_api import async_playwright
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from consts import CLASS_BY_NAME
 

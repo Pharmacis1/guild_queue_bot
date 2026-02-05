@@ -1,5 +1,5 @@
-import struct
 import os
+import struct
 from datetime import datetime
 
 # [cite_start]Константы структуры файла [cite: 5]
@@ -35,7 +35,7 @@ def parse_board_file(filepath):
                 msk_tz = pytz.timezone('Europe/Moscow')
                 dt = datetime.fromtimestamp(ts, msk_tz)
                 dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception as e:
+            except Exception:
                 # Fallback if pytz missing or error
                 try: 
                     dt = datetime.fromtimestamp(ts)

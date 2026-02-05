@@ -1,4 +1,5 @@
 import asyncio
+
 from playwright.async_api import async_playwright
 
 AUTH_FILE = "pwobs_auth.json"

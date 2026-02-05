@@ -1,6 +1,8 @@
-import aiohttp
 import asyncio
+
+import aiohttp
 from bs4 import BeautifulSoup
+
 
 async def main():
     item_id = 48669

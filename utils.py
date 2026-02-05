@@ -1,6 +1,6 @@
-import aiosqlite
-from datetime import datetime
 import logging
+
+import aiosqlite
 
 # Use the same DB as the rest of the app
 DB_NAME = "guild_bot.db"

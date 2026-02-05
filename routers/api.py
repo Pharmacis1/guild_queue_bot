@@ -1,26 +1,26 @@
-from fastapi import APIRouter, UploadFile, File, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse
-import shutil
+# Try to import dependencies
+import logging
 import os
+import shutil
+
 import aiosqlite
-from web_database import DB_NAME
+from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+
+import web_database
 from consts import CLASSES
 
 # Try to import dependencies
-import logging
 
-# Try to import dependencies
-try:
-    from scripts.board_parser import parse_board_file
-except ImportError:
-    logging.warning("Could not import board_parser from scripts.board_parser")
-    pass
 
 try:
     from scripts.item_scraper import run_item_scraper
 except ImportError:
     run_item_scraper = None
     logging.warning("Could not import run_item_scraper from scripts.item_scraper")
+
+from logic.player_manager import update_player_logic
+from logic import log_importer, party_manager, queue_manager
 
 router = APIRouter()
 
@@ -45,130 +45,24 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        # 2. Parse
-        data = parse_board_file(temp_path)
-        if not data:
-            return {"status": "error", "message": "File empty or data too old"}
-            
-        new_events = 0
-        item_ids = set()
-
+        # 2. Process via Logic Layer
+        result, missing_item_ids, should_run_pwobs = await log_importer.process_log_upload(temp_path)
         
-        # 3. Write to DB
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.cursor()
+        if result.get("status") == "error":
+            return result
+
+        # 3. Handle Background Actions
+        
+        # Trigger Item Scraper
+        if run_item_scraper and missing_item_ids:
+            logging.info(f"Triggering background item scraper for {len(missing_item_ids)} items")
+            background_tasks.add_task(run_item_scraper, list(missing_item_ids))
+        
+        # Trigger PWOBS Scraper (if enabled/available)
+        if pwobs_scraper and should_run_pwobs:
+             background_tasks.add_task(bg_run_scraper, server="capella", only_unknown=True)
             
-            # Pre-fetch known nicknames for description replacement
-            # We collect all IDs mentioned in descriptions or acting
-            all_involved_ids = set()
-            for row in data:
-                all_involved_ids.add(row['role_id'])
-                if row['raw_params']:
-                    try:
-                        p0 = int(row['raw_params'].split(',')[0])
-                        all_involved_ids.add(p0)
-                    except: pass
-            
-            # Fetch existing nicknames
-            id_to_nick = {}
-            if all_involved_ids:
-                q_placeholders = ','.join(['?'] * len(all_involved_ids))
-                async with conn.execute(f"SELECT role_id, nickname FROM players WHERE role_id IN ({q_placeholders})", list(all_involved_ids)) as fetch_cursor:
-                    rows = await fetch_cursor.fetchall()
-                    for r_id, r_nick in rows:
-                        if r_nick:
-                            id_to_nick[r_id] = r_nick
-
-            for row in data:
-                rid = row['role_id']
-                
-                # [FIX] Filter invalid IDs (like ID 1)
-                if rid < 16:
-                    continue
-
-                etype = row['action_type']
-                desc = row['description'] # keep original case for display or lower? user said "ID не заменятеся"
-                # Let's keep original string but replace ID if found
-                
-                val = 0
-                target_id = None
-                
-                if row['raw_params']:
-                    try:
-                        val = int(row['raw_params'].split(',')[0])
-                        target_id = val # p0 is often the target
-                        if etype == 0: # Item event
-                            item_ids.add(val)
-                    except: pass
-
-                # [FIX] Resolve ID in description
-                # If description contains "ID 12345", try to replace it
-                # The board_parser might produce "Изгнал ID 12345"
-                if target_id and f"ID {target_id}" in desc:
-                   # Try to find nickname
-                   t_nick = id_to_nick.get(target_id)
-                   if t_nick:
-                       desc = desc.replace(f"ID {target_id}", f"{t_nick}")
-                   # else: leave as ID {val}
-
-                # Ensure actor exists
-                await cursor.execute("INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (rid,))
-                
-                # [FIX] Status Updates
-                is_leave_self = (etype == 8) # Покинул гильдию
-                is_kick = (etype == 10)      # Изгнал ID ...
-                is_join = (etype == 6)       # Вступил (or 1, 2 for contrib means they are in) or "принят" in desc
-                
-                if is_leave_self:
-                    # Actor left
-                    await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (rid,))
-                
-                elif is_kick:
-                    # Actor KICKED someone. The TARGET (val) left.
-                    # Ensure target exists in DB first (so we can update them)
-                    if target_id:
-                        await cursor.execute("INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (target_id,))
-                        await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (target_id,))
-                        
-                elif etype in [1, 2, 6] or "принят" in desc.lower() or "joined" in desc.lower():
-                    await cursor.execute("UPDATE players SET in_clan = 1 WHERE role_id = ?", (rid,))
-                
-                # Event
-                await cursor.execute("""
-                    INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (rid, row['timestamp'], row['date'], etype, val, desc))
-                
-                if cursor.rowcount > 0:
-                    new_events += 1
-                    
-            await conn.commit()
-
-        # TRIGGER ITEM SCRAPER
-        logging.info(f"Checking item scraper trigger: run_item_scraper={run_item_scraper is not None}, item_ids_count={len(item_ids)}")
-        if run_item_scraper and item_ids:
-            async with aiosqlite.connect(DB_NAME) as conn:
-                placeholders = ','.join(['?'] * len(item_ids))
-                async with conn.execute(f"SELECT id FROM items WHERE id IN ({placeholders})", list(item_ids)) as cursor:
-                    existing_rows = await cursor.fetchall()
-                    existing_ids = {r[0] for r in existing_rows}
-                
-                missing_ids = list(item_ids - existing_ids)
-                logging.info(f"Missing item IDs to scrape: {missing_ids}")
-                
-                if missing_ids:
-                    logging.info(f"Triggering background item scraper for {len(missing_ids)} items")
-                    background_tasks.add_task(run_item_scraper, missing_ids)
-                else:
-                    logging.info("No new items to scrape.")
-            
-        # TRIGGER BACKGROUND SCRAPE (only for unknown players)
-        # We assume server name is implicitly Capella or default, as we don't have it in upload args.
-        # User requested to run automatically.
-        if pwobs_scraper:
-            background_tasks.add_task(bg_run_scraper, server="capella", only_unknown=True)
-            
-        return {"status": "ok", "new_events": new_events, "total_parsed": len(data)}
+        return result
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -192,7 +86,7 @@ async def get_player(request: Request):
         role_id = data.get('role_id')
         if not role_id: return {"status": "error", "message": "role_id required"}
 
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # 1. Fetch Player & User Info
             async with conn.execute("""
                 SELECT p.nickname, p.class_id, p.in_clan, p.user_id, p.is_alt,
@@ -325,7 +219,7 @@ async def afk_add(request: Request):
         if not user_id or not start or not end: 
             return {"status": "error", "message": "Missing fields"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
              await conn.execute("INSERT INTO afk_history (user_id, start_date, end_date, is_active_record) VALUES (?, ?, ?, 0)",
                               (user_id, start, end))
              await conn.commit()
@@ -339,7 +233,7 @@ async def afk_delete(request: Request):
         data = await request.json()
         afk_id = data.get('afk_id')
         if not afk_id: return {"status": "error", "message": "Missing afk_id"}
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
              await conn.execute("DELETE FROM afk_history WHERE id = ?", (afk_id,))
              await conn.commit()
         return {"status": "ok"}
@@ -355,23 +249,7 @@ async def queue_join(request: Request):
         auto_requeue = 1 if data.get('auto_requeue') else 0
         if not user_id or not queue_id: return {"status": "error", "message": "Missing fields"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
-            # Check for duplicate entry in same queue
-            async with conn.execute("""
-                SELECT id FROM queue_entries 
-                WHERE user_id = ? AND queue_type_id = ?
-            """, (user_id, queue_id)) as cursor:
-                existing = await cursor.fetchone()
-                if existing:
-                    return {"status": "error", "message": "Вы уже записаны в эту очередь"}
-            
-            # Insert with auto_requeue flag
-            await conn.execute("""
-                INSERT INTO queue_entries (user_id, queue_type_id, character_name, auto_requeue)
-                VALUES (?, ?, ?, ?)
-            """, (user_id, queue_id, char_name, auto_requeue))
-            await conn.commit()
-        return {"status": "ok"}
+        return await queue_manager.join_queue(user_id, queue_id, char_name, auto_requeue)
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.post("/api/queue/leave")
@@ -380,10 +258,7 @@ async def queue_leave(request: Request):
         data = await request.json()
         entry_id = data.get('entry_id')
         if not entry_id: return {"status": "error", "message": "Missing entry_id"}
-        async with aiosqlite.connect(DB_NAME) as conn:
-            await conn.execute("DELETE FROM queue_entries WHERE id = ?", (entry_id,))
-            await conn.commit()
-        return {"status": "ok"}
+        return await queue_manager.leave_queue(entry_id)
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.post("/api/character/link")
@@ -394,7 +269,7 @@ async def char_link(request: Request):
         nickname = data.get('nickname')
         if not user_id or not nickname: return {"status": "error", "message": "Missing fields"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # Upsert into characters
             # Check if exists
             async with conn.execute("SELECT id FROM characters WHERE nickname = ?", (nickname,)) as cursor:
@@ -419,7 +294,7 @@ async def char_unlink(request: Request):
         role_id = data.get('role_id') # If unlinking by Role ID via Web
         nickname = data.get('nickname') # If unlinking by Name
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             if role_id:
                 await conn.execute("UPDATE players SET user_id = NULL WHERE role_id = ?", (role_id,))
                 # Also find name to unlink from characters
@@ -446,48 +321,9 @@ async def party_get(request: Request):
         role_id = data.get('role_id')
         if not role_id: return {"status": "error", "message": "role_id required"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
-            # Find party membership for this player
-            async with conn.execute("""
-                SELECT pm.party_id, pm.is_leader
-                FROM party_members pm
-                WHERE pm.player_role_id = ?
-            """, (role_id,)) as cursor:
-                row = await cursor.fetchone()
-            
-            if not row:
-                return {"status": "ok", "party": None, "members": []}
-            
-            party_id, is_leader = row
-            
-            # Get party name
-            async with conn.execute("SELECT name FROM constant_parties WHERE id = ?", (party_id,)) as cursor:
-                party_row = await cursor.fetchone()
-                party_name = party_row[0] if party_row and party_row[0] else None
-            
-            # Get all party members
-            members = []
-            async with conn.execute("""
-                SELECT pm.player_role_id, pm.is_leader, p.nickname, p.class_id
-                FROM party_members pm
-                LEFT JOIN players p ON pm.player_role_id = p.role_id
-                WHERE pm.party_id = ?
-                ORDER BY pm.is_leader DESC, p.nickname
-            """, (party_id,)) as cursor:
-                rows = await cursor.fetchall()
-                for m_role_id, m_is_leader, m_nick, m_class_id in rows:
-                    members.append({
-                        "role_id": m_role_id,
-                        "nickname": m_nick or f"ID {m_role_id}",
-                        "class_id": m_class_id or -1,
-                        "is_leader": bool(m_is_leader)
-                    })
-            
-            return {
-                "status": "ok", 
-                "party": {"id": party_id, "name": party_name, "is_leader": bool(is_leader)},
-                "members": members
-            }
+        if not role_id: return {"status": "error", "message": "role_id required"}
+        
+        return await party_manager.get_party(role_id)
     except Exception as e: 
         logging.error(f"Error in party_get: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -504,47 +340,10 @@ async def party_add(request: Request):
         if not leader_role_id or not member_nickname:
             return {"status": "error", "message": "Missing fields"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
-            # Find new member by nickname
-            async with conn.execute("SELECT role_id FROM players WHERE nickname = ?", (member_nickname,)) as cursor:
-                member_row = await cursor.fetchone()
-            
-            if not member_row:
-                return {"status": "error", "message": f"Игрок '{member_nickname}' не найден"}
-            
-            member_role_id = member_row[0]
-            
-            # Check if member already in a party
-            async with conn.execute("SELECT party_id FROM party_members WHERE player_role_id = ?", (member_role_id,)) as cursor:
-                existing = await cursor.fetchone()
-                if existing:
-                    return {"status": "error", "message": f"Игрок уже состоит в другой КП"}
-            
-            # Find or create party for leader
-            async with conn.execute("SELECT party_id FROM party_members WHERE player_role_id = ?", (leader_role_id,)) as cursor:
-                leader_party = await cursor.fetchone()
-            
-            if leader_party:
-                party_id = leader_party[0]
-            else:
-                # Create new party with leader
-                await conn.execute("INSERT INTO constant_parties (name) VALUES (NULL)")
-                async with conn.execute("SELECT last_insert_rowid()") as cursor:
-                    party_id = (await cursor.fetchone())[0]
-                # Add leader as first member
-                await conn.execute(
-                    "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 1)",
-                    (party_id, leader_role_id)
-                )
-            
-            # Add new member
-            await conn.execute(
-                "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 0)",
-                (party_id, member_role_id)
-            )
-            await conn.commit()
-            
-        return {"status": "ok", "message": f"Игрок {member_nickname} добавлен в КП"}
+        if not leader_role_id or not member_nickname:
+            return {"status": "error", "message": "Missing fields"}
+        
+        return await party_manager.add_to_party(leader_role_id, member_nickname)
     except Exception as e: 
         logging.error(f"Error in party_add: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -560,29 +359,10 @@ async def party_remove(request: Request):
         if not member_role_id:
             return {"status": "error", "message": "member_role_id required"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
-            # Get party id before delete
-            async with conn.execute("SELECT party_id FROM party_members WHERE player_role_id = ?", (member_role_id,)) as cursor:
-                row = await cursor.fetchone()
-            
-            if not row:
-                return {"status": "error", "message": "Игрок не состоит в КП"}
-            
-            party_id = row[0]
-            
-            # Remove member
-            await conn.execute("DELETE FROM party_members WHERE player_role_id = ?", (member_role_id,))
-            
-            # Check if party is empty or has only 1 member left - delete party
-            async with conn.execute("SELECT COUNT(*) FROM party_members WHERE party_id = ?", (party_id,)) as cursor:
-                count = (await cursor.fetchone())[0]
-            
-            if count == 0:
-                await conn.execute("DELETE FROM constant_parties WHERE id = ?", (party_id,))
-            
-            await conn.commit()
-            
-        return {"status": "ok"}
+        if not member_role_id:
+            return {"status": "error", "message": "member_role_id required"}
+        
+        return await party_manager.remove_from_party(member_role_id)
     except Exception as e: 
         logging.error(f"Error in party_remove: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -599,11 +379,10 @@ async def party_rename(request: Request):
         if not party_id:
             return {"status": "error", "message": "party_id required"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
-            await conn.execute("UPDATE constant_parties SET name = ? WHERE id = ?", (new_name, party_id))
-            await conn.commit()
-            
-        return {"status": "ok"}
+        if not party_id:
+            return {"status": "error", "message": "party_id required"}
+        
+        return await party_manager.rename_party(party_id, new_name)
     except Exception as e: 
         logging.error(f"Error in party_rename: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -612,136 +391,18 @@ async def party_rename(request: Request):
 async def update_player(request: Request):
     """
     Update Player Data + Sync Bot Data (User, Character, AFK)
+    Refactored to use shared logic.
     """
     try:
         data = await request.json()
         role_id = data.get('role_id')
-        nickname = data.get('nickname')
-        class_id = data.get('class_id')
-        in_clan = data.get('in_clan') 
         
-        telegram_id_input = data.get('telegram_id') 
-        is_alt = data.get('is_alt')
-        
-        # AFK Dates (Strings "YYYY-MM-DD" or similar)
-        afk_start_str = data.get('afk_start') 
-        afk_end_str = data.get('afk_end')
-
         if not role_id: return {"status": "error", "message": "role_id required"}
         
-        logging.info(f"API update_player: {role_id} nick={nickname} tg={telegram_id_input} afk={afk_start_str}-{afk_end_str}")
-
-        async with aiosqlite.connect(DB_NAME) as conn:
-            # 1. Current State
-            async with conn.execute("SELECT user_id, nickname FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                row = await cursor.fetchone()
-                if not row: return {"status": "error", "message": "Player not found"}
-                current_user_id, current_nickname = row
-
-            new_user_id = current_user_id
-
-            # 2. Handle User Linking
-            if telegram_id_input is not None:
-                s_tg = str(telegram_id_input).strip()
-                if s_tg == "":
-                    new_user_id = None
-                else:
-                    try:
-                        tg_id = int(s_tg)
-                        async with conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,)) as cursor:
-                            u_row = await cursor.fetchone()
-                            if u_row:
-                                new_user_id = u_row[0]
-                            else:
-                                # Create new User placeholder if not exists?
-                                # For now, allow valid TG ID to create a stub user if missing?
-                                # Better safey: Only link existing.
-                                return {"status": "error", "message": f"User with TG ID {tg_id} not found."}
-                    except ValueError:
-                        return {"status": "error", "message": "Invalid TG ID"}
-
-            # 3. Update Player Table
-            updates = []
-            params = []
-            if nickname is not None:
-                updates.append("nickname = ?")
-                params.append(nickname.strip() if nickname else None)
-            if class_id is not None:
-                if class_id not in CLASSES and class_id != -1: return {"status": "error", "message": "Invalid Class"}
-                updates.append("class_id = ?")
-                params.append(class_id)
-            if in_clan is not None:
-                updates.append("in_clan = ?")
-                params.append(1 if in_clan else 0)
-            if is_alt is not None:
-                updates.append("is_alt = ?")
-                params.append(1 if is_alt else 0)
-            
-            updates.append("user_id = ?")
-            params.append(new_user_id)
-            
-            if updates:
-                sql = f"UPDATE players SET {', '.join(updates)} WHERE role_id = ?"
-                params.append(role_id)
-                await conn.execute(sql, tuple(params))
-
-            # 4. SYNC TO BOT TABLES ("characters")
-            # Logic: If user_id is set, ensure a row exists in 'characters' for this nickname + user_id.
-            # If is_alt is True -> is_main=False. If is_alt=False -> is_main=True (and unset others).
-            
-            target_nick = nickname.strip() if nickname else current_nickname
-            
-            if new_user_id and target_nick:
-                # Check if this character exists in bot table
-                async with conn.execute("SELECT id FROM characters WHERE nickname = ?", (target_nick,)) as cursor:
-                    char_row = await cursor.fetchone()
-                
-                is_main_val = 0 if is_alt else 1
-                
-                if char_row:
-                    # Update existing
-                    await conn.execute("UPDATE characters SET user_id = ?, is_main = ? WHERE nickname = ?", 
-                                     (new_user_id, is_main_val, target_nick))
-                else:
-                    # Create new
-                    await conn.execute("INSERT INTO characters (user_id, nickname, is_main) VALUES (?, ?, ?)", 
-                                     (new_user_id, target_nick, is_main_val))
-                
-                # If set to MAIN, demote others
-                if is_main_val:
-                    await conn.execute("UPDATE characters SET is_main = 0 WHERE user_id = ? AND nickname != ?", 
-                                     (new_user_id, target_nick))
-
-            # 5. Handle AFK Logic
-            if new_user_id:
-                # If explicit dates provided
-                if afk_start_str is not None: # Even if empty string (clear)
-                    start_val = None
-                    end_val = None
-                    
-                    if afk_start_str:
-                        # Validate/Parse
-                        # Expected format: ISO string or YYYY-MM-DD or DD.MM.YYYY
-                        # We store as DateTime in DB.
-                        try:
-                            # Try parsing ISO first (e.g. from input type=date/datetime-local)
-                            from dateutil.parser import parse
-                            s_dt = parse(afk_start_str)
-                            start_val = s_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except: pass
-                        
-                    if afk_end_str:
-                        try:
-                            from dateutil.parser import parse
-                            e_dt = parse(afk_end_str)
-                            end_val = e_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except: pass
-
-                    await conn.execute("UPDATE users SET afk_start = ?, afk_end = ? WHERE id = ?", 
-                                     (start_val, end_val, new_user_id))
-
-            await conn.commit()
-            return {"status": "ok", "message": "Saved & Synced"}
+        # Delegate to shared logic
+        # logic handles DB connection and complex sync
+        result = await update_player_logic(role_id, data)
+        return result
 
     except Exception as e:
         logging.error(f"Error in update_player: {e}", exc_info=True)
@@ -758,7 +419,7 @@ async def update_nickname(request: Request):
         if not role_id:
             return {"status": "error", "message": "role_id is required"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
                 if not await cursor.fetchone():
                     return {"status": "error", "message": f"Player ID {role_id} not found"}
@@ -788,7 +449,7 @@ async def update_class(request: Request):
         if class_id is not None and class_id not in CLASSES and class_id != -1:
             return {"status": "error", "message": f"Invalid class_id: {class_id}"}
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
                 if not await cursor.fetchone():
                     return {"status": "error", "message": f"Player ID {role_id} not found"}
@@ -817,7 +478,7 @@ async def update_status(request: Request):
         # Convert to int (0 or 1)
         in_clan_val = 1 if in_clan else 0
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
                 if not await cursor.fetchone():
                     return {"status": "error", "message": f"Player ID {role_id} not found"}
@@ -834,6 +495,7 @@ async def update_event_date(request: Request):
     """API endpoint to update event date"""
     try:
         from datetime import datetime
+
         import pytz
         msk_tz = pytz.timezone('Europe/Moscow')
         
@@ -861,7 +523,7 @@ async def update_event_date(request: Request):
         
         logging.info(f"Updating event: {role_id} from {old_ts} to {new_ts} ({new_date_str})")
 
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # We match by role_id and specific timestamp (or approx if needed, but precise is better)
             # Risk: duplicates. But LIMIT 1 helps.
             async with conn.execute("SELECT 1 FROM events WHERE role_id = ? AND timestamp = ?", (role_id, old_ts)) as cursor:
@@ -880,9 +542,9 @@ async def update_event_date(request: Request):
         return {"status": "error", "message": str(e)}
 
 # --- SCRAPER INTEGRATION ---
-from fastapi import BackgroundTasks
-import asyncio
 import logging
+
+from fastapi import BackgroundTasks
 
 # We do a deferred import or handle check to avoid breaking if not present
 try:
@@ -949,6 +611,7 @@ async def add_event(request: Request):
     """
     try:
         from datetime import datetime
+
         import pytz
         msk_tz = pytz.timezone('Europe/Moscow')
         

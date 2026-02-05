@@ -1,4 +1,5 @@
 import asyncio
+
 import aiosqlite
 from playwright.async_api import async_playwright
 
@@ -100,7 +101,7 @@ async def main():
                         VALUES (?, ?, ?)
                     """, (role_id, nickname.strip(), title.strip()))
                     await conn.commit()
-                    print(f"  -> Saved to DB.")
+                    print("  -> Saved to DB.")
                     
                 except Exception as e:
                     print(f"Error processing {role_id}: {e}")

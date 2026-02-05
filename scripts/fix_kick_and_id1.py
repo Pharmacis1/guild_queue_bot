@@ -1,13 +1,15 @@
 
-import aiosqlite
 import asyncio
 import os
 import sys
+
+import aiosqlite
 
 # Add parent dir to path if needed (though usually run from root)
 sys.path.append(os.getcwd())
 
 from web_database import DB_NAME
+
 
 async def fix_db():
     print(f"Connecting to {DB_NAME}...")

@@ -1,5 +1,6 @@
+
 from PIL import Image
-import sys
+
 
 def make_transparent(input_path, output_path, tolerance=30):
     img = Image.open(input_path).convert("RGBA")

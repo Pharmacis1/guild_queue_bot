@@ -1,10 +1,11 @@
-import sys
 import os
+import sys
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
-from database import session, User
+from database import User, session
+
 
 def promote(tg_id):
     try:

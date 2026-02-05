@@ -1,12 +1,14 @@
-import sys
-import os
-import aiosqlite
 import asyncio
+import os
+import sys
+
+import aiosqlite
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
 from web_database import DB_NAME
+
 
 async def inspect():
     async with aiosqlite.connect(DB_NAME) as conn:

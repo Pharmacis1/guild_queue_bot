@@ -1,7 +1,9 @@
-import aiosqlite
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple, Dict, Any
+from typing import List
+
+import aiosqlite
+
 from consts import CLASSES
 
 # Configure logging

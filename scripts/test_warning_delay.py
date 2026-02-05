@@ -1,9 +1,12 @@
-import sys
 import os
+import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from database import init_db, session, User, RewardHistory, QueueType, engine
 from sqlalchemy import text
+
+from database import RewardHistory, User, engine, init_db, session
+
 
 def test_delayed_warnings():
     print("Starting Delayed Warning Verification...")

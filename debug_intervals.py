@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
 from web_database import get_intervals
+
 
 # Test cases
 def test_intervals():

@@ -1,6 +1,7 @@
-from PIL import Image
-import sys
 import os
+
+from PIL import Image
+
 
 def remove_black_background(input_path, output_path, threshold=15):
     print(f"Processing {input_path}...")

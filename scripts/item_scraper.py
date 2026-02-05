@@ -1,10 +1,11 @@
 import asyncio
-import aiohttp
-from bs4 import BeautifulSoup
 import logging
-import aiosqlite
-import sys
 import os
+import sys
+
+import aiohttp
+import aiosqlite
+from bs4 import BeautifulSoup
 
 # Add parent directory to path to allow importing database
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

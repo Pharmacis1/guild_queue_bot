@@ -1,10 +1,11 @@
-import sys
 import os
+import sys
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
-from database import session, User, Character
+from database import Character, User, session
+
 
 def link_char(tg_id, char_name):
     try:

@@ -1,13 +1,15 @@
-from fastapi import APIRouter, Request, Query
+import os
+from datetime import date, datetime, timedelta
+from typing import List
+
+import aiosqlite
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import List
-import aiosqlite
-import os
-from web_database import DB_NAME, get_data_from_db, get_last_update_time
+
 from consts import CLASSES
-import bisect
-from datetime import datetime, timedelta, date
+from logic.analytics import calculate_gold_thresholds, calculate_thresholds, get_gold_tier, get_valor_tier
+from web_database import DB_NAME, get_data_from_db, get_last_update_time
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -47,7 +49,7 @@ async def read_root(
 ):
   try:
     # --- AUTH CHECK RESTORED ---
-    from database import session, User
+    from database import User, session
     
     # Default values for public access (Guest Mode)
     user_id = request.session.get('user_id')
@@ -189,17 +191,11 @@ async def read_root(
                 afk_map[uid] = []
             afk_map[uid].append((s_dt, e_dt))
 
+    # --- IMPORT SHARED LOGIC ---
+    from logic.helpers import is_newcomer
+
     def is_newcomer_func(role_id, ref_date_str):
-        if not role_id or role_id not in join_dates: return False
-        try:
-            val = join_dates[role_id]
-            # Handle "YYYY-MM-DD HH:MM:SS"
-            if ' ' in val: val = val.split()[0]
-            join_dt = datetime.strptime(val, "%Y-%m-%d")
-            ref_dt = datetime.strptime(ref_date_str, "%Y-%m-%d")
-            ref_monday = ref_dt - timedelta(days=ref_dt.weekday())
-            return (ref_monday - join_dt).days < 7
-        except: return False
+        return is_newcomer(role_id, join_dates, ref_date_str)
         
     def get_afk_dates(role_id):
         if not role_id: return None
@@ -243,29 +239,18 @@ async def read_root(
     else:
         kh_rows_filtered = kh_rows_raw
 
-    # 2. Tiers (Calculated on GLOBAL rows to preserve ranking context)
-    kh_active_valors = sorted([r['total_valor'] for r in kh_rows_raw if r['total_valor'] > 0])
-    kh_active_gold = sorted([r['total_gold'] for r in kh_rows_raw if r['total_gold'] > 0])
+    # 2. Tiers (Calculated using shared logic)
+    kh_active_valors = [r['total_valor'] for r in kh_rows_raw if r['total_valor'] > 0]
+    kh_active_gold = [r['total_gold'] for r in kh_rows_raw if r['total_gold'] > 0]
     
-    total_active = len(kh_active_valors)
-    total_active_gold = len(kh_active_gold)
+    # Calculate Thresholds
+    t_v = calculate_thresholds(kh_active_valors)
+    t_g = calculate_gold_thresholds(kh_active_gold) # Use specific gold logic
     
-    import math
-    import bisect
-    
-    # Valor Thresholds
-    t_v_gold = 999999
-    t_v_silver = 999999
-    t_v_10 = 999999
-    if total_active > 0:
-        t_v_gold = kh_active_valors[max(0, math.ceil(total_active*0.95)-1)]
-        t_v_silver = kh_active_valors[max(0, math.ceil(total_active*0.85)-1)]
-        t_v_10 = kh_active_valors[-10] if total_active >= 10 else kh_active_valors[0]
-        
-    # Gold Thresholds
-    t_g_10 = 999999999
-    if total_active_gold > 0:
-        t_g_10 = kh_active_gold[-10] if total_active_gold >= 10 else kh_active_gold[-max(1, total_active_gold//2)]
+    # Sort for rank calculation (required for percentile tiering inside helpers if using rank)
+    # The helpers `get_valor_tier` expects sorted list to run bisect.
+    kh_active_valors.sort()
+    kh_active_gold.sort()
 
     # Days Diff for Shine
     try:
@@ -299,32 +284,10 @@ async def read_root(
         if current_kh_newcomers == 'hide' and row['is_newcomer']: continue
 
         # Valor Tier
-        val = row['total_valor']
-        if val == 0: row['valor_tier'] = 0
-        else:
-            if val >= t_v_10: row['valor_tier'] = 6 if days_diff >=4 else 7
-            else:
-                rank = bisect.bisect_right(kh_active_valors, val)
-                pct = rank / total_active
-                if pct > 0.8: row['valor_tier'] = 5 if days_diff >=4 else 7
-                elif pct > 0.6: row['valor_tier'] = 4
-                elif pct > 0.4: row['valor_tier'] = 3
-                elif pct > 0.2: row['valor_tier'] = 2
-                else: row['valor_tier'] = 1
+        row['valor_tier'] = get_valor_tier(row['total_valor'], kh_active_valors, t_v, days_diff)
 
         # Gold Tier
-        val_g = row['total_gold']
-        if val_g == 0: row['gold_tier'] = 0
-        else:
-            if val_g >= t_g_10: row['gold_tier'] = 6 if days_diff >=4 else 7
-            else:
-                rank = bisect.bisect_right(kh_active_gold, val_g)
-                pct = rank / total_active_gold
-                if pct > 0.8: row['gold_tier'] = 5 if days_diff >=4 else 7
-                elif pct > 0.6: row['gold_tier'] = 4
-                elif pct > 0.4: row['gold_tier'] = 3
-                elif pct > 0.2: row['gold_tier'] = 2
-                else: row['gold_tier'] = 1
+        row['gold_tier'] = get_gold_tier(row['total_gold'], kh_active_gold, t_g, days_diff)
                 
         final_kh_rows.append(row)
 
@@ -536,7 +499,7 @@ async def remote_auth_page(request: Request):
     Secret admin page for remote browser authentication.
     """
     # Auth Logic Reuse
-    from database import session, User
+    from database import User, session
     user_id = request.session.get('user_id')
     is_admin = False
     

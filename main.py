@@ -1,21 +1,22 @@
 import asyncio
 import logging
-import uvicorn
-from aiogram import Bot
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+import os
 
-# Bot imports
-from loader import bot, dp, scheduler
-from handlers import user, admin
-from handlers.admin import schedule_job
-from database import init_db, session, ScheduledAnnouncement
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Web imports
 from starlette.middleware.sessions import SessionMiddleware
-from routers import api, views, auth
-import os
+
+from database import ScheduledAnnouncement, init_db, session
+from handlers import admin, user
+from handlers.admin import schedule_job
+
+# Bot imports
+from loader import bot, dp, scheduler
+from routers import api, auth, views
 
 # --- WEB APP SETUP ---
 app = FastAPI()
@@ -41,13 +42,16 @@ app.include_router(api.router)
 app.include_router(auth.router)
 # Remote Admin Browser
 from routers import admin_browser
+
 app.include_router(admin_browser.router)
 from routers import observer
+
 app.include_router(observer.router)
 
 
-from fastapi.responses import JSONResponse
 from fastapi.requests import Request
+from fastapi.responses import JSONResponse
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import Response, JSONResponse
-from playwright.async_api import async_playwright, Page, BrowserContext, Browser
 import asyncio
+import json
 import logging
 import os
-import json
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import Response
+from playwright.async_api import async_playwright
 
 # Configuration
 # Configuration
@@ -101,7 +102,7 @@ class RemoteBrowserSession:
 
     def _on_popup(self, page):
         """Handle new popup windows (e.g. OAuth login)"""
-        logger.info(f"New popup detected! Switching focus.")
+        logger.info("New popup detected! Switching focus.")
         self.page = page
         
         # Ensure viewport matches for consistency

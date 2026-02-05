@@ -1,5 +1,7 @@
-import aiosqlite
 import asyncio
+
+import aiosqlite
+
 
 async def test_db():
     async with aiosqlite.connect('guild_bot.db') as conn:

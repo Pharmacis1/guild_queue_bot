@@ -1,14 +1,15 @@
+import logging
+import os
+from typing import Optional
+
+import aiosqlite
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-import logging
-import os
-import secrets
 from pydantic import BaseModel
-from typing import Optional
+
 from auth_helper import validate_init_data, validate_widget_auth
 from avatar_helper import get_telegram_avatar_url
-import aiosqlite
 from web_database import DB_NAME
 
 router = APIRouter()

@@ -1,5 +1,7 @@
-import aiosqlite
 import asyncio
+
+import aiosqlite
+
 
 async def search_bad_items():
     async with aiosqlite.connect('guild_bot.db') as conn:

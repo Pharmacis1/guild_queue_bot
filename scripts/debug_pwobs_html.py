@@ -1,6 +1,7 @@
 import asyncio
-from playwright.async_api import async_playwright
 import os
+
+from playwright.async_api import async_playwright
 
 AUTH_FILE = "pwobs_auth.json"
 URL = "https://pwobs.com/capella/players/4208"

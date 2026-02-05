@@ -1,7 +1,8 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
+
 import pytz
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, create_engine
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 # Timezone Helper
 MSK = pytz.timezone('Europe/Moscow')
