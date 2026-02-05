@@ -47,12 +47,14 @@ def perform_backup(force_suffix=None):
             drive_service.upload_file(backup_path)
         except Exception as e:
             logger.error(f"Google Drive upload failed: {e}")
+            print(f"❌ [Backup] Google Drive upload failed: {e}")
 
         # Cleanup old backups (keep last 7 days + 5 recent)
         cleanup_old_backups()
         return True
     except Exception as e:
         logger.error(f"Failed to create backup: {e}")
+        print(f"❌ [Backup] Failed to create backup: {e}")
         return False
 
 def cleanup_old_backups(max_files=20, max_days=7):

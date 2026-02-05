@@ -11,9 +11,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-TOKEN_FILE = 'token.json'
-CLIENT_SECRET_FILE = 'client_secret.json'
+# Resolve paths relative to project root (assuming logic/ is one level deep)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOKEN_FILE = os.path.join(BASE_DIR, 'token.json')
+CLIENT_SECRET_FILE = os.path.join(BASE_DIR, 'client_secret.json')
 
 class GoogleDriveService:
     def __init__(self):
