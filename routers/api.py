@@ -19,8 +19,8 @@ except ImportError:
     run_item_scraper = None
     logging.warning("Could not import run_item_scraper from scripts.item_scraper")
 
-from logic.player_manager import update_player_logic
 from logic import log_importer, party_manager, queue_manager
+from logic.player_manager import update_player_logic
 
 router = APIRouter()
 

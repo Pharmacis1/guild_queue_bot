@@ -28,8 +28,8 @@ def test_db_session(test_db_path, monkeypatch):
     """
     # Override configured DB paths
     monkeypatch.setattr("web_database.DB_NAME", test_db_path)
-    # Note: database.py uses hardcoded string in create_engine, so we need to patch the engine creation or Base.metadata.create_all
-    # But since database.py initializes engine at module level, standard monkeypatching the variable might be too late if it's already imported.
+    # Note: database.py specific engine creation might need patching.
+    # Standard monkeypatching might be too late if already imported.
     # However, for tests importing 'database', we can try to re-bind or patch the session/engine if possible.
     
     # 1. Create Schema using SQLAlchemy
@@ -52,7 +52,8 @@ def test_db_session(test_db_path, monkeypatch):
     TestSession = sessionmaker(bind=engine)
     test_session = TestSession()
     
-    # Patch the module-level 'session' object if possible, BUT 'from database import session' creates a reference we can't easily update universally
+    # Patch the module-level 'session' object if possible.
+    # But 'from database import session' makes this hard to update universally
     # unless we patch where it is used.
     # HOWEVER, web_database uses `aiosqlite.connect(DB_NAME)`, which we patched via monkeypatch.
     # So `web_database` logic is SAFE.

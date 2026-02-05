@@ -60,7 +60,8 @@ if __name__ == "__main__":
         exit(1)
         
     role_id, nick = data
-    if not nick: nick = "Unknown"
+    if not nick:
+        nick = "Unknown"
     
     print(f"Using role_id: {role_id}, Nick: {nick}")
     

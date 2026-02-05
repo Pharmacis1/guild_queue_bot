@@ -80,12 +80,15 @@ def test_delayed_warnings():
     msg_text = ""
     if rewards:
         msg_text += "Rewards Header\n"
-        for r in rewards: msg_text += f"- {r.character_name}\n"
+        for r in rewards:
+            msg_text += f"- {r.character_name}\n"
         
     if warnings:
-        if rewards: msg_text += "---\n"
+        if rewards:
+            msg_text += "---\n"
         msg_text += "Warning Header\n"
-        for w in warnings: msg_text += f"- {w.character_name}\n"
+        for w in warnings:
+            msg_text += f"- {w.character_name}\n"
         
     print(f"Generated Message Body:\n{msg_text}")
     

@@ -23,8 +23,10 @@ async def test_get_data_from_db(test_db_session):
         ts = int(datetime.now().timestamp())
         
         # Event type 1 (Valor), Value 100
-        await conn.execute("INSERT INTO events (role_id, timestamp, event_date, event_type, value) VALUES (?, ?, ?, ?, ?)",
-                           (101, ts, today_str, 1, 100))
+        await conn.execute(
+            "INSERT INTO events (role_id, timestamp, event_date, event_type, value) VALUES (?, ?, ?, ?, ?)",
+            (101, ts, today_str, 1, 100)
+        )
         
         await conn.commit()
 

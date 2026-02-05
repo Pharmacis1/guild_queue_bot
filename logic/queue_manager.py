@@ -5,6 +5,7 @@ import aiosqlite
 
 import web_database
 
+
 async def join_queue(user_id: int, queue_id: int, char_name: Optional[str], auto_requeue: bool) -> Dict[str, Any]:
     """
     Add a user to a specific queue.

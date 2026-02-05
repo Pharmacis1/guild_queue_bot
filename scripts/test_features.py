@@ -38,7 +38,7 @@ def test_features():
         
         e_check = session.query(QueueEntry).filter_by(user_id=user.id, queue_type_id=q.id).first()
         assert e_check, "Entry should exist"
-        assert e_check.auto_requeue == True, "Auto-requeue flag should be True"
+        assert e_check.auto_requeue is True, "Auto-requeue flag should be True"
         print("[OK] Signup + Auto-requeue flag saved.")
 
         print("\n--- 2. Testing Reward Issuance ---")
@@ -62,7 +62,7 @@ def test_features():
         # 1. History exists and is_notified=False
         h_check = session.query(RewardHistory).filter_by(user_id=user.id, is_notified=False).first()
         assert h_check, "RewardHistory should exist"
-        assert h_check.is_notified == False, "is_notified should be False"
+        assert h_check.is_notified is False, "is_notified should be False"
         print("[OK] Reward History recorded (delayed).")
         
         # 2. User Requeued
@@ -90,7 +90,8 @@ def test_features():
         # Don't delete user/char/queue to avoid breaking ForeignKeys if needed elsewhere, 
         # or just delete if it's a test DB. Assuming dev DB, let's keep it clean.
         session.delete(user) # Cascades
-        if q.name == "TestQueue": session.delete(q)
+        if q.name == "TestQueue":
+            session.delete(q)
         session.commit()
         print("\n[OK] CLEANUP COMPLETE.")
 

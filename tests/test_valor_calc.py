@@ -29,7 +29,8 @@ session = Session()
 
 # 3. Validation Logic (copied from handlers/admin.py)
 def get_weekly_valor_map_simulated(nicknames, session_obj):
-    if not nicknames: return {}
+    if not nicknames:
+        return {}
     
     # Calculate Start of Week (Monday)
     today = datetime.now()
@@ -39,7 +40,8 @@ def get_weekly_valor_map_simulated(nicknames, session_obj):
     
     # Resolve Nicknames -> Role IDs
     players = session_obj.query(Player).filter(Player.nickname.in_(nicknames)).all()
-    if not players: return {}
+    if not players:
+        return {}
     
     role_map = {p.role_id: p.nickname for p in players}
     role_ids = list(role_map.keys())
@@ -52,7 +54,8 @@ def get_weekly_valor_map_simulated(nicknames, session_obj):
     ).group_by(Event.role_id).all()
     
     result = {}
-    for nick in nicknames: result[nick] = 0 # Default 0 (or -1 if not found, but logic sets 0 for players)
+    for nick in nicknames:
+        result[nick] = 0  # Default 0 (or -1 if not found, but logic sets 0 for players)
     
     for rid, total in events:
         if rid in role_map:

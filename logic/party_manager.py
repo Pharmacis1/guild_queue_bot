@@ -1,9 +1,10 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import aiosqlite
 
 import web_database
+
 
 async def get_party(role_id: int) -> Dict[str, Any]:
     """Get party members for a player."""

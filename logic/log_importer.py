@@ -1,6 +1,5 @@
 import logging
-import os
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, Set, Tuple
 
 import aiosqlite
 

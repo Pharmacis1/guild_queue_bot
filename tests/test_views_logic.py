@@ -35,15 +35,18 @@ async def test_logic():
         join_dates = {}
 
     def is_newcomer_func(role_id, ref_date_str):
-        if not role_id or role_id not in join_dates: return False
+        if not role_id or role_id not in join_dates:
+            return False
         try:
             val = join_dates[role_id]
-            if ' ' in val: val = val.split()[0]
+            if ' ' in val:
+                val = val.split()[0]
             join_dt = datetime.strptime(val, "%Y-%m-%d")
             ref_dt = datetime.strptime(ref_date_str, "%Y-%m-%d")
             ref_monday = ref_dt - timedelta(days=ref_dt.weekday())
             return (ref_monday - join_dt).days < 7
-        except: return False
+        except Exception:
+            return False
 
     # Processing
     final_kh_rows = []

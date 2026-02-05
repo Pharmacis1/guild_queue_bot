@@ -1,11 +1,11 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 
-from database import User, Character
+from database import Character, User
 from handlers import user as user_handler
-from states import Registration
 
 # --- Fixtures ---
 

@@ -25,7 +25,10 @@ async def test_update_status_integration(client, test_db_session):
     role_id = 801
     async with aiosqlite.connect(web_database.DB_NAME) as conn:
         # Create player with in_clan=1
-        await conn.execute("INSERT OR REPLACE INTO players (role_id, nickname, in_clan) VALUES (?, 'StatusTester', 1)", (role_id,))
+        await conn.execute(
+            "INSERT OR REPLACE INTO players (role_id, nickname, in_clan) VALUES (?, 'StatusTester', 1)",
+            (role_id,)
+        )
         await conn.commit()
 
     # 2. Call API to change status to 0 (Left Guild)
@@ -71,7 +74,10 @@ async def test_update_player_integration(client, test_db_session):
     role_id = 777
     original_nick = "HttpPlayer"
     async with aiosqlite.connect(web_database.DB_NAME) as conn:
-         await conn.execute("INSERT OR REPLACE INTO players (role_id, nickname, class_id) VALUES (?, ?, ?)", (role_id, original_nick, 0))
+         await conn.execute(
+             "INSERT OR REPLACE INTO players (role_id, nickname, class_id) VALUES (?, ?, ?)",
+             (role_id, original_nick, 0)
+         )
          # Create a User only if we want to test linking to EXISTING user, 
          # but the API can also link by creating? No, logic usually expects existing user for linking via UI logic?
          # Logic: "SELECT id FROM users WHERE telegram_id = ?" -> Must exist for linking.
@@ -103,7 +109,10 @@ async def test_update_player_integration(client, test_db_session):
     # 5. Verify Database
     async with aiosqlite.connect(web_database.DB_NAME) as conn:
         # Check Player Table
-        async with conn.execute("SELECT nickname, class_id, is_alt, user_id FROM players WHERE role_id=?", (role_id,)) as cursor:
+        async with conn.execute(
+            "SELECT nickname, class_id, is_alt, user_id FROM players WHERE role_id=?",
+            (role_id,)
+        ) as cursor:
             p_row = await cursor.fetchone()
             assert p_row[0] == "HttpUpdated"
             assert p_row[1] == 1

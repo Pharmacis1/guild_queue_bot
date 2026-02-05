@@ -26,7 +26,9 @@ check_google_sheet = check_nickname_exists
 
 # --- LOGGING (OPtional wrapper or remove) ---
 
-async def log_reward_to_sheet(queue_name: str, main_nick: str, char_nick: str, manager_name: str, status: str = "Выдано"):
+async def log_reward_to_sheet(
+    queue_name: str, main_nick: str, char_nick: str, manager_name: str, status: str = "Выдано"
+):
     """
     Legacy function stub. 
     Logging is now handled by RewardHistory in the database.

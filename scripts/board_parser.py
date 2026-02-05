@@ -60,19 +60,27 @@ def parse_board_file(filepath):
 def decode_action(rtype, who, p0, p1, p2):
     """Расшифровка кодов действий на основе FactionBoard.c"""
     # [cite_start]См. switch(record->type) в FactionBoard.c [cite: 8]
-    if rtype == 0: return f"Получил предмет ID {p0}"
-    if rtype == 1: return f"Вклад (Доблесть): {p0}"
-    if rtype == 2: return f"Вклад (Золото): {p0}"
-    if rtype == 5: return f"Пригласил игрока ID {p0}"
-    if rtype == 6: return "Вступил в гильдию"
-    if rtype == 7: return "Отказался вступить"
-    if rtype == 8: return "Покинул гильдию"
-    if rtype == 9: 
+    if rtype == 0:
+        return f"Получил предмет ID {p0}"
+    if rtype == 1:
+        return f"Вклад (Доблесть): {p0}"
+    if rtype == 2:
+        return f"Вклад (Золото): {p0}"
+    if rtype == 5:
+        return f"Пригласил игрока ID {p0}"
+    if rtype == 6:
+        return "Вступил в гильдию"
+    if rtype == 7:
+        return "Отказался вступить"
+    if rtype == 8:
+        return "Покинул гильдию"
+    if rtype == 9:
         # [cite_start]p1 - роль, p2 - направление (1=повысил, иначе понизил) [cite: 8]
         role_map = {2: "Мастер", 3: "Маршал", 4: "Майор", 5: "Капитан", 6: "Рядовой"}
         role = role_map.get(p1, str(p1))
         act = "Повысил" if p2 == 1 else "Понизил"
         return f"{act} ID {p0} до {role}"
-    if rtype == 10: return f"Изгнал ID {p0}"
+    if rtype == 10:
+        return f"Изгнал ID {p0}"
     
     return f"Действие {rtype}"

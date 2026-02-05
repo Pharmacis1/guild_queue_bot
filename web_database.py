@@ -147,23 +147,40 @@ def analyze_stats(events):
                     if next_type == 1 and next_val == 8 and (next_ts - ts) < 1200:
                         is_dance = True
                 
-                if is_dance: stats['dances'] += 1
-                else: stats['s1'] += 1
+                if is_dance:
+                    stats['dances'] += 1
+                else:
+                    stats['s1'] += 1
             
-            elif val == 6: stats['s2'] += 1
-            elif val == 10: stats['s3'] += 1
-            elif val == 14: stats['s4'] += 1
-            elif val == 24: stats['s5'] += 1
-            elif val == 40: stats['s6'] += 1
-            elif val == 70: stats['s7'] += 1
-            elif val == 7: stats['adepts'] += 1
-            elif val in [2, 8]: stats['dances'] += 1
+            elif val == 6:
+                stats['s2'] += 1
+            elif val == 10:
+                stats['s3'] += 1
+            elif val == 14:
+                stats['s4'] += 1
+            elif val == 24:
+                stats['s5'] += 1
+            elif val == 40:
+                stats['s6'] += 1
+            elif val == 70:
+                stats['s7'] += 1
+            elif val == 7:
+                stats['adepts'] += 1
+            elif val in [2, 8]:
+                stats['dances'] += 1
             
     return stats
 
-async def get_data_from_db(start_date: str = None, end_date: str = None, classes: List[int] = None, group_period: str = None, group_count: int = 1):
+async def get_data_from_db(
+    start_date: str = None, 
+    end_date: str = None, 
+    classes: List[int] = None, 
+    group_period: str = None, 
+    group_count: int = 1
+):
     today = datetime.now()
-    if not end_date: end_date = today.strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = today.strftime('%Y-%m-%d')
     
     # Auto-select: Monday of current week
     if not start_date:
