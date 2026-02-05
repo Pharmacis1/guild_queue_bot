@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Resolve paths relative to project root (assuming logic/ is one level deep)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 TOKEN_FILE = os.path.join(BASE_DIR, 'token.json')
 CLIENT_SECRET_FILE = os.path.join(BASE_DIR, 'client_secret.json')
 
