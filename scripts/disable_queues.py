@@ -3,13 +3,8 @@ import sqlite3
 
 DB_PATH = "guild_bot.db"
 
-QUEUES_TO_REMOVE = [
-    "Камень доблести", 
-    "Метеориты", 
-    "Опыт в диск", 
-    "Проходки в УФ", 
-    "Камни бессмертных"
-]
+QUEUES_TO_REMOVE = ["Камень доблести", "Метеориты", "Опыт в диск", "Проходки в УФ", "Камни бессмертных"]
+
 
 def disable_queues():
     if not os.path.exists(DB_PATH):
@@ -20,14 +15,14 @@ def disable_queues():
     cursor = conn.cursor()
 
     print("--- Disabling Queues ---")
-    
+
     # 1. Disable Queue Types
-    placeholders = ','.join(['?'] * len(QUEUES_TO_REMOVE))
+    placeholders = ",".join(["?"] * len(QUEUES_TO_REMOVE))
     sql_find = f"SELECT id, name FROM queue_types WHERE name IN ({placeholders})"
-    
+
     cursor.execute(sql_find, QUEUES_TO_REMOVE)
     found_queues = cursor.fetchall()
-    
+
     if not found_queues:
         print("No target queues found in DB.")
         conn.close()
@@ -35,9 +30,9 @@ def disable_queues():
 
     ids_to_disable = [row[0] for row in found_queues]
     names_disabled = [row[1] for row in found_queues]
-    
+
     print(f"Found queues to disable: {names_disabled} (IDs: {ids_to_disable})")
-    
+
     # Update is_active = 0
     sql_update = f"UPDATE queue_types SET is_active = 0 WHERE id IN ({','.join(map(str, ids_to_disable))})"
     cursor.execute(sql_update)
@@ -51,6 +46,7 @@ def disable_queues():
     conn.commit()
     conn.close()
     print("--- Done ---")
+
 
 if __name__ == "__main__":
     disable_queues()

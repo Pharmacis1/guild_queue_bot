@@ -9,6 +9,7 @@ DB_NAME = os.path.join(BASE_DIR, "guild_bot.db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 MANUAL_BACKUP = os.path.join(BASE_DIR, "guild_bot.db.bak")
 
+
 def get_latest_backup():
     # Look for files matching the pattern in backups/
     files = glob.glob(os.path.join(BACKUP_DIR, "guild_bot_*.db"))
@@ -17,6 +18,7 @@ def get_latest_backup():
     # Sort by modification time, newest first
     files.sort(key=os.path.getmtime, reverse=True)
     return files[0]
+
 
 def restore(target_backup=None, skip_confirm=False):
     if not target_backup:
@@ -38,15 +40,15 @@ def restore(target_backup=None, skip_confirm=False):
 
     print(f"Restoring '{DB_NAME}' from '{target_backup}'...")
     print("WARNING: This will overwrite the current database!")
-    
+
     # Confirm
     if not skip_confirm:
         try:
             confirm = input("Are you sure? (y/n): ")
         except EOFError:
-            confirm = 'y' # Assume yes if running non-interactively/piped, though risky. Better to be explicit.
-            
-        if confirm.lower() != 'y':
+            confirm = "y"  # Assume yes if running non-interactively/piped, though risky. Better to be explicit.
+
+        if confirm.lower() != "y":
             print("Restore cancelled.")
             return
 
@@ -61,6 +63,7 @@ def restore(target_backup=None, skip_confirm=False):
         print("Success! Database has been restored.")
     except Exception as e:
         print(f"Error restoring database: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

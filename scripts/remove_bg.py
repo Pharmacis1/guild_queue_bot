@@ -25,11 +25,12 @@ def remove_black_background(input_path, output_path, threshold=15):
     except Exception as e:
         print(f"Error: {e}")
 
+
 if __name__ == "__main__":
     # Hardcoded paths for the task
     input_file = r"c:\dev\guild_queue_bot\static\img\spider_arcane_ruby.png"
     output_file = r"c:\dev\guild_queue_bot\static\img\spider_arcane_ruby_transparent.png"
-    
+
     if os.path.exists(input_file):
         remove_black_background(input_file, output_file)
     else:

@@ -12,13 +12,9 @@ async def test_log_reward_stub(caplog):
     """
     with caplog.at_level(logging.INFO):
         await log_reward_to_sheet(
-            queue_name="Q1", 
-            main_nick="MainUser", 
-            char_nick="Char1", 
-            manager_name="Admin", 
-            status="UnitTest"
+            queue_name="Q1", main_nick="MainUser", char_nick="Char1", manager_name="Admin", status="UnitTest"
         )
-        
+
     # Check that it logged (stub behavior)
     assert "Reward Log: Q1 | MainUser (Char1) | By: Admin | Status: UnitTest" in caplog.text
 

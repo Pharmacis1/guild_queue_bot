@@ -18,6 +18,7 @@ DB_NAME = "guild_bot.db"
 
 # --- HELPER FUNCTIONS ---
 
+
 def get_intervals(start_date_str, end_date_str, period, count=1):
     """
     Generates a list of intervals [(label, start_dt, end_dt)]
@@ -25,74 +26,71 @@ def get_intervals(start_date_str, end_date_str, period, count=1):
     """
     s_date = datetime.strptime(start_date_str, "%Y-%m-%d")
     e_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-    
+
     intervals = []
-    
+
     current = s_date
     while current <= e_date:
         interval_start = current
-        
-        if period == 'day':
+
+        if period == "day":
             interval_end = current + timedelta(days=count - 1)
             next_start = interval_end + timedelta(days=1)
             label = interval_start.strftime("%d.%m")
-            
-        elif period == 'week':
+
+        elif period == "week":
             # Logic: Align to real week chunks
             days_to_sunday = 6 - current.weekday()
             interval_end = current + timedelta(days=days_to_sunday)
-            
+
             if count > 1:
-                interval_end += timedelta(weeks=count-1)
-                
+                interval_end += timedelta(weeks=count - 1)
+
             next_start = interval_end + timedelta(days=1)
-            
+
             # Cap at e_date
             if interval_end > e_date:
                 interval_end = e_date
-                
+
             label = f"{interval_start.strftime('%d.%m')} - {interval_end.strftime('%d.%m')}"
-            
-        elif period == 'month':
+
+        elif period == "month":
             # Logic: Real months
             next_month_first = (current.replace(day=1) + timedelta(days=32)).replace(day=1)
             interval_end = next_month_first - timedelta(days=1)
-            
+
             if count > 1:
-                 # Simplified for now (loop if needed)
-                 for _ in range(count - 1):
-                     next_month_first = (next_month_first + timedelta(days=32)).replace(day=1)
-                     interval_end = next_month_first - timedelta(days=1)
-            
+                # Simplified for now (loop if needed)
+                for _ in range(count - 1):
+                    next_month_first = (next_month_first + timedelta(days=32)).replace(day=1)
+                    interval_end = next_month_first - timedelta(days=1)
+
             next_start = interval_end + timedelta(days=1)
-            
+
             if interval_end > e_date:
                 interval_end = e_date
-            
+
             # Label Russian Months if possible, but keep simple for now
-            label = interval_start.strftime("%b %Y") 
-            
-        elif period == 'year':
+            label = interval_start.strftime("%b %Y")
+
+        elif period == "year":
             interval_end = current.replace(month=12, day=31)
             next_start = interval_end + timedelta(days=1)
-             
+
             if interval_end > e_date:
                 interval_end = e_date
-            
+
             label = interval_start.strftime("%Y")
 
         else:
-             break
-             
-        intervals.append({
-            'label': label,
-            'start': interval_start,
-            'end': interval_end
-        })
-        
+            break
+
+        intervals.append({"label": label, "start": interval_start, "end": interval_end})
+
         current = next_start
-        
+
     return intervals
+
 
 async def get_last_update_time():
     """Gets the date of the freshest record in DB and converts to MSK (UTC+3)."""
@@ -105,8 +103,9 @@ async def get_last_update_time():
             dt_utc = datetime.fromtimestamp(ts, timezone.utc)
             # 2. Add exactly 3 hours (MSK)
             dt_msk = dt_utc + timedelta(hours=3)
-            return dt_msk.strftime('%d.%m.%Y %H:%M') + " (МСК)"
+            return dt_msk.strftime("%d.%m.%Y %H:%M") + " (МСК)"
     return "Нет данных"
+
 
 def analyze_stats(events):
     """
@@ -114,85 +113,93 @@ def analyze_stats(events):
     Returns a dictionary with all counters.
     """
     stats = {
-        "s1": 0, "s2": 0, "s3": 0, "s4": 0, "s5": 0, "s6": 0, "s7": 0,
-        "adepts": 0, "dances": 0,
+        "s1": 0,
+        "s2": 0,
+        "s3": 0,
+        "s4": 0,
+        "s5": 0,
+        "s6": 0,
+        "s7": 0,
+        "adepts": 0,
+        "dances": 0,
         "total_gold": 0,
-        "total_valor": 0
+        "total_valor": 0,
     }
-    
+
     events.sort(key=lambda x: x[0])
-    
+
     for i, (ts, val, etype) in enumerate(events):
         # Gold
         if etype == 2:
-            stats['total_gold'] += val
-            continue 
-            
+            stats["total_gold"] += val
+            continue
+
         # Valor
         if etype == 1:
-            stats['total_valor'] += val
-            
+            stats["total_valor"] += val
+
             # Stages
             if val == 4:
                 is_dance = False
                 # Check backward (< 20 min)
                 if i > 0:
-                    prev_ts, prev_val, prev_type = events[i-1]
+                    prev_ts, prev_val, prev_type = events[i - 1]
                     if prev_type == 1 and prev_val == 2 and (ts - prev_ts) < 1200:
                         is_dance = True
-                
+
                 # Check forward (< 20 min)
                 if not is_dance and i < len(events) - 1:
-                    next_ts, next_val, next_type = events[i+1]
+                    next_ts, next_val, next_type = events[i + 1]
                     if next_type == 1 and next_val == 8 and (next_ts - ts) < 1200:
                         is_dance = True
-                
+
                 if is_dance:
-                    stats['dances'] += 1
+                    stats["dances"] += 1
                 else:
-                    stats['s1'] += 1
-            
+                    stats["s1"] += 1
+
             elif val == 6:
-                stats['s2'] += 1
+                stats["s2"] += 1
             elif val == 10:
-                stats['s3'] += 1
+                stats["s3"] += 1
             elif val == 14:
-                stats['s4'] += 1
+                stats["s4"] += 1
             elif val == 24:
-                stats['s5'] += 1
+                stats["s5"] += 1
             elif val == 40:
-                stats['s6'] += 1
+                stats["s6"] += 1
             elif val == 70:
-                stats['s7'] += 1
+                stats["s7"] += 1
             elif val == 7:
-                stats['adepts'] += 1
+                stats["adepts"] += 1
             elif val in [2, 8]:
-                stats['dances'] += 1
-            
+                stats["dances"] += 1
+
     return stats
 
+
 async def get_data_from_db(
-    start_date: str = None, 
-    end_date: str = None, 
-    classes: List[int] = None, 
-    group_period: str = None, 
-    group_count: int = 1
+    start_date: str = None,
+    end_date: str = None,
+    classes: List[int] = None,
+    group_period: str = None,
+    group_count: int = 1,
 ):
     today = datetime.now()
     if not end_date:
-        end_date = today.strftime('%Y-%m-%d')
-    
+        end_date = today.strftime("%Y-%m-%d")
+
     # Auto-select: Monday of current week
     if not start_date:
         days_to_subtract = today.weekday()
         monday = today - timedelta(days=days_to_subtract)
-        start_date = monday.strftime('%Y-%m-%d')
+        start_date = monday.strftime("%Y-%m-%d")
 
     # Calculate intervals if grouping is requested
     intervals = []
     if group_period:
         intervals = get_intervals(start_date, end_date, group_period, group_count)
-    
+
     async with aiosqlite.connect(DB_NAME) as conn:
         # Base SQL
         sql = """
@@ -211,7 +218,7 @@ async def get_data_from_db(
             WHERE p.in_clan = 1
         """
         params = [start_date, end_date]
-        
+
         # Filter by classes
         if classes:
             placeholders = ",".join("?" * len(classes))
@@ -233,55 +240,55 @@ async def get_data_from_db(
         # Global stats (Total)
         stats = analyze_stats(data["events"])
         stats["name"] = data["name"]
-        stats["role_id"] = rid  
-        stats["class_id"] = data["class_id"] 
-        
+        stats["role_id"] = rid
+        stats["class_id"] = data["class_id"]
+
         # Calculate stats for each interval
         if intervals:
             stats["interval_stats"] = []
             for interval in intervals:
                 # Filter events for this interval
-                # Use standard timestamp comparison 
+                # Use standard timestamp comparison
                 # (interval start/end are datetime objects, events have unix ts or need conversion?)
                 # Wait, events have `ts` (unix timestamp)
-                
+
                 # Use pytz to ensure MSK timezone consistency if available, else UTC fallback?
                 # Actually, the simplest way is to ensure we constructed intervals with the same assumption.
                 # Let's rely on string comparison or naive-to-naive if possible, but events are TS.
                 # Aligning with api.py: MSK (UTC+3)
-                
+
                 # Naive to Timestamp uses system local time. We want strict control.
                 # If we assume 00:00 MSK for the start of the day:
                 # TS = (dt - 1970).total_seconds() - but need correct offset.
-                
+
                 # Easy fix: Make interval dates explicit MSK before timestamping
                 from datetime import timezone
+
                 msk_offset = timedelta(hours=3)
                 tz_msk = timezone(msk_offset)
-                
+
                 # Make them aware (interpreting them AS MSK)
-                dt_start_msk = interval['start'].replace(tzinfo=tz_msk) 
-                
+                dt_start_msk = interval["start"].replace(tzinfo=tz_msk)
+
                 # End date + 1 day to cover full day up to 00:00 next day
-                dt_end_msk = (interval['end'] + timedelta(days=1)).replace(tzinfo=tz_msk)
-                
+                dt_end_msk = (interval["end"] + timedelta(days=1)).replace(tzinfo=tz_msk)
+
                 ts_start = dt_start_msk.timestamp()
                 ts_end = dt_end_msk.timestamp()
-                
-                interval_events = [
-                    ev for ev in data["events"] 
-                    if ev[0] is not None and ts_start <= ev[0] < ts_end
-                ]
-                
+
+                interval_events = [ev for ev in data["events"] if ev[0] is not None and ts_start <= ev[0] < ts_end]
+
                 istats = analyze_stats(interval_events)
-                stats["interval_stats"].append({
-                    "label": interval["label"],
-                    "start": interval["start"],
-                    "end": interval["end"],
-                    "valor": istats["total_valor"],
-                    "gold": istats["total_gold"]
-                })
-        
+                stats["interval_stats"].append(
+                    {
+                        "label": interval["label"],
+                        "start": interval["start"],
+                        "end": interval["end"],
+                        "valor": istats["total_valor"],
+                        "gold": istats["total_gold"],
+                    }
+                )
+
         # Mapping Class
         cid = data["class_id"]
         if cid in CLASSES:
@@ -291,11 +298,11 @@ async def get_data_from_db(
         else:
             stats["class_icon"] = ""
             stats["class_name"] = ""
-            
+
         result.append(stats)
 
     # Sort: First by s7, then by total valor
-    result.sort(key=lambda x: (x.get('s7', 0), x.get('total_valor', 0)), reverse=True)
-    
+    result.sort(key=lambda x: (x.get("s7", 0), x.get("total_valor", 0)), reverse=True)
+
     # Return intervals too so frontend can build headers
     return result, start_date, end_date, intervals

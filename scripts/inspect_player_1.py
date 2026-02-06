@@ -24,5 +24,6 @@ async def inspect():
         count = (await cursor.fetchone())[0]
         print(f"Total players: {count}")
 
+
 if __name__ == "__main__":
     asyncio.run(inspect())

@@ -11,7 +11,7 @@ if not TOKEN:
     exit("Error: BOT_TOKEN not found in .env file")
 
 # Часовой пояс
-MSK = pytz.timezone('Europe/Moscow')
+MSK = pytz.timezone("Europe/Moscow")
 
 # Инициализация
 bot = Bot(token=TOKEN)

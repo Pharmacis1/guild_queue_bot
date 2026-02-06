@@ -1,4 +1,3 @@
-
 import pytest
 
 from auth_helper import validate_init_data
@@ -12,11 +11,13 @@ MOCK_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # So we might test failure cases or basic structure if we can't easily generate valid hash.
 # OR we rely on the fact that we can generate a signature if we know the algorithm.
 
+
 def test_validate_init_data_invalid():
     """Test that invalid data raises ValueError"""
     invalid_data = "query_id=123&hash=fake"
     with pytest.raises(ValueError):
         validate_init_data(invalid_data, MOCK_TOKEN)
+
 
 def test_validate_init_data_empty():
     with pytest.raises(ValueError):

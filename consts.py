@@ -1,4 +1,3 @@
-
 # PW Class Mapping
 # ID -> (Name, Emoji, ShortName)
 CLASSES = {
@@ -18,7 +17,7 @@ CLASSES = {
     13: ("Паладин", "🛡️", "PAL"),
     14: ("Странник", "🐵", "MY"),
     15: ("Бард", "🎵", "BRD"),
-    16: ("Дух крови", "🩸", "VAMP")
+    16: ("Дух крови", "🩸", "VAMP"),
 }
 
 CLASS_BY_NAME = {}

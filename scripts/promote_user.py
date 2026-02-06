@@ -13,12 +13,13 @@ def promote(tg_id):
         if not user:
             print(f"User with Telegram ID {tg_id} not found.")
             return
-        
+
         user.is_master = True
         session.commit()
         print(f"✅ User {user.username} (ID: {tg_id}) is now a MASTER/ADMIN.")
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

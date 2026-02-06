@@ -11,11 +11,12 @@ sys.path.append(BASE_DIR)
 from logic.google_drive import GoogleDriveService  # noqa: E402
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("backup_db")
 
 DB_NAME = os.path.join(BASE_DIR, "guild_bot.db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
+
 
 def perform_backup(force_suffix=None):
     """
@@ -32,7 +33,7 @@ def perform_backup(force_suffix=None):
 
     now = datetime.datetime.now()
     timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-    
+
     suffix = f"_{force_suffix}" if force_suffix else ""
     filename = f"guild_bot_{timestamp}{suffix}.db"
     backup_path = os.path.join(BACKUP_DIR, filename)
@@ -40,7 +41,7 @@ def perform_backup(force_suffix=None):
     try:
         shutil.copy2(DB_NAME, backup_path)
         logger.info(f"Backup created successfully: {backup_path}")
-        
+
         # Upload to Google Drive
         try:
             drive_service = GoogleDriveService()
@@ -57,6 +58,7 @@ def perform_backup(force_suffix=None):
         print(f"❌ [Backup] Failed to create backup: {e}")
         return False
 
+
 def cleanup_old_backups(max_files=20, max_days=7):
     """
     Removes old backups to save space.
@@ -67,10 +69,10 @@ def cleanup_old_backups(max_files=20, max_days=7):
             if f.endswith(".db") and "guild_bot_" in f:
                 path = os.path.join(BACKUP_DIR, f)
                 files.append(path)
-        
+
         # Sort by modification time (newest first)
         files.sort(key=os.path.getmtime, reverse=True)
-        
+
         if len(files) <= max_files:
             return
 
@@ -79,9 +81,10 @@ def cleanup_old_backups(max_files=20, max_days=7):
         for old_file in files[max_files:]:
             os.remove(old_file)
             logger.info(f"Removed old backup: {old_file}")
-            
+
     except Exception as e:
         logger.error(f"Error cleaning up backups: {e}")
+
 
 if __name__ == "__main__":
     perform_backup("manual_run")

@@ -13,9 +13,9 @@ def inspect(tg_id):
         if not user:
             print(f"❌ User with Telegram ID {tg_id} not found in DB.")
             return
-        
+
         print(f"✅ User Found: ID={user.id}, Username={user.username}, IsMaster={user.is_master}")
-        
+
         chars = session.query(Character).filter_by(user_id=user.id).all()
         if chars:
             print(f"✅ Found {len(chars)} characters:")
@@ -23,9 +23,10 @@ def inspect(tg_id):
                 print(f"   - ID={c.id}, Nickname='{c.nickname}', IsMain={c.is_main}")
         else:
             print("⚠️ No characters found for this user.")
-            
+
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

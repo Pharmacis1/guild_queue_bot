@@ -5,74 +5,83 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, c
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 # Timezone Helper
-MSK = pytz.timezone('Europe/Moscow')
+MSK = pytz.timezone("Europe/Moscow")
+
 
 def get_msk_now():
     """Returns current time in MSK as naive datetime (for SQLite compatibility)"""
-    return datetime.now(MSK).replace(tzinfo=None) # Make naive so SQLite doesn't complain
+    return datetime.now(MSK).replace(tzinfo=None)  # Make naive so SQLite doesn't complain
+
 
 Base = declarative_base()
 
 # --- МОДЕЛИ ---
 
+
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     telegram_id = Column(Integer, unique=True)
     username = Column(String)
     avatar_url = Column(String, nullable=True)
-    pending_request_nick = Column(String, nullable=True) # For unauthorized users waiting approval
+    pending_request_nick = Column(String, nullable=True)  # For unauthorized users waiting approval
     is_master = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
-    personal_limit = Column(Integer, nullable=True) 
+    personal_limit = Column(Integer, nullable=True)
     afk_start = Column(DateTime, nullable=True)
     afk_end = Column(DateTime, nullable=True)
     characters = relationship("Character", back_populates="user", cascade="all, delete-orphan")
 
+
 class Settings(Base):
-    __tablename__ = 'settings'
+    __tablename__ = "settings"
     key = Column(String, primary_key=True)
     value = Column(String)
 
+
 class Character(Base):
-    __tablename__ = 'characters'
+    __tablename__ = "characters"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    user_id = Column(Integer, ForeignKey("users.id"))
     nickname = Column(String)
     is_main = Column(Boolean, default=False)
     user = relationship("User", back_populates="characters")
 
+
 class QueueType(Base):
-    __tablename__ = 'queue_types'
+    __tablename__ = "queue_types"
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
     description = Column(String, default="Стандартные условия")
     is_active = Column(Boolean, default=True)
     is_locked = Column(Boolean, default=False)
-    
+
+
 class QueueEntry(Base):
-    __tablename__ = 'queue_entries'
+    __tablename__ = "queue_entries"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    queue_type_id = Column(Integer, ForeignKey('queue_types.id'))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    queue_type_id = Column(Integer, ForeignKey("queue_types.id"))
     character_name = Column(String)
     auto_requeue = Column(Boolean, default=False)
     user = relationship("User")
     queue = relationship("QueueType")
 
+
 class RewardHistory(Base):
-    __tablename__ = 'reward_history'
+    __tablename__ = "reward_history"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    user_id = Column(Integer, ForeignKey("users.id"))
     character_name = Column(String)
     queue_name = Column(String)
     issued_by = Column(String)
-    is_notified = Column(Boolean, default=True) # Default True for old records/backwards compat if immediately sent
-    record_type = Column(String, default="reward") # "reward" or "warning"
+    is_notified = Column(Boolean, default=True)  # Default True for old records/backwards compat if immediately sent
+    record_type = Column(String, default="reward")  # "reward" or "warning"
     timestamp = Column(DateTime, default=get_msk_now)
 
+
 class ScheduledAnnouncement(Base):
-    __tablename__ = 'announcements'
+    __tablename__ = "announcements"
     id = Column(Integer, primary_key=True)
     text = Column(String)
     schedule_type = Column(String)
@@ -80,20 +89,22 @@ class ScheduledAnnouncement(Base):
     days_of_week = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
 
+
 class Player(Base):
-    __tablename__ = 'players'
+    __tablename__ = "players"
     role_id = Column(Integer, primary_key=True)
     nickname = Column(String, default=None)
     first_seen = Column(DateTime, default=get_msk_now)
     in_clan = Column(Integer, default=1)
     class_id = Column(Integer, default=-1)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     is_alt = Column(Boolean, default=False)
     # Relationship to user
     user = relationship("User", backref="game_characters")
 
+
 class Event(Base):
-    __tablename__ = 'events'
+    __tablename__ = "events"
     id = Column(Integer, primary_key=True)
     role_id = Column(Integer)
     timestamp = Column(Integer)
@@ -102,38 +113,43 @@ class Event(Base):
     value = Column(Integer)
     raw_desc = Column(String)
 
+
 class Item(Base):
-    __tablename__ = 'items'
+    __tablename__ = "items"
     id = Column(Integer, primary_key=True)
     name = Column(String)
     icon_url = Column(String, nullable=True)
 
+
 class AFKHistory(Base):
-    __tablename__ = 'afk_history'
+    __tablename__ = "afk_history"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    user_id = Column(Integer, ForeignKey("users.id"))
     start_date = Column(DateTime)
     end_date = Column(DateTime)
-    is_active_record = Column(Boolean, default=True) # True if this was a finalized period
+    is_active_record = Column(Boolean, default=True)  # True if this was a finalized period
+
 
 class ObserverCache(Base):
-    __tablename__ = 'observer_cache'
+    __tablename__ = "observer_cache"
     role_id = Column(Integer, primary_key=True)
     html_content = Column(String)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+
 # КП (Constant Party) - группы для постоянной игры вместе
 class ConstantParty(Base):
-    __tablename__ = 'constant_parties'
+    __tablename__ = "constant_parties"
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)  # Опциональное название
     created_at = Column(DateTime, default=get_msk_now)
     members = relationship("PartyMember", back_populates="party", cascade="all, delete-orphan")
 
+
 class PartyMember(Base):
-    __tablename__ = 'party_members'
+    __tablename__ = "party_members"
     id = Column(Integer, primary_key=True)
-    party_id = Column(Integer, ForeignKey('constant_parties.id'))
+    party_id = Column(Integer, ForeignKey("constant_parties.id"))
     player_role_id = Column(Integer)  # role_id из players
     is_leader = Column(Boolean, default=False)  # Лидер может управлять пати
     party = relationship("ConstantParty", back_populates="members")
@@ -141,22 +157,28 @@ class PartyMember(Base):
 
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
-engine = create_engine('sqlite:///guild_bot.db', echo=False)
+engine = create_engine("sqlite:///guild_bot.db", echo=False)
 Session = sessionmaker(bind=engine)
 session = Session()
 
 DEFAULT_QUEUES = [
-    "Жемчужины Фу Си", "Знаки Единства", "Колода карт", "Сущность карты",
-    "Камень божества", "Драконья чешуя", "Цилинь"
+    "Жемчужины Фу Си",
+    "Знаки Единства",
+    "Колода карт",
+    "Сущность карты",
+    "Камень божества",
+    "Драконья чешуя",
+    "Цилинь",
 ]
+
 
 def init_db():
     Base.metadata.create_all(engine)
-    
+
     # --- AUTO MIGRATION (Pending Nick & AFK) ---
     with engine.connect() as conn:
         from sqlalchemy import text
-        
+
         # 1. Pending Request Nick
         try:
             conn.execute(text("SELECT pending_request_nick FROM users LIMIT 1"))
@@ -180,7 +202,7 @@ def init_db():
                 print("Migration successful: Added afk_start/end")
             except Exception as e:
                 print(f"Migration failed (afk): {e}")
-    # -------------------------------------
+        # -------------------------------------
 
         try:
             conn.execute(text("SELECT auto_requeue FROM queue_entries LIMIT 1"))
@@ -236,28 +258,29 @@ def init_db():
                 print(f"Migration failed (players.is_alt): {e}")
 
         # 7. Disable Removed Queues
-        queues_to_disable = [
-            "Камень доблести", "Метеориты", "Опыт в диск", 
-            "Проходки в УФ", "Камни бессмертных"
-        ]
+        queues_to_disable = ["Камень доблести", "Метеориты", "Опыт в диск", "Проходки в УФ", "Камни бессмертных"]
         q_names_sql = "', '".join(queues_to_disable)
-        
+
         # Check if any are still active
         check_sql = f"SELECT count(*) FROM queue_types WHERE name IN ('{q_names_sql}') AND is_active = 1"
         active_count = conn.execute(text(check_sql)).scalar()
-        
+
         if active_count > 0:
             print(f"Found {active_count} active queues to disable. Migrating...")
             try:
                 # Disable queues
                 conn.execute(text(f"UPDATE queue_types SET is_active = 0 WHERE name IN ('{q_names_sql}')"))
-                
+
                 # Retrieve IDs of disabled queues for entry deletion
                 # (SQLite doesn't support returning clause in update widely enough to rely on it via sqlalchemy text depending on version, so query first/after)
                 # Actually, we can just delete via join or subquery logic, but SQLite simple DELETE is safest with subquery
-                
-                conn.execute(text(f"DELETE FROM queue_entries WHERE queue_type_id IN (SELECT id FROM queue_types WHERE name IN ('{q_names_sql}'))"))
-                
+
+                conn.execute(
+                    text(
+                        f"DELETE FROM queue_entries WHERE queue_type_id IN (SELECT id FROM queue_types WHERE name IN ('{q_names_sql}'))"
+                    )
+                )
+
                 print("Migration successful: Disabled queues and removed entries.")
                 conn.commit()
             except Exception as e:
@@ -269,7 +292,8 @@ def init_db():
         except Exception:
             print("Table 'afk_history' missing. Migrating...")
             try:
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     CREATE TABLE afk_history (
                         id INTEGER PRIMARY KEY,
                         user_id INTEGER REFERENCES users(id),
@@ -277,22 +301,24 @@ def init_db():
                         end_date DATETIME,
                         is_active_record BOOLEAN DEFAULT 1
                     )
-                """))
+                """)
+                )
                 print("Migration successful: Created afk_history table")
             except Exception as e:
                 print(f"Migration failed (afk_history table): {e}")
 
-    
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
             session.add(QueueType(name=q_name))
-            
+
     if not session.query(Settings).filter_by(key="default_limit").first():
         session.add(Settings(key="default_limit", value="1"))
-        
+
     session.commit()
 
+
 # --- ФУНКЦИИ ЗАПРОСОВ (Перенесли сюда) ---
+
 
 def ensure_user(telegram_id, username):
     """Получает или создает пользователя."""
@@ -304,6 +330,7 @@ def ensure_user(telegram_id, username):
         session.commit()
     return user
 
+
 def get_user_active_queues(user_id):
     """Возвращает список активных записей пользователя."""
     return session.query(QueueEntry).filter_by(user_id=user_id).all()
@@ -314,13 +341,15 @@ def get_effective_limit_logic(user):
     # Если у пользователя установлен личный лимит
     if user.personal_limit is not None:
         return user.personal_limit
-        
+
     setting = session.query(Settings).filter_by(key="default_limit").first()
     return int(setting.value) if setting else 1
+
 
 def get_setting(key, default=None):
     s = session.query(Settings).filter_by(key=key).first()
     return s.value if s else default
+
 
 def set_setting(key, value):
     s = session.query(Settings).filter_by(key=key).first()

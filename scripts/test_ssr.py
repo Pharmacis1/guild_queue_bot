@@ -8,7 +8,7 @@ try:
     print("Fetching https://pwobs.com/capella/players/4208 ...")
     response = requests.get("https://pwobs.com/capella/players/4208", headers=headers, timeout=10)
     print(f"Status: {response.status_code}")
-    
+
     if "player-equipment" in response.text:
         print("SUCCESS: Found 'player-equipment' in HTML response.")
         print("SSR is WORKING.")
@@ -17,6 +17,6 @@ try:
         print("Content might be CSR (Client Side Rendered).")
         print("Partial content preview:")
         print(response.text[:500])
-        
+
 except Exception as e:
     print(f"Error: {e}")

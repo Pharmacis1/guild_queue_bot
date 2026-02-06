@@ -8,18 +8,16 @@ import aiosqlite
 from bs4 import BeautifulSoup
 
 # Add parent directory to path to allow importing database
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 # from database import DB_NAME
 DB_NAME = "guild_bot.db"
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("item_scraper")
 
 BASE_URL_TEMPLATE = "https://www.pwdatabase.com/ru/items/{item_id}"
+
 
 async def fetch_item_name(session, item_id):
     """
@@ -31,34 +29,34 @@ async def fetch_item_name(session, item_id):
         async with session.get(url) as response:
             if response.status == 404:
                 return item_id, None
-            
+
             if response.status != 200:
                 logger.warning(f"Failed to fetch {item_id}: Status {response.status}")
                 return item_id, None
-            
+
             # Read as binary to handle encoding manually
             content = await response.read()
-            
+
             # Try decoding as utf-8 first (standard)
             try:
-                html = content.decode('utf-8')
+                html = content.decode("utf-8")
             except UnicodeDecodeError:
                 # Fallback to windows-1251 if utf-8 fails
                 try:
-                    html = content.decode('windows-1251')
+                    html = content.decode("windows-1251")
                 except UnicodeDecodeError:
                     # Final fallback with replace
-                    html = content.decode('windows-1251', errors='replace')
+                    html = content.decode("windows-1251", errors="replace")
 
-            soup = BeautifulSoup(html, 'html.parser')
-            
+            soup = BeautifulSoup(html, "html.parser")
+
             # 1. Try th.item-name
             name_el = soup.select_one("th.item-name")
             if name_el:
                 name = name_el.get_text(strip=True)
                 if name and "Perfect World" not in name:
                     return item_id, name
-            
+
             # 2. Try td.item-name
             name_el = soup.select_one("td.item-name")
             if name_el:
@@ -80,12 +78,13 @@ async def fetch_item_name(session, item_id):
                     name = title_text.split(" - ")[-1].strip()
                     if name and name != "Perfect World Item Database":
                         return item_id, name
-                
+
             return item_id, None
-            
+
     except Exception as e:
         logger.error(f"Error fetching item {item_id}: {e}")
         return item_id, None
+
 
 async def run_item_scraper(item_ids):
     """
@@ -93,17 +92,17 @@ async def run_item_scraper(item_ids):
     """
     if not item_ids:
         return
-        
+
     logger.info(f"Starting item scraper for {len(item_ids)} items: {item_ids}")
-    
+
     async with aiosqlite.connect(DB_NAME) as conn:
         async with aiohttp.ClientSession() as session:
             tasks = []
             for item_id in item_ids:
                 tasks.append(fetch_item_name(session, item_id))
-                
+
             results = await asyncio.gather(*tasks)
-            
+
             for item_id, name in results:
                 if name:
                     logger.info(f"Found name for {item_id}: {name}")
@@ -112,12 +111,14 @@ async def run_item_scraper(item_ids):
                 else:
                     logger.warning(f"Could not find name for item {item_id}")
                     # Optionally insert a placeholder or do nothing
-            
+
             await conn.commit()
-            
+
     logger.info("Item scraping completed.")
 
+
 if __name__ == "__main__":
+
     async def main():
         print("Checking database for missing item names...")
         async with aiosqlite.connect(DB_NAME) as conn:
@@ -125,17 +126,17 @@ if __name__ == "__main__":
             async with conn.execute("SELECT DISTINCT value FROM events WHERE event_type = 0") as cursor:
                 rows = await cursor.fetchall()
                 all_item_ids = {r[0] for r in rows}
-            
+
             # 2. Get already scraped items
             async with conn.execute("SELECT id FROM items") as cursor:
                 rows = await cursor.fetchall()
                 known_ids = {r[0] for r in rows}
-            
+
             missing = list(all_item_ids - known_ids)
             print(f"Total item events: {len(all_item_ids)}")
             print(f"Known items: {len(known_ids)}")
             print(f"Missing items to scrape: {len(missing)}")
-            
+
             if missing:
                 await run_item_scraper(missing)
             else:

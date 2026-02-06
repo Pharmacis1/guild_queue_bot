@@ -11,7 +11,7 @@ from database import Character, session
 
 def clear_data():
     print("WARNING: This will delete ALL linked nicknames and player professions.")
-    
+
     # Auto-backup
     print("creating pre-clear backup...")
     if perform_backup("pre_clear"):
@@ -23,7 +23,7 @@ def clear_data():
             return
 
     confirm = input("Type 'DELETE' to confirm: ")
-    
+
     if confirm != "DELETE":
         print("Operation cancelled.")
         return
@@ -40,12 +40,13 @@ def clear_data():
 
         session.commit()
         print("Database cleanup successful.")
-        
+
     except Exception as e:
         session.rollback()
         print(f"An error occurred: {e}")
     finally:
         session.close()
+
 
 if __name__ == "__main__":
     clear_data()

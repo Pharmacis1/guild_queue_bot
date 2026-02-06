@@ -1,4 +1,3 @@
-
 from PIL import Image
 
 
@@ -7,7 +6,7 @@ def make_transparent(input_path, output_path, tolerance=30):
     datas = img.getdata()
 
     new_data = []
-    
+
     # Get background color from top-left pixel
     bg_color = datas[0][:3]  # RGB
     print(f"Background color detected: {bg_color}")
@@ -20,12 +19,13 @@ def make_transparent(input_path, output_path, tolerance=30):
             new_data.append(item)
 
     img.putdata(new_data)
-    
+
     # Resize to small icon size (e.g. 64x64) to save space, but keep quality high enough
     img.thumbnail((128, 128), Image.Resampling.LANCZOS)
-    
+
     img.save(output_path, "PNG")
     print(f"Saved transparent image to {output_path}")
+
 
 if __name__ == "__main__":
     input_file = r"C:/Users/Анастасия/.gemini/antigravity/brain/6cee865f-696c-4074-a7e9-65a932667ced/uploaded_media_1769599675216.jpg"

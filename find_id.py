@@ -2,11 +2,12 @@ import sqlite3
 import sys
 
 # Set stdout to utf-8 just in case, or just avoid printing unicode
-sys.stdout.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding="utf-8")
+
 
 def find_user(nickname):
     try:
-        conn = sqlite3.connect('guild_bot.db')
+        conn = sqlite3.connect("guild_bot.db")
         cursor = conn.cursor()
         cursor.execute("SELECT role_id FROM players WHERE nickname = ?", (nickname,))
         results = cursor.fetchall()
@@ -17,6 +18,7 @@ def find_user(nickname):
         conn.close()
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     find_user("拉格雷克雷")

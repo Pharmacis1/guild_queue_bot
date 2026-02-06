@@ -3,18 +3,19 @@ import struct
 from datetime import datetime
 
 # [cite_start]Константы структуры файла [cite: 5]
-HEADER_FORMAT = "<ii"      # 8 байт (from_id, to_id)
+HEADER_FORMAT = "<ii"  # 8 байт (from_id, to_id)
 RECORD_FORMAT = "<iiiiiii"  # 28 байт (type, id, timestamp, who, p0, p1, p2)
 RECORD_SIZE = 28
+
 
 def parse_board_file(filepath):
     """Читает бинарный файл и возвращает список записей."""
     data_list = []
-    
+
     if not os.path.exists(filepath):
         return []
 
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         # Пропускаем заголовок (8 байт)
         f.read(struct.calcsize(HEADER_FORMAT))
 
@@ -22,41 +23,45 @@ def parse_board_file(filepath):
             chunk = f.read(RECORD_SIZE)
             if len(chunk) < RECORD_SIZE:
                 break
-            
+
             # [cite_start]Распаковываем байты в числа [cite: 5]
             rtype, rid, ts, role_id, p0, p1, p2 = struct.unpack(RECORD_FORMAT, chunk)
-            
+
             # Фильтр: игнорируем даты из 1970 года (пустые записи)
-            if ts < 1600000000: # Отсекаем всё, что старше ~2020 года
+            if ts < 1600000000:  # Отсекаем всё, что старше ~2020 года
                 continue
-                
+
             try:
                 import pytz
-                msk_tz = pytz.timezone('Europe/Moscow')
+
+                msk_tz = pytz.timezone("Europe/Moscow")
                 dt = datetime.fromtimestamp(ts, msk_tz)
-                dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 # Fallback if pytz missing or error
-                try: 
+                try:
                     dt = datetime.fromtimestamp(ts)
-                    dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     dt_str = "Error Date"
 
             desc = decode_action(rtype, role_id, p0, p1, p2)
-            
-            data_list.append({
-                "date": dt_str,
-                "timestamp": ts,
-                "role_id": role_id,
-                "action_type": rtype,
-                "description": desc,
-                "raw_params": f"{p0}, {p1}, {p2}"
-            })
-            
+
+            data_list.append(
+                {
+                    "date": dt_str,
+                    "timestamp": ts,
+                    "role_id": role_id,
+                    "action_type": rtype,
+                    "description": desc,
+                    "raw_params": f"{p0}, {p1}, {p2}",
+                }
+            )
+
     # Сортируем: новые сверху
-    data_list.sort(key=lambda x: x['timestamp'], reverse=True)
+    data_list.sort(key=lambda x: x["timestamp"], reverse=True)
     return data_list
+
 
 def decode_action(rtype, who, p0, p1, p2):
     """Расшифровка кодов действий на основе FactionBoard.c"""
@@ -83,5 +88,5 @@ def decode_action(rtype, who, p0, p1, p2):
         return f"{act} ID {p0} до {role}"
     if rtype == 10:
         return f"Изгнал ID {p0}"
-    
+
     return f"Действие {rtype}"

@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import sys
@@ -25,12 +24,12 @@ async def fix_db():
         # Find all kick events (type 10)
         async with conn.execute("SELECT value, event_date FROM events WHERE event_type = 10") as cursor:
             kicked_events = await cursor.fetchall()
-            
+
         kicked_ids = {row[0] for row in kicked_events if row[0] > 0}
         print(f"Found {len(kicked_ids)} players who were kicked: {kicked_ids}")
-        
+
         if kicked_ids:
-            placeholders = ','.join('?' for _ in kicked_ids)
+            placeholders = ",".join("?" for _ in kicked_ids)
             # Mark them as NOT in clan
             await conn.execute(f"UPDATE players SET in_clan = 0 WHERE role_id IN ({placeholders})", list(kicked_ids))
             print("Updated in_clan = 0 for kicked players.")
@@ -38,7 +37,8 @@ async def fix_db():
         await conn.commit()
         print("Done.")
 
+
 if __name__ == "__main__":
-    if os.name == 'nt':
+    if os.name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(fix_db())

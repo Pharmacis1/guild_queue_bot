@@ -33,5 +33,6 @@ def link_char(tg_id, char_name):
     except Exception as e:
         print(f"Error: {e}")
 
+
 if __name__ == "__main__":
     link_char(5075198340, "Morwen")
