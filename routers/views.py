@@ -170,7 +170,7 @@ async def read_root(
                 return datetime.strptime(str(date_val), "%Y-%m-%d %H:%M:%S")
             else:
                 return datetime.strptime(str(date_val), "%Y-%m-%d")
-        except:
+        except Exception:
             return None
     
     # Add periods from users table
@@ -198,9 +198,11 @@ async def read_root(
         return is_newcomer(role_id, join_dates, ref_date_str)
         
     def get_afk_dates(role_id):
-        if not role_id: return None
+        if not role_id:
+            return None
         uid = role_user_map.get(role_id)
-        if not uid: return None
+        if not uid:
+            return None
         periods = afk_map.get(uid, [])
         if periods:
             # Return the most recent (or current) period
@@ -211,17 +213,21 @@ async def read_root(
         return None
 
     def is_afk_func(role_id):
-        if not role_id: return False
+        if not role_id:
+            return False
         uid = role_user_map.get(role_id)
-        if not uid: return False
+        if not uid:
+            return False
         return uid in afk_map
 
     # --- FETCH & PROCESS KH DATA ---
     kh_rows_raw, kh_s, kh_e, _ = await get_data_from_db(current_kh_start, current_kh_end, None, None, 1)
 
     # Fallback: If DB returns None/Empty for dates (shouldn't happen), use the calculated defaults
-    if not kh_s: kh_s = current_kh_start if current_kh_start else date.today().strftime('%Y-%m-%d')
-    if not kh_e: kh_e = current_kh_end if current_kh_end else date.today().strftime('%Y-%m-%d')
+    if not kh_s:
+        kh_s = current_kh_start if current_kh_start else date.today().strftime('%Y-%m-%d')
+    if not kh_e:
+        kh_e = current_kh_end if current_kh_end else date.today().strftime('%Y-%m-%d')
 
     # --- 3. HISTORY CONTEXT SETUP (Moved here to access kh_s/kh_e) ---
     current_history_start = history_start if history_start else (kh_s if kh_s else None)
@@ -257,7 +263,8 @@ async def read_root(
         d1 = datetime.strptime(kh_s, "%Y-%m-%d")
         d2 = datetime.strptime(kh_e, "%Y-%m-%d")
         days_diff = (d2-d1).days + 1
-    except: days_diff = 1
+    except Exception:
+        days_diff = 1
 
     final_kh_rows = []
     for r in kh_rows_filtered:
@@ -274,14 +281,16 @@ async def read_root(
                 jd_date = datetime.strptime(jd_str, "%Y-%m-%d")
                 diff = (today - jd_date).days
                 row['join_date'] = f"{jd_str} ({diff} дн.)"
-            except:
+            except Exception:
                 row['join_date'] = jd_str
         else:
             row['join_date'] = ''
 
         # Newcomer Filter
-        if current_kh_newcomers == 'only' and not row['is_newcomer']: continue
-        if current_kh_newcomers == 'hide' and row['is_newcomer']: continue
+        if current_kh_newcomers == 'only' and not row['is_newcomer']:
+            continue
+        if current_kh_newcomers == 'hide' and row['is_newcomer']:
+            continue
 
         # Valor Tier
         row['valor_tier'] = get_valor_tier(row['total_valor'], kh_active_valors, t_v, days_diff)
@@ -320,15 +329,17 @@ async def read_root(
                 jd_date = datetime.strptime(jd_str, "%Y-%m-%d")
                 diff = (today - jd_date).days
                 row['join_date'] = f"{jd_str} ({diff} дн.)"
-            except:
+            except Exception:
                 row['join_date'] = jd_str
         else:
             row['join_date'] = ''
         
         
         # Newcomer Filter
-        if current_money_newcomers == 'only' and not row['is_newcomer']: continue
-        if current_money_newcomers == 'hide' and row['is_newcomer']: continue
+        if current_money_newcomers == 'only' and not row['is_newcomer']:
+            continue
+        if current_money_newcomers == 'hide' and row['is_newcomer']:
+            continue
         
         # Calculate Interval Flags
         if 'interval_stats' in row:
@@ -337,7 +348,8 @@ async def read_root(
              if jd:
                  try:
                      jd_dt = datetime.strptime(jd.split()[0], "%Y-%m-%d")
-                 except: pass
+                 except Exception:
+                     pass
 
              # Role -> User for AFK
              uid = role_user_map.get(row.get('role_id'))

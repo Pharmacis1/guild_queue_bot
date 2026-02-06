@@ -160,7 +160,7 @@ def init_db():
         # 1. Pending Request Nick
         try:
             conn.execute(text("SELECT pending_request_nick FROM users LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'pending_request_nick' missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE users ADD COLUMN pending_request_nick VARCHAR"))
@@ -171,7 +171,7 @@ def init_db():
         # 2. AFK Columns
         try:
             conn.execute(text("SELECT afk_start FROM users LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'afk_start' missing. Migrating...")
             try:
                 # SQLite usually allows only one ADD COLUMN per statement, so we do two
@@ -184,7 +184,7 @@ def init_db():
 
         try:
             conn.execute(text("SELECT auto_requeue FROM queue_entries LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'auto_requeue' missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE queue_entries ADD COLUMN auto_requeue BOOLEAN DEFAULT 0"))
@@ -195,7 +195,7 @@ def init_db():
         # 4. RewardHistory Is Notified
         try:
             conn.execute(text("SELECT is_notified FROM reward_history LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'is_notified' missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE reward_history ADD COLUMN is_notified BOOLEAN DEFAULT 1"))
@@ -206,7 +206,7 @@ def init_db():
         # 5. RewardHistory Record Type
         try:
             conn.execute(text("SELECT record_type FROM reward_history LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'record_type' missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE reward_history ADD COLUMN record_type VARCHAR DEFAULT 'reward'"))
@@ -217,7 +217,7 @@ def init_db():
         # 6. Player User Link & Alt Status
         try:
             conn.execute(text("SELECT user_id FROM players LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'user_id' in players missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)"))
@@ -227,7 +227,7 @@ def init_db():
 
         try:
             conn.execute(text("SELECT is_alt FROM players LIMIT 1"))
-        except:
+        except Exception:
             print("Column 'is_alt' in players missing. Migrating...")
             try:
                 conn.execute(text("ALTER TABLE players ADD COLUMN is_alt BOOLEAN DEFAULT 0"))
@@ -266,7 +266,7 @@ def init_db():
         # 8. AFK History Table (Ensure existence)
         try:
             conn.execute(text("SELECT count(*) FROM afk_history LIMIT 1"))
-        except:
+        except Exception:
             print("Table 'afk_history' missing. Migrating...")
             try:
                 conn.execute(text("""

@@ -97,8 +97,10 @@ class RemoteBrowserSession:
             except Exception as e:
                 self.last_error = str(e)
                 logger.error(f"Failed to start browser session: {e}")
-                try: await self.stop_session() 
-                except: pass
+                try:
+                    await self.stop_session() 
+                except Exception:
+                    pass
 
     def _on_popup(self, page):
         """Handle new popup windows (e.g. OAuth login)"""
@@ -172,8 +174,10 @@ class RemoteBrowserSession:
         async with self.lock:
             # Always try to cleanup, even if is_active=False (cleanup failed start)
             try:
-                if self.browser: await self.browser.close()
-                if self.playwright: await self.playwright.stop()
+                if self.browser:
+                    await self.browser.close()
+                if self.playwright:
+                    await self.playwright.stop()
             except Exception as e:
                 logger.error(f"Failed to stop browser session: {e}")
             finally:
@@ -202,8 +206,10 @@ class RemoteBrowserSession:
     async def get_status(self):
         url = "Unknown"
         if self.page and not self.page.is_closed():
-            try: url = self.page.url
-            except: pass
+            try:
+                url = self.page.url
+            except Exception:
+                pass
             
         return {
             "active": self.is_active,
@@ -229,8 +235,10 @@ class RemoteBrowserSession:
                 text = action.get("text")
                 if text is not None:
                     # If selector provided, type there. If not, just type (key press)
-                    if selector: await self.page.fill(selector, text)
-                    else: await self.page.keyboard.type(text)
+                    if selector:
+                        await self.page.fill(selector, text)
+                    else:
+                        await self.page.keyboard.type(text)
                     return {"status": "ok", "message": f"Typed '{text}'"}
                 else:
                     raise HTTPException(status_code=400, detail="Missing text for type action")

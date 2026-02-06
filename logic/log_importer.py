@@ -45,7 +45,8 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
                     try:
                         p0 = int(row['raw_params'].split(',')[0])
                         all_involved_ids.add(p0)
-                    except: pass
+                    except Exception:
+                        pass
             
             # Fetch existing nicknames
             id_to_nick = {}
@@ -76,7 +77,8 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
                         target_id = val # p0 is often the target
                         if etype == 0: # Item event
                             item_ids.add(val)
-                    except: pass
+                    except Exception:
+                        pass
 
                 # [FIX] Resolve ID in description
                 if target_id and f"ID {target_id}" in desc:
@@ -90,7 +92,7 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
                 # [FIX] Status Updates
                 is_leave_self = (etype == 8) # Покинул гильдию
                 is_kick = (etype == 10)      # Изгнал ID ...
-                is_join = (etype == 6)       # Вступил
+                # is_join = (etype == 6)       # Вступил (unused)
                 
                 if is_leave_self:
                     # Actor left
@@ -122,7 +124,10 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
         if item_ids:
             async with aiosqlite.connect(web_database.DB_NAME) as conn:
                 placeholders = ','.join(['?'] * len(item_ids))
-                async with conn.execute(f"SELECT id FROM items WHERE id IN ({placeholders})", list(item_ids)) as cursor:
+                async with conn.execute(
+                    f"SELECT id FROM items WHERE id IN ({placeholders})", 
+                    list(item_ids)
+                ) as cursor:
                     existing_rows = await cursor.fetchall()
                     existing_ids = {r[0] for r in existing_rows}
                 

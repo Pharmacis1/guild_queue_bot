@@ -35,7 +35,8 @@ async def init_browser():
             args=["--no-sandbox", "--disable-setuid-sandbox"] # Docker friendly
         )
         context_args = {
-             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
              "viewport": {"width": 1280, "height": 720}
         }
         
@@ -124,7 +125,7 @@ async def get_player_equipment(role_id: int, server: str = "capella"):
              await page.wait_for_selector(selector, timeout=20000)
              # Extra wait for Vue to populate the empty divs with stats
              await page.wait_for_timeout(2000)
-        except:
+        except Exception:
              # Check if 404
              title = await page.title()
              if "404" in title:

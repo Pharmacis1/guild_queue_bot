@@ -107,7 +107,10 @@ async def login(data: LoginRequest, request: Request, response: Response):
             char_count = (await cursor.fetchone())[0]
             
             if char_count == 0:
-                 return JSONResponse(status_code=403, content={"status": "error", "message": "У вас нет персонажей в гильдии."})
+                 return JSONResponse(status_code=403, content={
+                     "status": "error",
+                     "message": "У вас нет персонажей в гильдии."
+                 })
             
             # Fetch and update avatar
             avatar_url = await get_telegram_avatar_url(tg_id, BOT_TOKEN)

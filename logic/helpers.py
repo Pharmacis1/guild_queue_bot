@@ -11,7 +11,8 @@ def is_newcomer(role_id: int, join_dates_map: dict, ref_date_str: str) -> bool:
         ref_date_str: The reference date string (YYYY-MM-DD or None) used as 'current' context 
                       (often start of week or similar). logic uses < 7 days from ref_monday.
     """
-    if not role_id or role_id not in join_dates_map: return False
+    if not role_id or role_id not in join_dates_map:
+        return False
     try:
         val = join_dates_map[role_id]
         if ' ' in val: val = val.split()[0]
@@ -26,5 +27,5 @@ def is_newcomer(role_id: int, join_dates_map: dict, ref_date_str: str) -> bool:
         ref_monday = ref_dt - timedelta(days=ref_dt.weekday())
         
         return (ref_monday - join_dt).days < 7
-    except:
+    except Exception:
         return False

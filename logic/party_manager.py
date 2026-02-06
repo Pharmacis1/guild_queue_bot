@@ -75,7 +75,10 @@ async def add_to_party(leader_role_id: int, member_nickname: str) -> Dict[str, A
                     return {"status": "error", "message": "Игрок уже состоит в другой КП"}
             
             # Find or create party for leader
-            async with conn.execute("SELECT party_id FROM party_members WHERE player_role_id = ?", (leader_role_id,)) as cursor:
+            async with conn.execute(
+                "SELECT party_id FROM party_members WHERE player_role_id = ?", 
+                (leader_role_id,)
+            ) as cursor:
                 leader_party = await cursor.fetchone()
             
             if leader_party:

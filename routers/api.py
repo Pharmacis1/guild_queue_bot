@@ -96,7 +96,8 @@ async def get_player(request: Request):
                 WHERE p.role_id = ?
             """, (role_id,)) as cursor:
                 row = await cursor.fetchone()
-                if not row: return {"status": "error", "message": "Player not found"}
+                if not row:
+                    return {"status": "error", "message": "Player not found"}
                 
                 (p_nick, p_class, p_in_clan, p_user_id, p_is_alt, 
                  u_tg_id, u_username, u_afk_start, u_afk_end) = row
@@ -247,7 +248,8 @@ async def queue_join(request: Request):
         queue_id = data.get('queue_id')
         char_name = data.get('character_name')
         auto_requeue = 1 if data.get('auto_requeue') else 0
-        if not user_id or not queue_id: return {"status": "error", "message": "Missing fields"}
+        if not user_id or not queue_id:
+            return {"status": "error", "message": "Missing fields"}
         
         return await queue_manager.join_queue(user_id, queue_id, char_name, auto_requeue)
     except Exception as e: return {"status": "error", "message": str(e)}
@@ -257,9 +259,11 @@ async def queue_leave(request: Request):
     try:
         data = await request.json()
         entry_id = data.get('entry_id')
-        if not entry_id: return {"status": "error", "message": "Missing entry_id"}
+        if not entry_id:
+            return {"status": "error", "message": "Missing entry_id"}
         return await queue_manager.leave_queue(entry_id)
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.post("/api/character/link")
 async def char_link(request: Request):
@@ -267,7 +271,8 @@ async def char_link(request: Request):
         data = await request.json()
         user_id = data.get('user_id')
         nickname = data.get('nickname')
-        if not user_id or not nickname: return {"status": "error", "message": "Missing fields"}
+        if not user_id or not nickname:
+            return {"status": "error", "message": "Missing fields"}
         
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # Upsert into characters
@@ -551,6 +556,7 @@ try:
     from scripts import pwobs_scraper
 except ImportError:
     pwobs_scraper = None
+    pwobs_scraper = None
 
 SCRAPER_IS_RUNNING = False
 
@@ -626,7 +632,7 @@ async def add_event(request: Request):
             
         try:
             val_int = int(value)
-        except:
+        except Exception:
              return {"status": "error", "message": "Value must be an integer"}
 
         # Parse Date
@@ -648,7 +654,7 @@ async def add_event(request: Request):
              
         logging.info(f"Manual Event Add: {role_id}, val={val_int}, ts={timestamp} ({event_date_str})")
         
-        async with aiosqlite.connect(DB_NAME) as conn:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # Check player exists
             async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
                 if not await cursor.fetchone():

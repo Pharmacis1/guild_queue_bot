@@ -2,17 +2,17 @@ import datetime
 import logging
 import os
 import shutil
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("backup_db")
-
 import sys
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
-from logic.google_drive import GoogleDriveService
+
+from logic.google_drive import GoogleDriveService  # noqa: E402
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("backup_db")
 
 DB_NAME = os.path.join(BASE_DIR, "guild_bot.db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")

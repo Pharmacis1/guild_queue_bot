@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
@@ -30,6 +31,7 @@ from keyboards import (
     get_persistent_menu,
     get_unauthorized_menu,
 )
+from loader import bot
 from logic.queue_ops import join_queue, leave_queue
 from states import AFKState, Registration
 from utils import check_google_sheet, log_reward_to_sheet
@@ -113,7 +115,8 @@ async def cancel_pending_request(callback: types.CallbackQuery, state: FSMContex
         for m in masters:
             try:
                 await bot.send_message(m.telegram_id, f"❌ <b>Пользователь отменил заявку!</b>\nИгрок: {user_desc}\nНик: {cancelled_nick}\n\n<i>Не нажимайте «Принять» на предыдущем сообщении.</i>", parse_mode="HTML")
-            except: pass
+            except Exception:
+                pass
 
     await callback.answer("Заявка отменена.")
     # Show welcome again
@@ -130,7 +133,7 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     text = get_menu_text(user)
     try:
         await callback.message.edit_text(text, reply_markup=get_main_menu(user), parse_mode="HTML")
-    except:
+    except Exception:
         await callback.message.answer(text, reply_markup=get_main_menu(user), parse_mode="HTML")
 
 
@@ -346,7 +349,8 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
             # We pass data in callback_data. 
             await message.bot.send_message(m.telegram_id, text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
             count += 1
-        except: pass
+        except Exception:
+            pass
         
     if count > 0:
         # Save pending state ONLY if it's a main char request (unauthorized user flow)
@@ -365,7 +369,8 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
 async def del_alt_menu(callback: types.CallbackQuery):
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     alts = session.query(Character).filter_by(user_id=user.id, is_main=False).all()
-    if not alts: return await callback.answer("Нет твинов.", show_alert=True)
+    if not alts:
+        return await callback.answer("Нет твинов.", show_alert=True)
     kb = [[types.InlineKeyboardButton(text=f"❌ {c.nickname}", callback_data=f"del_c_{c.id}")] for c in alts]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_chars")])
     await callback.message.edit_text("Кого удалить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -374,7 +379,8 @@ async def del_alt_menu(callback: types.CallbackQuery):
 async def del_char_action(callback: types.CallbackQuery):
     cid = int(callback.data.split("_")[2])
     char = session.get(Character, cid)
-    if not char: return await callback.answer("Не найден.")
+    if not char:
+        return await callback.answer("Не найден.")
     
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     entries = session.query(QueueEntry).filter_by(character_name=char.nickname).all()
@@ -415,7 +421,8 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     cid, action = int(parts[2]), parts[3]
     char = session.get(Character, cid)
-    if not char: return await callback.answer("Уже удален.")
+    if not char:
+        return await callback.answer("Уже удален.")
     
     nick_to_del, user_id = char.nickname, char.user_id
     user = session.get(User, user_id)
@@ -523,8 +530,10 @@ async def view_queue(callback: types.CallbackQuery):
             ])
 
     kb.append([types.InlineKeyboardButton(text="🔙 К списку", callback_data="menu_join")])
-    try: await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
-    except: pass
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
+    except Exception:
+        pass
 
 @router.callback_query(F.data.startswith("pre_join_"))
 async def pre_join(callback: types.CallbackQuery):
@@ -534,7 +543,8 @@ async def pre_join(callback: types.CallbackQuery):
     mode = parts[3] if len(parts) > 3 else "once" 
     
     q = session.get(QueueType, qid)
-    if q.is_locked: return await callback.answer("⛔ Очередь закрыта Мастером!", show_alert=True)
+    if q.is_locked:
+        return await callback.answer("⛔ Очередь закрыта Мастером!", show_alert=True)
     
     # Force single mode for restricted queue
     if q.name == "Цилинь" and mode == "auto":
@@ -542,7 +552,8 @@ async def pre_join(callback: types.CallbackQuery):
     
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     chars = session.query(Character).filter_by(user_id=user.id).all()
-    if not chars: return await callback.answer("Нет персонажей!", show_alert=True)
+    if not chars:
+        return await callback.answer("Нет персонажей!", show_alert=True)
     
     # Direct to join_final with selected mode
     kb = [[types.InlineKeyboardButton(text=f"{'👑' if c.is_main else '👤'} {c.nickname}", callback_data=f"join_final_{qid}_{c.id}_{mode}")] for c in chars]
@@ -669,10 +680,13 @@ async def show_my_active_queues(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("toggle_mode_"))
 async def toggle_mode_handler(callback: types.CallbackQuery):
-    try: eid = int(callback.data.split("_")[2])
-    except: return
+    try:
+        eid = int(callback.data.split("_")[2])
+    except Exception:
+        return
     entry = session.get(QueueEntry, eid)
-    if not entry: return await callback.answer("Запись не найдена.", show_alert=True)
+    if not entry:
+        return await callback.answer("Запись не найдена.", show_alert=True)
     
     if entry.queue.name == "Цилинь":
         return await callback.answer("Для этой очереди доступна только разовая запись.", show_alert=True)
@@ -686,17 +700,22 @@ async def toggle_mode_handler(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("swap_start_"))
 async def swap_start(callback: types.CallbackQuery):
-    try: eid = int(callback.data.split("_")[2])
-    except: return
+    try:
+        eid = int(callback.data.split("_")[2])
+    except Exception:
+        return
     entry = session.get(QueueEntry, eid)
-    if not entry: return await callback.answer("Не найдено.", show_alert=True)
+    if not entry:
+        return await callback.answer("Не найдено.", show_alert=True)
     
     chars = session.query(Character).filter_by(user_id=entry.user_id).all()
-    if len(chars) < 2: return await callback.answer("Нет других персонажей.", show_alert=True)
+    if len(chars) < 2:
+        return await callback.answer("Нет других персонажей.", show_alert=True)
     
     kb = []
     for c in chars:
-        if c.nickname == entry.character_name: continue
+        if c.nickname == entry.character_name:
+            continue
         kb.append([types.InlineKeyboardButton(text=f"🔄 На: {c.nickname}", callback_data=f"do_swap_{eid}_{c.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Отмена", callback_data="my_active_queues")])
     await callback.message.edit_text(f"👇 Выберите замену для <b>{entry.character_name}</b>:", parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -720,7 +739,8 @@ async def do_swap_finish(callback: types.CallbackQuery):
         
         await callback.answer(f"✅ {old_nick} -> {new_char.nickname}")
         await show_my_active_queues(callback)
-    else: await show_my_active_queues(callback)
+    else:
+        await show_my_active_queues(callback)
 
 @router.callback_query(F.data == "menu_history")
 async def my_history(callback: types.CallbackQuery):
@@ -784,9 +804,6 @@ async def afk_set_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AFKState.waiting_for_start)
 
 # Helper for date parsing
-from datetime import datetime, timedelta
-
-
 def parse_date_input(text):
     text = text.strip()
     now = get_msk_now()
@@ -797,13 +814,15 @@ def parse_date_input(text):
         dt = datetime.strptime(d_str, "%d.%m.%Y")
         
         # If date is in the past (e.g. user typed 01.01 but it's now 26.01), maybe they meant next year?
-        # Or maybe they just made a mistake. Let's assume current year. 
+        # Or maybe they just made a mistake. Let's assume current year.
+    except Exception:
+        dt = None
         # But if it's December and they type 01.01, they mean next year.
         if dt.month < now.month:
              dt = dt.replace(year=now.year + 1)
              
         return dt
-    except:
+    except Exception:
         return None
 
 @router.callback_query(AFKState.waiting_for_start, F.data.startswith("afk_date_"))

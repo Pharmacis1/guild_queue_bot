@@ -64,7 +64,8 @@ def get_weekly_valor_map(nicknames):
     Calculates weekly valor (from Monday) for a list of nicknames.
     Returns: {nickname: total_valor}
     """
-    if not nicknames: return {}
+    if not nicknames:
+        return {}
     
     from datetime import timedelta
     today = datetime.now()
@@ -75,7 +76,8 @@ def get_weekly_valor_map(nicknames):
     # This assumes nicknames in QueueEntry match Players table exactly (case sensitive-ish)
     
     players = session.query(Player).filter(Player.nickname.in_(nicknames)).all()
-    if not players: return {}
+    if not players:
+        return {}
     
     role_map = {p.role_id: p.nickname for p in players}
     role_ids = list(role_map.keys())
@@ -137,7 +139,7 @@ async def open_system_menu(callback: types.CallbackQuery):
 async def m_users_list(callback: types.CallbackQuery):
     try:
         page = int(callback.data.split(":")[1])
-    except:
+    except Exception:
         page = 0
 
     users = session.query(User).join(Character).distinct().all()
@@ -207,7 +209,8 @@ async def render_user_manage(event, uid, page):
     
     user = session.get(User, uid)
     if not user: 
-        if isinstance(event, types.CallbackQuery): await event.answer("Пользователь не найден.", show_alert=True)
+        if isinstance(event, types.CallbackQuery):
+            await event.answer("Пользователь не найден.", show_alert=True)
         return
     
     chars = session.query(Character).filter_by(user_id=user.id).all()
@@ -257,7 +260,8 @@ async def m_master_toggle_handler(callback: types.CallbackQuery):
     uid, page = int(parts[3]), int(parts[4])
     
     user = session.get(User, uid)
-    if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
+    if not user:
+        return await callback.answer("Пользователь не найден.", show_alert=True)
     
     # Self-protection
     if user.telegram_id == callback.from_user.id:
@@ -278,9 +282,11 @@ async def m_toggle_ban(callback: types.CallbackQuery):
     uid, page = int(parts[3]), int(parts[4])
     user = session.get(User, uid)
     if user:
-        if user.is_master: return await callback.answer("❌ Нельзя забанить Мастера!", show_alert=True)
+        if user.is_master:
+            return await callback.answer("❌ Нельзя забанить Мастера!", show_alert=True)
         user.is_banned = not user.is_banned
-        if user.is_banned: session.query(QueueEntry).filter_by(user_id=uid).delete()
+        if user.is_banned:
+            session.query(QueueEntry).filter_by(user_id=uid).delete()
         session.commit()
         await callback.answer(f"Пользователь {'забанен' if user.is_banned else 'разбанен'}.")
         await render_user_manage(callback, uid, page)
@@ -290,7 +296,8 @@ async def m_char_menu(callback: types.CallbackQuery):
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
     char = session.get(Character, cid)
-    if not char: return await callback.answer("Персонаж не найден.", show_alert=True)
+    if not char:
+        return await callback.answer("Персонаж не найден.", show_alert=True)
     
     text = f"⚙️ <b>Управление персонажем:</b>\nНик: <b>{char.nickname}</b>\nРоль: {'👑 Основа' if char.is_main else '👤 Твин'}"
     kb = [
@@ -305,7 +312,8 @@ async def m_rename_start(callback: types.CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
     char = session.get(Character, cid)
-    if not char: return await callback.answer("Ошибка char.", show_alert=True)
+    if not char:
+        return await callback.answer("Ошибка char.", show_alert=True)
     
     await callback.message.edit_text(f"✏️ Введите новый никнейм для <b>{char.nickname}</b>:", parse_mode="HTML", reply_markup=get_back_btn(f"m_char_menu_{cid}_{uid}_{page}"))
     await state.update_data(target_cid=cid, uid=uid, page=page)
@@ -393,7 +401,8 @@ async def m_add_admin_start(callback: types.CallbackQuery, state: FSMContext):
 async def m_add_admin_save(message: types.Message, state: FSMContext):
     target = message.text.replace("@", "").strip()
     user = session.query(User).filter(User.username == target).first()
-    if not user: return await message.answer(f"❌ Пользователь @{target} не найден в базе.", reply_markup=get_back_btn("menu_master"))
+    if not user:
+        return await message.answer(f"❌ Пользователь @{target} не найден в базе.", reply_markup=get_back_btn("menu_master"))
     
     user.is_master = True
     session.commit()
@@ -476,10 +485,13 @@ async def render_dist_list(event, qid):
 
 @router.callback_query(F.data.startswith("issue_"))
 async def m_issue_reward(callback: types.CallbackQuery):
-    try: eid = int(callback.data.split("_")[1])
-    except: return
+    try:
+        eid = int(callback.data.split("_")[1])
+    except Exception:
+        return
     entry = session.get(QueueEntry, eid)
-    if not entry: return await callback.answer("Уже выдано/удалено.")
+    if not entry:
+        return await callback.answer("Уже выдано/удалено.")
     
     qid, q_name, char_nick = entry.queue_type_id, entry.queue.name, entry.character_name
     user = session.get(User, entry.user_id)
@@ -489,7 +501,8 @@ async def m_issue_reward(callback: types.CallbackQuery):
     main_nick = char_nick
     if user:
         main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
-        if main_char: main_nick = main_char.nickname
+        if main_char:
+            main_nick = main_char.nickname
     
     # LOGIC CALL
     success, msg, hist = issue_reward(session, entry.id, master.username)
@@ -536,10 +549,13 @@ async def m_issue_reward(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("warn_"))
 async def m_warn_user(callback: types.CallbackQuery):
-    try: eid = int(callback.data.split("_")[1])
-    except: return
+    try:
+        eid = int(callback.data.split("_")[1])
+    except Exception:
+        return
     entry = session.get(QueueEntry, eid)
-    if not entry: return await callback.answer("Запись не найдена.", show_alert=True)
+    if not entry:
+        return await callback.answer("Запись не найдена.", show_alert=True)
     
     user = session.get(User, entry.user_id)
     master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
@@ -553,12 +569,14 @@ async def m_warn_user(callback: types.CallbackQuery):
 @router.callback_query(F.data == "m_send_batch")
 async def m_send_batch_notifications(callback: types.CallbackQuery):
     pending = session.query(RewardHistory).filter_by(is_notified=False).all()
-    if not pending: return await callback.answer("Нет уведомлений для отправки.", show_alert=True)
+    if not pending:
+        return await callback.answer("Нет уведомлений для отправки.", show_alert=True)
     
     # Group by User ID
     user_map = {}
     for item in pending:
-        if item.user_id not in user_map: user_map[item.user_id] = []
+        if item.user_id not in user_map:
+            user_map[item.user_id] = []
         user_map[item.user_id].append(item)
         
     count_users = 0
@@ -567,7 +585,9 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
         if not user: 
              # Mark as processed if user gone? Or keep pending? 
              # Better to mark processed to avoid stuck loop
-             for i in items: i.is_notified = True
+             # Better to mark processed to avoid stuck loop
+             for i in items:
+                 i.is_notified = True
              continue
         
         rewards = [i for i in items if i.record_type != "warning"]
@@ -583,7 +603,8 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             msg_text += "\n⚠️ <i>Заберите награды из Клан листа в ближайшее время, пока не пропали.</i>\n\n"
             
         if warnings:
-            if rewards: msg_text += "───────────────\n\n"
+            if rewards:
+                msg_text += "───────────────\n\n"
             msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
             for item in warnings:
                 msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
@@ -597,7 +618,8 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
         try:
             await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
             count_users += 1
-        except: pass
+        except Exception:
+            pass
         
     # --- PUBLIC LOG BROADCAST ---
     log_enabled = get_setting("public_log_enabled")
@@ -613,7 +635,8 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
                 
             for item in all_items:
                 if item.record_type != "warning":
-                    if item.queue_name not in queues_map: queues_map[item.queue_name] = []
+                    if item.queue_name not in queues_map:
+                        queues_map[item.queue_name] = []
                     queues_map[item.queue_name].append(item.character_name)
             
             if queues_map:
@@ -647,7 +670,7 @@ async def m_limits_menu(callback: types.CallbackQuery):
     g_limit = session.query(Settings).filter_by(key="default_limit").first().value
     
     # Fetch personal limits
-    p_users = session.query(User).filter(User.personal_limit != None).all()
+    p_users = session.query(User).filter(User.personal_limit.is_not(None)).all()
     
     text = "⚙️ <b>Настройки лимитов</b>\n\n"
     text += f"🌐 <b>Общий лимит:</b> {g_limit} (записей на человека)\n\n"
@@ -677,18 +700,20 @@ async def m_set_global_start(callback: types.CallbackQuery, state: FSMContext):
 async def m_set_global_save(message: types.Message, state: FSMContext):
     try:
         val = int(message.text)
-        if val < 1: raise ValueError
+        if val < 1:
+            raise ValueError
         setting = session.query(Settings).filter_by(key="default_limit").first()
         setting.value = str(val)
         session.commit()
         await message.answer(f"✅ Общий лимит: {val}", reply_markup=get_master_menu())
         await state.clear()
-    except: await message.answer("❌ Введи число > 0.")
+    except Exception:
+        await message.answer("❌ Введи число > 0.")
 
 @router.callback_query(F.data == "m_set_personal")
 async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext):
     # Fetch personal limits for display
-    p_users = session.query(User).filter(User.personal_limit != None).all()
+    p_users = session.query(User).filter(User.personal_limit.is_not(None)).all()
     
     text = "👤 <b>Установка личного лимита.</b>\n\n"
     if p_users:
@@ -709,7 +734,8 @@ async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext)
 @router.message(LimitStates.waiting_for_nick_limit)
 async def m_set_personal_nick(message: types.Message, state: FSMContext):
     char = session.query(Character).filter_by(nickname=message.text.strip()).first()
-    if not char: return await message.answer("❌ Не найден.", reply_markup=get_back_btn("m_limits_menu"))
+    if not char:
+        return await message.answer("❌ Не найден.", reply_markup=get_back_btn("m_limits_menu"))
     await state.update_data(user_id=char.user_id, nick=char.nickname)
     await message.answer("Введи лимит (0 = сброс):", reply_markup=get_back_btn("m_limits_menu"))
     await state.set_state(LimitStates.waiting_for_personal_limit_value)
@@ -724,7 +750,8 @@ async def m_set_personal_save(message: types.Message, state: FSMContext):
         session.commit()
         await message.answer(f"✅ Лимит для {data['nick']} {'обновлен' if val>0 else 'сброшен'}.", reply_markup=get_master_menu())
         await state.clear()
-    except: await message.answer("❌ Число.")
+    except Exception:
+        await message.answer("❌ Число.")
 
 @router.callback_query(F.data == "m_lock_menu")
 async def m_lock_menu(callback: types.CallbackQuery):
@@ -786,7 +813,8 @@ async def m_force_single_start(callback: types.CallbackQuery, state: FSMContext)
 
 @router.message(MasterManageStates.waiting_for_nickname_add)
 async def m_force_nick(message: types.Message, state: FSMContext):
-    if not await check_google_sheet(message.text): return await message.answer("❌ Невалидный ник.")
+    if not await check_google_sheet(message.text):
+        return await message.answer("❌ Невалидный ник.")
     await state.update_data(nick=message.text)
     kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"f_add_{q.id}")] for q in session.query(QueueType).filter_by(is_active=True).all()]
     await message.answer("Куда?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
@@ -956,8 +984,10 @@ async def run_broadcast(ann_id, bot_instance):
         if not ann or not ann.is_active: return
         users = session.query(User).all()
         for u in users:
-            try: await bot_instance.send_message(u.telegram_id, f"📢 <b>ОБЪЯВЛЕНИЕ</b>\n\n{ann.text}", parse_mode="HTML")
-            except: pass
+            try:
+                await bot_instance.send_message(u.telegram_id, f"📢 <b>ОБЪЯВЛЕНИЕ</b>\n\n{ann.text}", parse_mode="HTML")
+            except Exception:
+                pass
         if ann.schedule_type == 'once_future':
             ann.is_active = False
             session.commit()
@@ -973,9 +1003,12 @@ def schedule_job(ann, bot_instance):
             scheduler.add_job(run_broadcast, 'cron', day_of_week=ann.days_of_week, hour=h, minute=m, id=job_id, replace_existing=True, args=[ann.id, bot_instance])
         elif ann.schedule_type == 'once_future':
             dt = datetime.strptime(ann.run_time, "%d.%m.%Y %H:%M")
+            datetime.strptime(ann.run_time, "%d.%m.%Y %H:%M")
+            dt = datetime.strptime(ann.run_time, "%d.%m.%Y %H:%M")
             dt_msk = MSK.localize(dt)
             scheduler.add_job(run_broadcast, 'date', run_date=dt_msk, id=job_id, replace_existing=True, args=[ann.id, bot_instance])
-    except Exception as e: print(f"❌ Error scheduling {job_id}: {e}")
+    except Exception as e:
+        print(f"❌ Error scheduling {job_id}: {e}")
 
 @router.callback_query(F.data == "m_announce")
 async def m_ann_start(callback: types.CallbackQuery, state: FSMContext):
@@ -1180,7 +1213,8 @@ async def process_future_datetime(message: types.Message, state: FSMContext):
         schedule_job(ann, message.bot)
         await message.answer(f"✅ Запланировано на {dt}", reply_markup=get_master_menu())
         await state.clear()
-    except: await message.answer("❌ Формат: ДД.ММ.ГГГГ ЧЧ:ММ")
+    except Exception:
+        await message.answer("❌ Формат: ДД.ММ.ГГГГ ЧЧ:ММ")
 
 @router.callback_query(F.data.startswith("toggle_day_"))
 async def toggle_day(callback: types.CallbackQuery, state: FSMContext):
@@ -1212,7 +1246,8 @@ async def process_time_only(message: types.Message, state: FSMContext):
         schedule_job(ann, message.bot)
         await message.answer(f"✅ Расписание создано: {t_str}", reply_markup=get_master_menu())
         await state.clear()
-    except: await message.answer("❌ Формат: ЧЧ:ММ")
+    except Exception:
+        await message.answer("❌ Формат: ЧЧ:ММ")
 
 @router.callback_query(F.data == "m_schedule")
 async def m_show_schedule(callback: types.CallbackQuery):
@@ -1233,8 +1268,10 @@ async def m_del_schedule(callback: types.CallbackQuery):
     if task:
         task.is_active = False
         session.commit()
-        try: scheduler.remove_job(f"ann_{aid}")
-        except JobLookupError: pass
+        try:
+            scheduler.remove_job(f"ann_{aid}")
+        except JobLookupError:
+            pass
         await callback.answer("Отключено.")
         await m_show_schedule(callback)
     else: await m_show_schedule(callback)
@@ -1255,15 +1292,19 @@ async def m_bk_create(callback: types.CallbackQuery):
         await callback.message.answer("✅ Бэкап успешно создан!", reply_markup=get_backup_menu_kb())
         # Ideally edit previous message, but "answer" creates new bottom. 
         # Let's try to delete loading msg?
-        try: await callback.message.delete() 
-        except: pass
+        try:
+            await callback.message.delete() 
+        except Exception:
+            pass
     else:
         await callback.message.edit_text("❌ Ошибка при создании бэкапа.", reply_markup=get_backup_menu_kb())
 
 @router.callback_query(F.data.startswith("m_bk_list:"))
 async def m_bk_list(callback: types.CallbackQuery):
-    try: page = int(callback.data.split(":")[1])
-    except: page = 0
+    try:
+        page = int(callback.data.split(":")[1])
+    except Exception:
+        page = 0
     
     # Get files
     backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
@@ -1472,8 +1513,10 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
     
     # 1. Reject
     if action == "no":
-        try: await bot.send_message(target_user.telegram_id, "❌ <b>Ваша заявка отклонена Мастером.</b>", parse_mode="HTML")
-        except: pass
+        try:
+            await bot.send_message(target_user.telegram_id, "❌ <b>Ваша заявка отклонена Мастером.</b>", parse_mode="HTML")
+        except Exception:
+            pass
         
         # Clear pending state
         target_user.pending_request_nick = None
@@ -1490,8 +1533,10 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
         # VALIDATION: Check if request was cancelled (main_input only)
         if reg_type == "main_input":
             if target_user.pending_request_nick != nick:
-                try: await callback.message.edit_text(f"⚠️ <b>Заявка неактуальна.</b>\nПользователь отменил её или изменил ник.\n(Запрос: {nick}, Текущий: {target_user.pending_request_nick})")
-                except: pass
+                try:
+                    await callback.message.edit_text(f"⚠️ <b>Заявка неактуальна.</b>\nПользователь отменил её или изменил ник.\n(Запрос: {nick}, Текущий: {target_user.pending_request_nick})")
+                except Exception:
+                    pass
                 await callback.answer("Заявка отменена пользователем.", show_alert=True)
                 return
 

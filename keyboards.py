@@ -95,9 +95,12 @@ def get_backups_list_kb(files, page=0, page_size=5):
     
     # Navigation
     nav = []
-    if page > 0: nav.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"m_bk_list:{page-1}"))
-    if page < total_pages - 1: nav.append(types.InlineKeyboardButton(text="➡️", callback_data=f"m_bk_list:{page+1}"))
-    if nav: kb.append(nav)
+    if page > 0:
+        nav.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"m_bk_list:{page-1}"))
+    if page < total_pages - 1:
+        nav.append(types.InlineKeyboardButton(text="➡️", callback_data=f"m_bk_list:{page+1}"))
+    if nav:
+        kb.append(nav)
     
     for f in current:
         # File name example: guild_bot_2026-02-01_17-34-43.db
@@ -138,7 +141,8 @@ def get_back_btn(callback_data="back_to_main"):
 
 # Клавиатура выбора дней недели
 def get_weekdays_kb(selected_days=None):
-    if selected_days is None: selected_days = []
+    if selected_days is None:
+        selected_days = []
     
     # Коды дней для APScheduler
     days = [("Понедельник", "mon"), ("Вторник", "tue"), ("Среда", "wed"), 

@@ -98,11 +98,16 @@ def get_valor_tier(value: int, sorted_active_values: List[int], thresholds: Dict
     rank = bisect.bisect_right(sorted_active_values, value)
     pct = rank / total
     
-    if pct > 0.8: return 5 if days_diff >= 4 else 7 # Gold Tier or Sparkle
-    elif pct > 0.6: return 4 # Silver
-    elif pct > 0.4: return 3 # Bronze
-    elif pct > 0.2: return 2 # Iron?
-    else: return 1 # Grey
+    if pct > 0.8:
+        return 5 if days_diff >= 4 else 7
+    elif pct > 0.6:
+        return 4
+    elif pct > 0.4:
+        return 3
+    elif pct > 0.2:
+        return 2
+    else:
+        return 1
     
 def get_gold_tier(value: int, sorted_active_values: List[int], thresholds: Dict[str, int], days_diff: int) -> int:
     """
@@ -119,8 +124,13 @@ def get_gold_tier(value: int, sorted_active_values: List[int], thresholds: Dict[
     rank = bisect.bisect_right(sorted_active_values, value)
     pct = rank / total
     
-    if pct > 0.8: return 5 if days_diff >= 4 else 7
-    elif pct > 0.6: return 4
-    elif pct > 0.4: return 3
-    elif pct > 0.2: return 2
-    else: return 1
+    if pct > 0.8:
+        return 5 if days_diff >= 4 else 7
+    elif pct > 0.6:
+        return 4
+    elif pct > 0.4:
+        return 3
+    elif pct > 0.2:
+        return 2
+    else:
+        return 1

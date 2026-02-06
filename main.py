@@ -5,6 +5,8 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.requests import Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # Web imports
@@ -16,7 +18,7 @@ from handlers.admin import schedule_job
 
 # Bot imports
 from loader import bot, dp, scheduler
-from routers import api, auth, views
+from routers import admin_browser, api, auth, observer, views
 
 # --- WEB APP SETUP ---
 app = FastAPI()
@@ -40,17 +42,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(views.router)
 app.include_router(api.router)
 app.include_router(auth.router)
-# Remote Admin Browser
-from routers import admin_browser
-
 app.include_router(admin_browser.router)
-from routers import observer
-
 app.include_router(observer.router)
-
-
-from fastapi.requests import Request
-from fastapi.responses import JSONResponse
 
 
 @app.exception_handler(Exception)

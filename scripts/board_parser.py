@@ -40,7 +40,8 @@ def parse_board_file(filepath):
                 try: 
                     dt = datetime.fromtimestamp(ts)
                     dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-                except: dt_str = "Error Date"
+                except Exception:
+                    dt_str = "Error Date"
 
             desc = decode_action(rtype, role_id, p0, p1, p2)
             
