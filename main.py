@@ -85,7 +85,9 @@ async def on_startup():
 
     # 4. Start Scheduler
     scheduler.start()
+    scheduler.start()
     print(f"✅ Bot started. Jobs restored: {count}")
+    print("🚀 Version: 2.5.0 (AI Features + RAG + Summary)")
 
 
 async def main():
