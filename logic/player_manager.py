@@ -182,3 +182,106 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
 
         await conn.commit()
         return {"status": "ok", "message": "Saved & Synced"}
+
+
+async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Fetches full profile data for the modal.
+    """
+    async with aiosqlite.connect(web_database.DB_NAME) as conn:
+        conn.row_factory = aiosqlite.Row
+
+        # 1. Basic Player & User Info
+        sql = """
+            SELECT p.role_id, p.nickname, p.class_id, p.in_clan, p.is_alt, 
+                   u.id as user_id, u.telegram_id, u.username, u.afk_start, u.afk_end
+            FROM players p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.role_id = ?
+        """
+        async with conn.execute(sql, (role_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            
+            data = dict(row)
+
+        user_id = data["user_id"]
+        data["afk_history"] = []
+        data["queues"] = []
+        data["linked_chars"] = []
+        data["party"] = None
+
+        if user_id:
+            # 2. AFK History
+            # Combine current AFK (if in user table) with history table
+            # Actually, UI usually separates "Current Status" from "History Log"
+            # But we'll return the log.
+            
+            # Fetch history
+            h_sql = "SELECT start_date, end_date FROM afk_history WHERE user_id = ? ORDER BY start_date DESC LIMIT 5"
+            async with conn.execute(h_sql, (user_id,)) as cursor:
+                h_rows = await cursor.fetchall()
+                for hr in h_rows:
+                    data["afk_history"].append({
+                        "start": str(hr["start_date"]), 
+                        "end": str(hr["end_date"])
+                    })
+
+            # 3. Active Queues
+            q_sql = """
+                SELECT qe.id, qt.name, qe.auto_requeue 
+                FROM queue_entries qe
+                JOIN queue_types qt ON qe.queue_type_id = qt.id
+                WHERE qe.user_id = ?
+            """
+            async with conn.execute(q_sql, (user_id,)) as cursor:
+                q_rows = await cursor.fetchall()
+                data["queues"] = [dict(qr) for qr in q_rows]
+
+            # 4. Linked Characters (Twins)
+            # Fetch all characters for this user from 'characters' table or 'players' table?
+            # 'characters' table is the master list for the bot, 'players' is for stats.
+            # Usually we want 'players' linked to this user for stats display, 
+            # BUT 'characters' is what handles the "My Chars" list etc.
+            # Let's use 'characters' table as it's the link source.
+            c_sql = "SELECT nickname, is_main FROM characters WHERE user_id = ?"
+            async with conn.execute(c_sql, (user_id,)) as cursor:
+                c_rows = await cursor.fetchall()
+                data["linked_chars"] = [dict(cr) for cr in c_rows]
+            
+            # Also ensure current player nickname is in the list if missing (integrity check)
+            if data["nickname"]:
+                nicks = {c["nickname"] for c in data["linked_chars"]}
+                if data["nickname"] not in nicks:
+                    # It might be unlinked in 'characters' but linked in 'players' (should happen rarely)
+                    pass
+
+        # 5. Constant Party (KP)
+        # Find if this role_id is in a party
+        p_sql = """
+            SELECT cp.id, cp.name, pm.is_leader 
+            FROM party_members pm
+            JOIN constant_parties cp ON pm.party_id = cp.id
+            WHERE pm.player_role_id = ?
+        """
+        async with conn.execute(p_sql, (role_id,)) as cursor:
+            p_row = await cursor.fetchone()
+            if p_row:
+                party_data = dict(p_row)
+                party_id = party_data["id"]
+                
+                # Fetch members
+                m_sql = """
+                    SELECT p.nickname, pm.is_leader, p.class_id, p.role_id
+                    FROM party_members pm
+                    JOIN players p ON pm.player_role_id = p.role_id
+                    WHERE pm.party_id = ?
+                """
+                async with conn.execute(m_sql, (party_id,)) as cursor:
+                    m_rows = await cursor.fetchall()
+                    party_data["members"] = [dict(mr) for mr in m_rows]
+                
+                data["party"] = party_data
+
+        return data

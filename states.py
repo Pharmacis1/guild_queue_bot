@@ -43,3 +43,11 @@ class LimitStates(StatesGroup):
 class AFKState(StatesGroup):
     waiting_for_start = State()
     waiting_for_end = State()
+
+
+class AIAdminStates(StatesGroup):
+    waiting_for_topic = State()
+    waiting_for_content = State()
+    waiting_for_edit_content = State()
+    waiting_for_summary_channel = State()
+

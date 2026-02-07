@@ -36,6 +36,7 @@ def get_master_menu():
         [types.InlineKeyboardButton(text="👥 Сообщество и игроки", callback_data="m_menu_community")],
         [types.InlineKeyboardButton(text="📢 Объявления", callback_data="m_menu_announce")],
         [types.InlineKeyboardButton(text="💾 Система и Бэкапы", callback_data="m_menu_system")],
+        [types.InlineKeyboardButton(text="🤖 AI & FAQ", callback_data="m_menu_ai")],
         [types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="back_to_main")],
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
@@ -78,6 +79,16 @@ def get_master_system_menu():
     kb = [
         [types.InlineKeyboardButton(text="💾 Управление бэкапами", callback_data="m_backup_menu")],
         [types.InlineKeyboardButton(text="📝 Настройка сводки по выдаче", callback_data="m_log_settings")],
+        [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")],
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def get_master_ai_menu():
+    kb = [
+        [types.InlineKeyboardButton(text="➕ Добавить тему", callback_data="m_ai_add")],
+        [types.InlineKeyboardButton(text="📚 Список тем", callback_data="m_ai_list")],
+        [types.InlineKeyboardButton(text="📝 Уст. канал саммари", callback_data="m_ai_set_channel")],
         [types.InlineKeyboardButton(text="🔙 Назад в меню Мастера", callback_data="menu_master")],
     ]
     return types.InlineKeyboardMarkup(inline_keyboard=kb)

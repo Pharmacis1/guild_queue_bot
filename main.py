@@ -13,12 +13,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from database import ScheduledAnnouncement, init_db, session
-from handlers import admin, user
+from handlers import admin, user, ai_admin, ai_user
 from handlers.admin import schedule_job
 
 # Bot imports
 from loader import bot, dp, scheduler
-from routers import admin_browser, api, auth, observer, views
+from routers import admin_browser, api, auth, observer, views, api_dashboard
 
 # --- WEB APP SETUP ---
 app = FastAPI()
@@ -44,6 +44,7 @@ app.include_router(api.router)
 app.include_router(auth.router)
 app.include_router(admin_browser.router)
 app.include_router(observer.router)
+app.include_router(api_dashboard.router)
 
 
 @app.exception_handler(Exception)
@@ -91,6 +92,8 @@ async def main():
     # Setup Bot Routers
     dp.include_router(user.router)
     dp.include_router(admin.router)
+    dp.include_router(ai_admin.router)
+    dp.include_router(ai_user.router)
 
     await bot.delete_webhook(drop_pending_updates=True)
     await on_startup()

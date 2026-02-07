@@ -155,6 +155,49 @@ class PartyMember(Base):
     party = relationship("ConstantParty", back_populates="members")
 
 
+class FaqTopic(Base):
+    __tablename__ = "faq_topics"
+    id = Column(Integer, primary_key=True)
+    topic = Column(String)
+    content = Column(String)
+    created_by = Column(Integer)  # User ID of creator (Telegram ID)
+    updated_at = Column(DateTime, default=get_msk_now)
+    # RAG Support
+    embedding = Column(String, nullable=True)  # JSON-serialized list of floats
+    
+    messages = relationship("FaqMessage", back_populates="topic", cascade="all, delete-orphan")
+
+
+class FaqMessage(Base):
+    __tablename__ = "faq_messages"
+    id = Column(Integer, primary_key=True)
+    topic_id = Column(Integer, ForeignKey("faq_topics.id"))
+    text = Column(String, nullable=True)
+    photo_id = Column(String, nullable=True)  # Telegram File ID
+    order_index = Column(Integer, default=0)
+    
+    topic = relationship("FaqTopic", back_populates="messages")
+
+
+class MessageLog(Base):
+    __tablename__ = "message_logs"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer)  # BigInteger in real DB, Integer in SQLite is dynamic
+    thread_id = Column(Integer, nullable=True)
+    user_id = Column(Integer)
+    user_name = Column(String)
+    text = Column(String)
+    timestamp = Column(DateTime, default=get_msk_now)
+
+
+class SummaryState(Base):
+    __tablename__ = "summary_states"
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer)
+    thread_id = Column(Integer, nullable=True)
+    last_summary_time = Column(DateTime)
+
+
 # --- ИНИЦИАЛИЗАЦИЯ ---
 
 engine = create_engine("sqlite:///guild_bot.db", echo=False)
@@ -306,6 +349,112 @@ def init_db():
                 print("Migration successful: Created afk_history table")
             except Exception as e:
                 print(f"Migration failed (afk_history table): {e}")
+
+        # 9. FAQ Topics Table (Ensure existence)
+        try:
+            conn.execute(text("SELECT count(*) FROM faq_topics LIMIT 1"))
+        except Exception:
+            print("Table 'faq_topics' missing. Migrating...")
+            try:
+                conn.execute(
+                    text("""
+                    CREATE TABLE faq_topics (
+                        id INTEGER PRIMARY KEY,
+                        topic VARCHAR,
+                        content VARCHAR,
+                        created_by INTEGER,
+                        updated_at DATETIME
+                    )
+                """)
+                )
+                print("Migration successful: Created faq_topics table")
+            except Exception as e:
+                print(f"Migration failed (faq_topics table): {e}")
+
+        # 10. MessageLog Table
+        try:
+            conn.execute(text("SELECT count(*) FROM message_logs LIMIT 1"))
+        except Exception:
+            print("Table 'message_logs' missing. Migrating...")
+            try:
+                conn.execute(
+                    text("""
+                    CREATE TABLE message_logs (
+                        id INTEGER PRIMARY KEY,
+                        chat_id INTEGER,
+                        thread_id INTEGER,
+                        user_id INTEGER,
+                        user_name VARCHAR,
+                        text VARCHAR,
+                        timestamp DATETIME
+                    )
+                """)
+                )
+                print("Migration successful: Created message_logs table")
+            except Exception as e:
+                print(f"Migration failed (message_logs table): {e}")
+
+        # 11. SummaryState Table
+        try:
+            conn.execute(text("SELECT count(*) FROM summary_states LIMIT 1"))
+        except Exception:
+            print("Table 'summary_states' missing. Migrating...")
+            try:
+                conn.execute(
+                    text("""
+                    CREATE TABLE summary_states (
+                        id INTEGER PRIMARY KEY,
+                        chat_id INTEGER,
+                        thread_id INTEGER,
+                        last_summary_time DATETIME
+                    )
+                """)
+                )
+                print("Migration successful: Created summary_states table")
+            except Exception as e:
+                print(f"Migration failed (summary_states table): {e}")
+
+        # 12. RAG & Multi-Message Migration
+        # A. Add embedding to FaqTopic
+        try:
+            conn.execute(text("SELECT embedding FROM faq_topics LIMIT 1"))
+        except Exception:
+            print("Column 'embedding' in faq_topics missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE faq_topics ADD COLUMN embedding VARCHAR"))
+                print("Migration successful: Added faq_topics.embedding")
+            except Exception as e:
+                print(f"Migration failed (faq_topics.embedding): {e}")
+
+        # B. Create FaqMessage table
+        try:
+            conn.execute(text("SELECT count(*) FROM faq_messages LIMIT 1"))
+        except Exception:
+            print("Table 'faq_messages' missing. Migrating...")
+            try:
+                conn.execute(
+                    text("""
+                    CREATE TABLE faq_messages (
+                        id INTEGER PRIMARY KEY,
+                        topic_id INTEGER REFERENCES faq_topics(id),
+                        text VARCHAR,
+                        photo_id VARCHAR,
+                        order_index INTEGER DEFAULT 0
+                    )
+                """)
+                )
+                print("Migration successful: Created faq_messages table")
+                
+                # C. Data Migration: Move FaqTopic.content -> FaqMessage
+                # We need to do this via session usually, but plain SQL is faster for simple move if no logic needed.
+                # SQLite: INSERT INTO faq_messages (topic_id, text, order_index) SELECT id, content, 0 FROM faq_topics WHERE content IS NOT NULL
+                conn.execute(
+                    text("INSERT INTO faq_messages (topic_id, text, order_index) SELECT id, content, 0 FROM faq_topics WHERE content IS NOT NULL AND content != ''")
+                )
+                print("Data Migration: Moved existing content to messages.")
+                
+            except Exception as e:
+                print(f"Migration failed (faq_messages table): {e}")
 
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
