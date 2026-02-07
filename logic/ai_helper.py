@@ -236,20 +236,34 @@ Question: {question}
                 return 0
             return dot_product / (magnitude1 * magnitude2)
 
+        # Calculate all scores first
         for topic in topics:
             try:
                 topic_embedding = json.loads(topic.embedding)
                 score = cosine_similarity(query_embedding, topic_embedding)
-                # Lower threshold to catch more loosely related topics
-                if score > 0.30: 
-                    scored_topics.append((score, topic))
+                scored_topics.append((score, topic))
             except Exception:
                 continue
 
         # Sort by score DESC
         scored_topics.sort(key=lambda x: x[0], reverse=True)
         
-        return [t[1] for t in scored_topics[:20]]
+        # LOGIC UPDATE:
+        # If total topics count is relatively small (< 2x Limit), we should be generous.
+        # But if total topics <= limit, just return ALL of them regardless of score.
+        # The LLM (Gemini 1.5/2.0) has a huge context window, so seeing 6 or 20 topics is nothing.
+        # This ensures we don't accidentally filter out a necessary "puzzle piece" (like Topic 6 vs Topic 4).
+        
+        if len(scored_topics) <= limit:
+             return [t[1] for t in scored_topics]
+
+        # Otherwise, filter by threshold and take top N
+        filtered_topics = []
+        for score, topic in scored_topics:
+            if score > 0.25: # Even lower threshold if we have many topics
+                filtered_topics.append(topic)
+                
+        return filtered_topics[:limit]
 
 # Global instance
 ai_helper = None
