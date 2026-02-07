@@ -41,7 +41,7 @@ jobs:
           username: ${{ secrets.USER }}
           host: ${{ secrets.HOST }}
           key: ${{ secrets.SSH_KEY }}
-          source: "compose.yml,Caddyfile,guild_bot.db"
+          source: "compose.yml,Caddyfile"
           target: "guild_queue_bot"
       - name: Executing remote ssh commands to deploy
         uses: appleboy/ssh-action@v1
@@ -52,5 +52,5 @@ jobs:
           script: |
             cd guild_queue_bot
             sudo docker compose -f compose.yml pull
-            sudo docker compose -f compose.yml up -d
+            sudo docker compose -f compose.yml up -d --force-recreate
             sudo docker system prune -f
