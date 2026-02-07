@@ -241,7 +241,7 @@ Question: {question}
                 topic_embedding = json.loads(topic.embedding)
                 score = cosine_similarity(query_embedding, topic_embedding)
                 # Lower threshold to catch more loosely related topics
-                if score > 0.35: 
+                if score > 0.30: 
                     scored_topics.append((score, topic))
             except Exception:
                 continue
@@ -249,7 +249,7 @@ Question: {question}
         # Sort by score DESC
         scored_topics.sort(key=lambda x: x[0], reverse=True)
         
-        return [t[1] for t in scored_topics[:limit]]
+        return [t[1] for t in scored_topics[:20]]
 
 # Global instance
 ai_helper = None
