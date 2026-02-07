@@ -41,7 +41,7 @@ jobs:
           username: ${{ secrets.USER }}
           host: ${{ secrets.HOST }}
           key: ${{ secrets.SSH_KEY }}
-          source: "compose.yml,Caddyfile"
+          source: "compose.yml,Caddyfile,frontend"
           target: "guild_queue_bot"
       - name: Executing remote ssh commands to deploy
         uses: appleboy/ssh-action@v1
