@@ -765,8 +765,8 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                             {/* Interval Data */}
                                             {row.interval_stats?.map((stat, i) => {
                                                 const isZero = stat.valor === 0;
-                                                let bg = `rgba(139, 0, 0, ${0.3 + (stat.valor / (columnMaxes[i] || 1)) * 0.7})`;
-                                                let boxShadow = `0 0 10px rgba(139, 0, 0, ${0.2 + (stat.valor / (columnMaxes[i] || 1)) * 0.4})`;
+                                                let bg = `rgba(139, 0, 0, ${0.15 + (stat.valor / (columnMaxes[i] || 1)) * 0.35})`;
+                                                let boxShadow = `0 0 10px rgba(139, 0, 0, ${0.1 + (stat.valor / (columnMaxes[i] || 1)) * 0.2})`;
                                                 let border = 'none';
                                                 let color = '#fff';
 
@@ -827,7 +827,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                             {/* TOTAL SUM */}
                                             <div className="kh-col kh-stage" style={{ justifyContent: 'center' }}>
                                                 <span style={{
-                                                    background: `rgba(139, 0, 0, ${0.15 + (row.total_valor / maxTotalValor) * 0.45})`,
+                                                    background: `rgba(139, 0, 0, ${0.08 + (row.total_valor / maxTotalValor) * 0.22})`,
                                                     color: '#fff',
                                                     width: '34px',
                                                     height: '34px',
@@ -839,7 +839,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                                     borderRadius: '4px',
                                                     fontSize: '0.9rem',
                                                     fontWeight: 700,
-                                                    boxShadow: `0 0 10px rgba(139, 0, 0, ${0.1 + (row.total_valor / maxTotalValor) * 0.3})`
+                                                    boxShadow: `0 0 10px rgba(139, 0, 0, ${0.05 + (row.total_valor / maxTotalValor) * 0.15})`
                                                 }}>
                                                     {row.total_valor.toLocaleString()}
                                                 </span>
