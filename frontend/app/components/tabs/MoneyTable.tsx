@@ -669,18 +669,18 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
 
                                     if (row.is_newcomer) {
                                         stickyStyle = {
-                                            background: '#0d1212',
-                                            backgroundImage: 'linear-gradient(to right, rgba(64, 224, 208, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
+                                            backgroundColor: 'rgba(5, 5, 5, 1)',
+                                            backgroundImage: 'linear-gradient(to right, rgba(64, 224, 208, 0.15) 0%, transparent 85%)'
                                         };
                                     } else if (row.is_afk) {
                                         stickyStyle = {
-                                            background: '#121212',
-                                            backgroundImage: 'linear-gradient(to right, rgba(128, 128, 128, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
+                                            backgroundColor: 'rgba(5, 5, 5, 1)',
+                                            backgroundImage: 'linear-gradient(to right, rgba(128, 128, 128, 0.15) 0%, transparent 85%)'
                                         };
                                     } else if (row.is_mine) {
                                         stickyStyle = {
-                                            background: '#0d120d',
-                                            backgroundImage: 'linear-gradient(to right, rgba(50, 205, 50, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
+                                            backgroundColor: 'rgba(5, 5, 5, 1)',
+                                            backgroundImage: 'linear-gradient(to right, rgba(50, 205, 50, 0.15) 0%, transparent 85%)'
                                         };
                                     }
 
