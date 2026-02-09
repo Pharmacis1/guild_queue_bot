@@ -172,7 +172,14 @@ async def get_kh_table_data(
             "join_date": jd_str,
             "join_days_ago": jd_diff,
             "valor_tier": v_tier,
-            "gold_tier": g_tier
+            "gold_tier": g_tier,
+            "s1_details": r.get("s1_details", []),
+            "s2_details": r.get("s2_details", []),
+            "s3_details": r.get("s3_details", []),
+            "s4_details": r.get("s4_details", []),
+            "s5_details": r.get("s5_details", []),
+            "s6_details": r.get("s6_details", []),
+            "s7_details": r.get("s7_details", []),
         })
 
     print(f"DEBUG: Returning {len(final_rows)} rows to API")
@@ -323,7 +330,7 @@ async def get_history_data(
             if t == "valor": allowed.append(1)
             elif t == "gold": allowed.append(2)
             elif t == "items": allowed.append(0)
-            elif t == "roster": allowed.extend([6, 8, 10])
+            elif t == "roster": allowed.extend([5, 6, 7, 8, 9, 10])
         
         if allowed:
             placeholders = ",".join("?" for _ in allowed)
@@ -335,13 +342,49 @@ async def get_history_data(
     async with aiosqlite.connect(DB_NAME) as conn:
         cursor = await conn.execute(sql, tuple(params))
         raw = await cursor.fetchall()
+
+        # [FIX] Pre-fetch all nicknames for dynamic ID resolution in descriptions
+        cursor = await conn.execute("SELECT role_id, nickname FROM players WHERE nickname IS NOT NULL")
+        id_to_nick = {r[0]: r[1] for r in await cursor.fetchall()}
     
+    # Context Data
+    join_dates, role_user_map = await get_join_dates()
+    afk_map = await get_afk_map()
+    today = datetime.now()
+
+    import re
+    id_pattern = re.compile(r"ID (\d+)")
+
     result = []
     for date_evt, name, cid, desc, etype, role_id, item_name, ts in raw:
+        # [FIX] Dynamic ID resolution in description
+        if desc and "ID " in desc:
+            matches = id_pattern.findall(desc)
+            for m_id_str in matches:
+                try:
+                    m_id = int(m_id_str)
+                    if m_id in id_to_nick:
+                        desc = desc.replace(f"ID {m_id}", id_to_nick[m_id])
+                except: pass
+
         icon = f"/static/icons/{cid}.png" if cid in CLASSES else ""
         cname = CLASSES[cid][0] if cid in CLASSES else ""
         is_mine = name and name.lower().strip() in my_nicks
         
+        # Join Date logic
+        jd_str = ""
+        jd_diff = 0
+        if role_id in join_dates:
+            raw_jd = join_dates[role_id].split()[0]
+            jd_str = raw_jd
+            try:
+                jd_dt = datetime.strptime(raw_jd, "%Y-%m-%d")
+                jd_diff = (today - jd_dt).days
+            except: pass
+            
+        # AFK logic
+        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map)
+
         result.append({
             "date": date_evt,
             "name": name,
@@ -352,7 +395,11 @@ async def get_history_data(
             "role_id": role_id,
             "item_name": item_name,
             "is_mine": is_mine,
-            "timestamp": ts
+            "timestamp": ts,
+            "join_date": jd_str,
+            "join_days_ago": jd_diff,
+            "is_afk": is_afk,
+            "afk_dates": afk_text
         })
         
     return result

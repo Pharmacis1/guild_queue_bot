@@ -530,7 +530,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                     margin: '0 auto',
                     border: '1px solid rgba(255, 255, 255, 0.15)',
                     borderRadius: '8px',
-                    background: 'rgba(0, 0, 0, 0.6)',
+                    background: 'rgba(5, 5, 5, 1)',
                     backdropFilter: 'blur(5px)',
                     position: 'relative'
                 }}
@@ -541,7 +541,8 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                     minWidth: '100%',
                     width: intervals.length > 10 ? 'max-content' : '100%',
                     maxWidth: 'none',
-                    margin: '0'
+                    margin: '0',
+                    background: 'rgba(5, 5, 5, 1)'
                 }}>
                     <div className="kh-table-header" style={{
                         display: 'grid',
@@ -668,18 +669,18 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
 
                                     if (row.is_newcomer) {
                                         stickyStyle = {
-                                            background: '#050505',
-                                            backgroundImage: 'linear-gradient(to right, rgba(64, 224, 208, 0.4) 0%, rgba(64, 224, 208, 0.2) 100%)'
+                                            background: '#0d1212',
+                                            backgroundImage: 'linear-gradient(to right, rgba(64, 224, 208, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
                                         };
                                     } else if (row.is_afk) {
                                         stickyStyle = {
-                                            background: '#050505',
-                                            backgroundImage: 'linear-gradient(to right, rgba(128, 128, 128, 0.3) 0%, rgba(128, 128, 128, 0.15) 100%)'
+                                            background: '#121212',
+                                            backgroundImage: 'linear-gradient(to right, rgba(128, 128, 128, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
                                         };
                                     } else if (row.is_mine) {
                                         stickyStyle = {
-                                            background: '#050505',
-                                            backgroundImage: 'linear-gradient(to right, rgba(50, 205, 50, 0.25) 0%, rgba(50, 205, 50, 0.1) 100%)'
+                                            background: '#0d120d',
+                                            backgroundImage: 'linear-gradient(to right, rgba(50, 205, 50, 0.15) 0%, rgba(5, 5, 5, 1) 85%)'
                                         };
                                     }
 

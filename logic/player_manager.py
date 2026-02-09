@@ -230,7 +230,7 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
 
             # 3. Active Queues
             q_sql = """
-                SELECT qe.id, qt.name, qe.auto_requeue 
+                SELECT qe.id, qt.name, qe.auto_requeue, qe.character_name
                 FROM queue_entries qe
                 JOIN queue_types qt ON qe.queue_type_id = qt.id
                 WHERE qe.user_id = ?
@@ -245,10 +245,22 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
             # Usually we want 'players' linked to this user for stats display, 
             # BUT 'characters' is what handles the "My Chars" list etc.
             # Let's use 'characters' table as it's the link source.
-            c_sql = "SELECT nickname, is_main FROM characters WHERE user_id = ?"
+            c_sql = """
+                SELECT c.nickname, c.is_main, MAX(p.class_id) as class_id 
+                FROM characters c
+                LEFT JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
+                WHERE c.user_id = ?
+                GROUP BY c.nickname, c.is_main
+            """
             async with conn.execute(c_sql, (user_id,)) as cursor:
                 c_rows = await cursor.fetchall()
-                data["linked_chars"] = [dict(cr) for cr in c_rows]
+                data["linked_chars"] = []
+                for cr in c_rows:
+                    data["linked_chars"].append({
+                        "nickname": cr["nickname"],
+                        "is_main": bool(cr["is_main"]),
+                        "class_id": cr["class_id"]
+                    })
             
             # Also ensure current player nickname is in the list if missing (integrity check)
             if data["nickname"]:

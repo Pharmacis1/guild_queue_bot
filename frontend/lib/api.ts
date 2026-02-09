@@ -9,6 +9,7 @@ const api = axios.create({
 export interface InitData {
     user: UserData | null;
     classes: Record<string, [string, string, string]>;
+    queue_types: { id: number; name: string }[];
     last_updated: string;
     bot_username: string;
 }
@@ -39,6 +40,8 @@ export interface KHTableRow {
     s5: number;
     s6: number;
     s7: number;
+    s8: number;
+    s9: number;
     adepts: number;
     dances: number;
     total_valor: number;
@@ -51,6 +54,13 @@ export interface KHTableRow {
     join_days_ago: number;
     valor_tier: string;
     gold_tier: string;
+    s1_details?: string[];
+    s2_details?: string[];
+    s3_details?: string[];
+    s4_details?: string[];
+    s5_details?: string[];
+    s6_details?: string[];
+    s7_details?: string[];
 }
 
 export interface KHResponse {
@@ -70,6 +80,7 @@ export interface MoneyTableRow {
     name: string;
     class_id: number;
     total_gold: number;
+    total_valor: number; // Added
     gold_count: number; // For averages
     avg_gold?: number; // Pre-calc or calc on front
     is_mine: boolean;
@@ -77,14 +88,18 @@ export interface MoneyTableRow {
     is_afk: boolean;
     join_date: string;
     join_days_ago: number;
+    afk_dates?: string;
     // Interval specific
     interval_stats?: {
+        label: string; // Added label 
         start: string;
         end: string;
         gold: number;
+        valor: number; // Added
         is_pre_join: boolean;
         is_newcomer_stay: boolean;
         is_afk_stay: boolean;
+        valor_details?: string[];
     }[];
 }
 
@@ -113,6 +128,10 @@ export interface HistoryRow {
     item_name: string | null;
     is_mine: boolean;
     timestamp: number;
+    join_date: string;
+    join_days_ago: number;
+    is_afk: boolean;
+    afk_dates?: string;
 }
 
 export const fetchHistoryTable = async (params?: Record<string, any>): Promise<HistoryRow[]> => {
@@ -133,9 +152,9 @@ export interface ProfileResponse {
     afk_start: string | null;
     afk_end: string | null;
     afk_history: { start: string; end: string }[];
-    queues: { id: number; name: string; auto_requeue: boolean }[];
-    linked_chars: { nickname: string; is_main: boolean }[];
-    party: { id: number; name: string | null; is_leader: boolean; members: any[] } | null;
+    queues: { id: number; name: string; auto_requeue: boolean; character_name?: string }[];
+    linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];
+    party: { id: number; name: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
 }
 
 export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => {
@@ -145,6 +164,22 @@ export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => 
 
 export const updateProfile = async (roleId: number, data: any): Promise<any> => {
     const response = await api.post(`/dashboard/profile/${roleId}`, data);
+    return response.data;
+};
+
+export const addEvent = async (data: { role_id: number, date: string, value: number, description?: string }): Promise<any> => {
+    const response = await api.post('/add_event', data);
+    return response.data;
+};
+
+export const addAfkHistory = async (data: { user_id: number, start: string, end: string }): Promise<any> => {
+    const response = await api.post('/afk/add', data);
+    return response.data;
+};
+
+// --- OBSERVER ---
+export const fetchObserver = async (roleId: number): Promise<{ status: string; html: string; message?: string }> => {
+    const response = await api.get<{ status: string; html: string; message?: string }>(`/observer/${roleId}`);
     return response.data;
 };
 

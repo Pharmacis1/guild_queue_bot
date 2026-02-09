@@ -110,25 +110,25 @@ async def get_last_update_time():
 def analyze_stats(events):
     """
     Analyzes player event list.
-    Returns a dictionary with all counters.
+    Returns a dictionary with all counters and details for tooltips.
     """
     stats = {
-        "s1": 0,
-        "s2": 0,
-        "s3": 0,
-        "s4": 0,
-        "s5": 0,
-        "s6": 0,
-        "s7": 0,
-        "adepts": 0,
-        "dances": 0,
-        "total_gold": 0,
-        "total_valor": 0,
+        "s1": 0, "s2": 0, "s3": 0, "s4": 0, "s5": 0, "s6": 0, "s7": 0,
+        "adepts": 0, "dances": 0, "total_gold": 0, "total_valor": 0,
+        "s1_details": [], "s2_details": [], "s3_details": [], "s4_details": [],
+        "s5_details": [], "s6_details": [], "s7_details": [], "valor_details": []
     }
 
     events.sort(key=lambda x: x[0])
 
+    def fmt_date(ts):
+        if not ts: return ""
+        # Convert unix timestamp to DD.MM
+        return datetime.fromtimestamp(ts, timezone(timedelta(hours=3))).strftime("%d.%m")
+
     for i, (ts, val, etype) in enumerate(events):
+        d_str = fmt_date(ts)
+
         # Gold
         if etype == 2:
             stats["total_gold"] += val
@@ -137,7 +137,8 @@ def analyze_stats(events):
         # Valor
         if etype == 1:
             stats["total_valor"] += val
-
+            
+            detail_label = ""
             # Stages
             if val == 4:
                 is_dance = False
@@ -155,25 +156,47 @@ def analyze_stats(events):
 
                 if is_dance:
                     stats["dances"] += 1
+                    detail_label = f"Танцы (4)"
                 else:
                     stats["s1"] += 1
+                    stats["s1_details"].append(d_str)
+                    detail_label = f"Этап I (4)"
 
             elif val == 6:
                 stats["s2"] += 1
+                stats["s2_details"].append(d_str)
+                detail_label = f"Этап II (6)"
             elif val == 10:
                 stats["s3"] += 1
+                stats["s3_details"].append(d_str)
+                detail_label = f"Этап III (10)"
             elif val == 14:
                 stats["s4"] += 1
+                stats["s4_details"].append(d_str)
+                detail_label = f"Этап IV (14)"
             elif val == 24:
                 stats["s5"] += 1
+                stats["s5_details"].append(d_str)
+                detail_label = f"Этап V (24)"
             elif val == 40:
                 stats["s6"] += 1
+                stats["s6_details"].append(d_str)
+                detail_label = f"Этап VI (40)"
             elif val == 70:
                 stats["s7"] += 1
+                stats["s7_details"].append(d_str)
+                detail_label = f"Этап VII (70)"
             elif val == 7:
                 stats["adepts"] += 1
+                detail_label = f"Адепты (7)"
             elif val in [2, 8]:
                 stats["dances"] += 1
+                detail_label = f"Танцы ({val})"
+            else:
+                detail_label = f"Доблесть ({val})"
+            
+            if detail_label:
+                stats["valor_details"].append(f"{d_str}: {detail_label}")
 
     return stats
 
@@ -247,30 +270,11 @@ async def get_data_from_db(
         if intervals:
             stats["interval_stats"] = []
             for interval in intervals:
-                # Filter events for this interval
-                # Use standard timestamp comparison
-                # (interval start/end are datetime objects, events have unix ts or need conversion?)
-                # Wait, events have `ts` (unix timestamp)
-
-                # Use pytz to ensure MSK timezone consistency if available, else UTC fallback?
-                # Actually, the simplest way is to ensure we constructed intervals with the same assumption.
-                # Let's rely on string comparison or naive-to-naive if possible, but events are TS.
-                # Aligning with api.py: MSK (UTC+3)
-
-                # Naive to Timestamp uses system local time. We want strict control.
-                # If we assume 00:00 MSK for the start of the day:
-                # TS = (dt - 1970).total_seconds() - but need correct offset.
-
-                # Easy fix: Make interval dates explicit MSK before timestamping
-                from datetime import timezone
-
+                # TS alignment with MSK
                 msk_offset = timedelta(hours=3)
                 tz_msk = timezone(msk_offset)
 
-                # Make them aware (interpreting them AS MSK)
                 dt_start_msk = interval["start"].replace(tzinfo=tz_msk)
-
-                # End date + 1 day to cover full day up to 00:00 next day
                 dt_end_msk = (interval["end"] + timedelta(days=1)).replace(tzinfo=tz_msk)
 
                 ts_start = dt_start_msk.timestamp()
@@ -286,6 +290,7 @@ async def get_data_from_db(
                         "end": interval["end"],
                         "valor": istats["total_valor"],
                         "gold": istats["total_gold"],
+                        "valor_details": istats["valor_details"],
                     }
                 )
 

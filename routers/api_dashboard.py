@@ -24,6 +24,7 @@ class UserData(BaseModel):
 class InitResponse(BaseModel):
     user: Optional[UserData]
     classes: dict
+    queue_types: List[dict]
     last_updated: str
     bot_username: str
 
@@ -50,6 +51,13 @@ class KHTableRow(BaseModel):
     join_days_ago: int
     valor_tier: str
     gold_tier: str
+    s1_details: Optional[List[str]] = []
+    s2_details: Optional[List[str]] = []
+    s3_details: Optional[List[str]] = []
+    s4_details: Optional[List[str]] = []
+    s5_details: Optional[List[str]] = []
+    s6_details: Optional[List[str]] = []
+    s7_details: Optional[List[str]] = []
 
 class KHResponse(BaseModel):
     rows: List[KHTableRow]
@@ -78,10 +86,12 @@ class ProfileQueue(BaseModel):
     id: int
     name: str
     auto_requeue: bool
+    character_name: Optional[str]
 
 class ProfileLinkedChar(BaseModel):
     nickname: str
     is_main: bool
+    class_id: Optional[int] = 0
 
 class ProfilePartyMember(BaseModel):
     nickname: Optional[str]
@@ -127,6 +137,15 @@ async def get_init_data(request: Request):
     user = await get_current_user(request)
     last_upd = await get_last_update_time()
     
+    # Fetch active queue types
+    import aiosqlite
+    import web_database
+    async with aiosqlite.connect(web_database.DB_NAME) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT id, name FROM queue_types WHERE is_active = 1") as cursor:
+            q_rows = await cursor.fetchall()
+            queue_types = [dict(r) for r in q_rows]
+
     user_data = None
     if user:
         user_data = UserData(
@@ -141,8 +160,9 @@ async def get_init_data(request: Request):
     return InitResponse(
         user=user_data,
         classes=CLASSES,
+        queue_types=queue_types,
         last_updated=last_upd,
-        bot_username="Pharmacis1Bot" # Should fetch from env
+        bot_username="Lineage2_Guild_Bot" # Should probably be dynamic but hardcoded for now matches existing
     )
 
 @router.get("/kh", response_model=KHResponse)
@@ -239,9 +259,20 @@ async def get_profile_endpoint(role_id: int):
 @router.post("/profile/{role_id}")
 async def update_profile_endpoint(role_id: int, request: Request):
     user = await get_current_user(request)
-    if not user or not user.is_master:
-         # Only masters can edit for now? Or owner?
-         # TODO: Check if user owns this char
+    if not user:
+         from fastapi import HTTPException
+         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Permission check: Master can edit anyone, User can edit their own characters
+    can_edit = user.is_master
+    if not can_edit:
+        # Check ownership
+        from database import Player
+        player = session.query(Player).filter_by(role_id=role_id, user_id=user.id).first()
+        if player:
+            can_edit = True
+
+    if not can_edit:
          from fastapi import HTTPException
          raise HTTPException(status_code=403, detail="Access denied")
 

@@ -11,6 +11,10 @@ start "Arahnius Bot" cmd /k "venv\Scripts\python main.py"
 echo 2. Launching Zrok Tunnel (%ZROK_SHARE_NAME%)...
 start "Zrok Tunnel" cmd /k "zrok share reserved %ZROK_SHARE_NAME%"
 
+
+echo 3. Launching Frontend (Next.js)...
+start "Frontend" cmd /k "cd frontend && npm run dev"
+
 echo.
 echo Started!
 pause
