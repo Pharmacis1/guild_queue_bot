@@ -116,7 +116,8 @@ async def main():
 # Proxy static nextjs assets
 @app.get("/_next/{full_path:path}")
 async def proxy_next_assets(full_path: str):
-    target_url = f"http://frontend:3000/_next/{full_path}"
+    frontend_url = os.getenv("FRONTEND_URL", "http://frontend:3000")
+    target_url = f"{frontend_url}/_next/{full_path}"
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(target_url) as resp:
@@ -134,9 +135,10 @@ async def serve_react_app(full_path: str):
         return JSONResponse({"status": "error", "message": "Not Found"}, status_code=404)
 
     # Proxy to frontend container
-    target_url = f"http://frontend:3000/{full_path}"
+    frontend_url = os.getenv("FRONTEND_URL", "http://frontend:3000")
+    target_url = f"{frontend_url}/{full_path}"
     if not full_path:  # Root path
-        target_url = "http://frontend:3000/"
+        target_url = f"{frontend_url}/"
     
     async with aiohttp.ClientSession() as session:
         try:
