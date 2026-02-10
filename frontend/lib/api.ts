@@ -183,4 +183,9 @@ export const fetchObserver = async (roleId: number): Promise<{ status: string; h
     return response.data;
 };
 
+export const logout = async (): Promise<any> => {
+    const response = await api.post('/logout');
+    return response.data;
+};
+
 export default api;

@@ -238,7 +238,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                     {(nickname || 'Unknown').toUpperCase()}
                                 </h4>
                                 <div className="profile-hero-meta">
-                                    <span>{data?.class_id ? (initData?.classes[data.class_id]?.[0] || 'Unknown Class') : '...'}</span>
+                                    <span>{data?.class_id !== undefined && data?.class_id !== null ? (initData?.classes[data.class_id]?.[0] || 'Unknown Class') : '...'}</span>
                                     <span>• ID: {roleId}</span>
                                 </div>
                             </div>

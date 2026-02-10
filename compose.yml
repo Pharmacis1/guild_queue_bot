@@ -16,11 +16,9 @@ services:
       - WEB_PORT=8081
 
   frontend:
-    build: ./frontend
+    image: hyperf0rm/guild_queue_bot:frontend
     restart: always
     ports:
       - "3000:3000"
-    volumes:
-      - /app/node_modules
     depends_on:
       - bot

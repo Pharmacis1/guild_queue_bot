@@ -192,3 +192,11 @@ async def login_widget(data: WidgetLoginRequest, request: Request):
 async def logout(request: Request):
     request.session.pop("user_id", None)
     return {"status": "ok", "message": "Logged out"}
+
+
+
+@router.get("/logout")
+@router.get("/api/logout")  # Alias for easier frontend access if needed
+async def logout_get(request: Request):
+    request.session.pop("user_id", None)
+    return RedirectResponse(url="/")

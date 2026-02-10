@@ -31,6 +31,7 @@ export default function Home() {
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
+                        currentUser={initData?.user}
                     />
                 )}
 
@@ -39,6 +40,7 @@ export default function Home() {
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
+                        currentUser={initData?.user}
                     />
                 )}
 
@@ -47,6 +49,7 @@ export default function Home() {
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
+                        currentUser={initData?.user}
                     />
                 )}
             </div>

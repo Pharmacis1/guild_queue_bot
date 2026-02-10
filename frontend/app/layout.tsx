@@ -1,6 +1,14 @@
 import './globals.css'
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import SpiderScroll from './components/ui/SpiderScroll'
+import MobileStub from './components/MobileStub'
+
+export const viewport: Viewport = {
+    width: 'device-width',
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+}
 
 export const metadata: Metadata = {
     title: 'Arahnius Clan',
@@ -19,6 +27,7 @@ export default function RootLayout({
                 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@300;400;600&family=Rajdhani:wght@500;600;700&family=Cormorant+Garamond:wght@500;600;700&display=swap" rel="stylesheet" />
             </head>
             <body>
+                <MobileStub />
                 {children}
                 <SpiderScroll />
             </body>

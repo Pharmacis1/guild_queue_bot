@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchMoneyTable, MoneyTableRow } from '@/lib/api';
+import { fetchMoneyTable, MoneyTableRow, UserData } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
@@ -31,9 +31,10 @@ interface MoneyTableProps {
     onRowClick?: (roleId: number) => void;
     onObserverClick?: (roleId: number, name: string) => void;
     classes?: Record<string, [string, string, string]>;
+    currentUser?: UserData | null;
 }
 
-export default function MoneyTable({ onRowClick, onObserverClick, classes }: MoneyTableProps) {
+export default function MoneyTable({ onRowClick, onObserverClick, classes, currentUser }: MoneyTableProps) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<MoneyTableRow[]>([]);
     const [intervals, setIntervals] = useState<{ label: string }[]>([]);
@@ -688,7 +689,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                         <div
                                             key={row.role_id}
                                             className={`kh-row fade-in-smooth kh-row-interactive ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''}`}
-                                            onClick={() => onRowClick?.(row.role_id)}
+                                            // onClick={() => onRowClick?.(row.role_id)} // Removed
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: intervals.length > 10
@@ -703,7 +704,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                                 background: rowBg, // Soft gradient for the rest of the row
                                                 borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
                                                 alignItems: 'stretch',
-                                                cursor: 'pointer'
+                                                cursor: 'default' // Changed from pointer
                                             }}
                                         >
                                             {/* Participant */}
@@ -728,9 +729,22 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes }: Mon
                                                     isAfk={row.is_afk}
                                                     afkDates={row.afk_dates}
                                                 >
-                                                    <span className="player-name" style={{ marginRight: '4px', whiteSpace: 'nowrap' }}>{row.name}</span>
+                                                    <span
+                                                        className="player-name"
+                                                        style={{
+                                                            marginRight: '4px',
+                                                            whiteSpace: 'nowrap',
+                                                            cursor: currentUser?.is_master ? 'pointer' : 'default'
+                                                        }}
+                                                        onClick={(e) => {
+                                                            if (currentUser?.is_master && onRowClick) {
+                                                                e.stopPropagation();
+                                                                onRowClick(row.role_id);
+                                                            }
+                                                        }}
+                                                    >{row.name}</span>
                                                 </PlayerTooltip>
-                                                {onObserverClick && (
+                                                {onObserverClick && currentUser?.is_master && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();

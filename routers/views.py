@@ -17,7 +17,7 @@ templates = Jinja2Templates(directory="templates")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "my_pharmacis_bot")
 
 
-@router.get("/", response_class=HTMLResponse)
+# @router.get("/", response_class=HTMLResponse)
 async def read_root(
     request: Request,
     # KH Params

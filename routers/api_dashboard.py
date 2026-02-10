@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Any
+import os
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
@@ -162,7 +163,7 @@ async def get_init_data(request: Request):
         classes=CLASSES,
         queue_types=queue_types,
         last_updated=last_upd,
-        bot_username="Lineage2_Guild_Bot" # Should probably be dynamic but hardcoded for now matches existing
+        bot_username=os.getenv("BOT_USERNAME", "Lineage2_Guild_Bot")
     )
 
 @router.get("/kh", response_model=KHResponse)

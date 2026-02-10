@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { fetchHistoryTable, HistoryRow } from '@/lib/api';
+import { fetchHistoryTable, HistoryRow, UserData } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 
@@ -9,6 +9,7 @@ interface HistoryTableProps {
     onRowClick?: (roleId: number) => void;
     onObserverClick?: (roleId: number, name: string) => void;
     classes?: Record<string, [string, string, string]>;
+    currentUser?: UserData | null;
 }
 
 const getActionStyle = (desc: string) => {
@@ -75,7 +76,7 @@ const EVENT_LABELS: Record<string, string> = {
     'CONTR': 'ВКЛАД'
 };
 
-export default function HistoryTable({ onRowClick, onObserverClick, classes }: HistoryTableProps) {
+export default function HistoryTable({ onRowClick, onObserverClick, classes, currentUser }: HistoryTableProps) {
     const [loading, setLoading] = useState(true);
     const [allRows, setAllRows] = useState<HistoryRow[]>([]);
 
@@ -407,11 +408,12 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes }: H
                                     borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
                                     padding: '16px 24px',
                                     borderRadius: '4px',
-                                    transition: 'background 0.2s'
+                                    transition: 'background 0.2s',
+                                    cursor: 'default' // Changed from pointer
                                 }}
                                 onMouseOver={(e) => e.currentTarget.style.background = 'rgba(20, 20, 20, 0.8)'}
                                 onMouseOut={(e) => e.currentTarget.style.background = 'rgba(10, 10, 10, 0.4)'}
-                                onClick={() => onRowClick?.(row.role_id)}
+                            // onClick={() => onRowClick?.(row.role_id)} // Removed
                             >
                                 {/* Date Column */}
                                 <div style={{ minWidth: '100px', display: 'flex', flexDirection: 'column', marginRight: '32px' }}>
@@ -430,11 +432,23 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes }: H
                                         isAfk={row.is_afk}
                                         afkDates={row.afk_dates}
                                     >
-                                        <span className="player-name" style={{ whiteSpace: 'nowrap' }}>
+                                        <span
+                                            className="player-name"
+                                            style={{
+                                                whiteSpace: 'nowrap',
+                                                cursor: currentUser?.is_master ? 'pointer' : 'default'
+                                            }}
+                                            onClick={(e) => {
+                                                if (currentUser?.is_master && onRowClick) {
+                                                    e.stopPropagation();
+                                                    onRowClick(row.role_id);
+                                                }
+                                            }}
+                                        >
                                             {row.name || 'Unknown'}
                                         </span>
                                     </PlayerTooltip>
-                                    {onObserverClick && row.role_id && (
+                                    {onObserverClick && row.role_id && currentUser?.is_master && (
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();

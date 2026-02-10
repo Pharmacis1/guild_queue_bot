@@ -6,7 +6,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Web imports
@@ -37,6 +37,9 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+if os.path.exists("frontend/out/_next"):
+    app.mount("/_next", StaticFiles(directory="frontend/out/_next"), name="next_static")
 
 # Include Routers
 app.include_router(views.router)
@@ -110,6 +113,24 @@ async def main():
     await asyncio.gather(dp.start_polling(bot), server.serve())
 
 
+
+@app.get("/{full_path:path}")
+async def serve_react_app(full_path: str):
+    # Check if file exists in frontend/out
+    file_path = os.path.join("frontend/out", full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+
+    # 404 for API/Static to avoid returning HTML
+    if full_path.startswith("api") or full_path.startswith("static") or full_path.startswith("_next"):
+        return JSONResponse({"status": "error", "message": "Not Found"}, status_code=404)
+
+    # SPA Fallback
+    index_path = "frontend/out/index.html"
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return JSONResponse({"status": "error", "message": "Frontend not built"}, status_code=404)
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init_db()  # Init Bot DB (Sync)
@@ -117,3 +138,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped")
+

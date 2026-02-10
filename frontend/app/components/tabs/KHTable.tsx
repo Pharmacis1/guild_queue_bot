@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { fetchKHTable, KHTableRow } from '@/lib/api';
+import { fetchKHTable, KHTableRow, UserData } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
@@ -31,9 +31,10 @@ interface KHTableProps {
     onRowClick?: (roleId: number) => void;
     onObserverClick?: (roleId: number, name: string) => void;
     classes?: Record<string, [string, string, string]>;
+    currentUser?: UserData | null;
 }
 
-export default function KHTable({ onRowClick, onObserverClick, classes }: KHTableProps) {
+export default function KHTable({ onRowClick, onObserverClick, classes, currentUser }: KHTableProps) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<KHTableRow[]>([]);
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -514,7 +515,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes }: KHTabl
                                     onMouseOut={(e) => {
                                         e.currentTarget.style.background = 'transparent';
                                     }}
-                                    onClick={() => onRowClick?.(row.role_id)}
+                                    // onClick={() => onRowClick?.(row.role_id)} // Removed
                                     style={{
                                         display: 'grid',
                                         gridTemplateColumns: 'minmax(200px, 2.5fr) repeat(9, 1fr)',
@@ -525,7 +526,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes }: KHTabl
                                         transition: 'background 0.2s',
                                         background: 'transparent',
                                         minHeight: '44px',
-                                        cursor: 'pointer'
+                                        cursor: 'default'
                                     }}
                                 >
                                     <div className="kh-col kh-participant" style={{
@@ -544,9 +545,22 @@ export default function KHTable({ onRowClick, onObserverClick, classes }: KHTabl
                                             isAfk={row.is_afk}
                                             afkDates={row.afk_dates}
                                         >
-                                            <span className="player-name" style={{ marginRight: '4px', whiteSpace: 'nowrap' }}>{row.name}</span>
+                                            <span
+                                                className="player-name"
+                                                style={{
+                                                    marginRight: '4px',
+                                                    whiteSpace: 'nowrap',
+                                                    cursor: currentUser?.is_master ? 'pointer' : 'default'
+                                                }}
+                                                onClick={(e) => {
+                                                    if (currentUser?.is_master && onRowClick) {
+                                                        e.stopPropagation();
+                                                        onRowClick(row.role_id);
+                                                    }
+                                                }}
+                                            >{row.name}</span>
                                         </PlayerTooltip>
-                                        {onObserverClick && (
+                                        {onObserverClick && currentUser?.is_master && (
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();

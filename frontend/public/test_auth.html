@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Test Telegram Auth</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            background: #222;
+            color: #fff;
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        #logs {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #444;
+            background: #000;
+            font-family: monospace;
+            min-height: 100px;
+        }
+
+        .success {
+            color: #0f0;
+        }
+
+        .error {
+            color: #f00;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Telegram Auth Test 2.0</h1>
+    <p>1. Open this page.</p>
+    <p>2. Click the button below.</p>
+    <p>3. Watch the LOGS box below.</p>
+
+    <!-- Widget Container -->
+    <div id="widget"></div>
+
+    <div id="logs">Waiting for action...</div>
+
+    <script>
+        function log(msg, type = '') {
+            const el = document.getElementById('logs');
+            const color = type === 'error' ? 'red' : (type === 'success' ? '#0f0' : '#ccc');
+            el.innerHTML += `<div style="color:${color}; border-bottom:1px solid #333; padding:2px;">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            console.log(msg);
+        }
+
+        window.onerror = function (msg, url, line) {
+            log(`GLOBAL ERROR: ${msg} at ${line}`, 'error');
+        };
+
+        // EXPLICIT GLOBAL ASSIGNMENT
+        window.onTelegramAuth = function (user) {
+            log("CALLBACK FIRED! User structure received.", 'success');
+            log("User ID: " + user.id);
+            log("First Name: " + user.first_name);
+            alert("SUCCESS! Callback worked.\nUser: " + user.first_name);
+
+            log("Sending to backend...", 'info');
+            fetch('/api/login/widget', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(user)
+            })
+                .then(r => r.json())
+                .then(data => {
+                    log("Backend Response: " + JSON.stringify(data), data.status === 'ok' ? 'success' : 'error');
+                })
+                .catch(e => log("Backend Fetch Error: " + e.message, 'error'));
+        };
+
+        log("Initializing widget for bot: my_pharmacis_bot");
+
+        try {
+            const script = document.createElement('script');
+            script.src = "https://telegram.org/js/telegram-widget.js?22";
+            script.setAttribute('data-telegram-login', 'my_pharmacis_bot');
+            script.setAttribute('data-size', 'large');
+            script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+            script.setAttribute('data-request-access', 'write');
+            document.getElementById('widget').appendChild(script);
+            log("Widget script injected.");
+        } catch (e) {
+            log("Script injection failed: " + e.message, 'error');
+        }
+    </script>
+</body>
+
+</html>

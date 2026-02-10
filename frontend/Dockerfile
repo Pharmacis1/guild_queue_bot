@@ -1,20 +1,18 @@
-FROM node:18-alpine
-
+FROM node:18-alpine AS builder
 WORKDIR /app
-
-# Install dependencies based on package.json
-COPY package.json ./
-# No lockfile yet, so we use npm install (generated package-lock.json will stay in container)
-RUN npm install
-
-# Copy source
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
+RUN npm run build
 
-# Build (optional here if we dev, but good to have)
-# RUN npm run build
+FROM node:18-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV production
 
-# Expose Next.js port
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
 EXPOSE 3000
 
-# Start dev server
-CMD ["npm", "run", "dev"]
+CMD ["node", "server.js"]

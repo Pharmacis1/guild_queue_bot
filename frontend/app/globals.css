@@ -1932,6 +1932,7 @@ select.profile-field {
     box-shadow: 0 6px 16px rgba(180, 20, 30, 0.4);
     filter: brightness(1.1);
 }
+
 /* Make date picker icons visible in dark mode */
 input[type='date']::-webkit-calendar-picker-indicator {
     filter: invert(1);
@@ -1942,4 +1943,89 @@ input[type='date']::-webkit-calendar-picker-indicator {
 
 input[type='date']::-webkit-calendar-picker-indicator:hover {
     opacity: 1;
+}
+
+/* --- Mobile Stub --- */
+.mobile-stub {
+    display: none;
+    /* Hidden by default on desktop */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #050505;
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.mobile-stub-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    border: 1px solid var(--accent-ruby);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(20, 0, 0, 0.95), rgba(0, 0, 0, 0.98));
+    padding: 40px 20px;
+    box-shadow: 0 0 30px rgba(139, 0, 0, 0.2);
+    width: 100%;
+    max-width: 90%;
+    margin: 0 auto;
+}
+
+.mobile-stub-logo {
+    width: 120px;
+    height: auto;
+    margin-bottom: 30px;
+    filter: drop-shadow(0 0 15px rgba(255, 0, 51, 0.4));
+    animation: pulseLogo 3s infinite ease-in-out;
+}
+
+.mobile-stub-title {
+    font-family: 'Cinzel', serif;
+    font-size: 1.8rem;
+    color: var(--accent-ruby);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 30px;
+    line-height: 1.4;
+    text-shadow: 0 0 10px rgba(139, 0, 0, 0.5);
+}
+
+.mobile-stub-text {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 1rem;
+    color: var(--text-silver);
+    opacity: 0.8;
+    line-height: 1.6;
+}
+
+@keyframes pulseLogo {
+    0% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 10px rgba(255, 0, 51, 0.3));
+    }
+
+    50% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 20px rgba(255, 0, 51, 0.6));
+    }
+
+    100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 10px rgba(255, 0, 51, 0.3));
+    }
+}
+
+/* Show on mobile */
+/* Show on mobile */
+@media (max-width: 768px) {
+    .mobile-stub {
+        display: flex !important;
+    }
 }
