@@ -4,22 +4,8 @@ const nextConfig = {
     images: {
         unoptimized: true,
     },
-    async rewrites() {
-        return [
-            {
-                source: '/api/:path*',
-                destination: 'http://bot:8081/api/:path*',
-            },
-            {
-                source: '/admin/:path*',
-                destination: 'http://bot:8081/admin/:path*',
-            },
-            {
-                source: '/static/:path*',
-                destination: 'http://bot:8081/static/:path*',
-            },
-        ];
-    },
+    // rewrites is not compatible with output: 'export'
+    // async rewrites() { ... } 
 };
 
 export default nextConfig;
