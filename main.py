@@ -3,7 +3,8 @@ import logging
 import os
 
 import uvicorn
-from fastapi import FastAPI
+import aiohttp
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, FileResponse
@@ -40,9 +41,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- FRONTEND PROXY ---
 # Proxy static nextjs assets
+# --- FRONTEND PROXY ---
+# Proxy static nextjs assets
 @app.get("/_next/{full_path:path}")
 async def proxy_next_assets(full_path: str):
-    import aiohttp
     target_url = f"http://frontend:3000/_next/{full_path}"
     async with aiohttp.ClientSession() as session:
         try:
@@ -59,9 +61,6 @@ async def serve_react_app(full_path: str):
     if full_path.startswith("api") or full_path.startswith("static") or full_path.startswith("admin"):
          # Let FastAPI handle 404 for these if no router matches
         return JSONResponse({"status": "error", "message": "Not Found"}, status_code=404)
-
-    import aiohttp
-    from fastapi import Response
 
     # Proxy to frontend container
     target_url = f"http://frontend:3000/{full_path}"
