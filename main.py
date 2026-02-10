@@ -112,8 +112,6 @@ async def main():
 
 # --- FRONTEND PROXY ---
 # Proxy static nextjs assets
-# --- FRONTEND PROXY ---
-# Proxy static nextjs assets
 @app.get("/_next/{full_path:path}")
 async def proxy_next_assets(full_path: str):
     frontend_url = os.getenv("FRONTEND_URL", "http://frontend:3000")
