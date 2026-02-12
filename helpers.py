@@ -2,7 +2,7 @@ import datetime
 
 from sqlalchemy import func
 
-from database import Event, Player, QueueEntry, get_effective_limit_logic, get_user_active_queues, session
+from database import Event, Player, QueueEntry, get_effective_limit_logic, get_msk_now, get_user_active_queues, session
 
 
 def get_start_of_week():
@@ -114,7 +114,10 @@ def get_menu_text(user, custom_title=None):
 
     afk_info = ""
     if user.afk_start and user.afk_end:
-        afk_info = f"🛌 <b>Режим AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}\n\n"
+        # Check expiration
+        now = get_msk_now()
+        if user.afk_end >= now:
+            afk_info = f"🛌 <b>Режим AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}\n\n"
 
     return (
         f"{header}\n\n"

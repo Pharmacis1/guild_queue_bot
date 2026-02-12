@@ -24,7 +24,7 @@ except ImportError:
 from logic import log_importer, party_manager, queue_manager
 from logic.player_manager import update_player_logic
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 
 @router.get("/download/watcher")
@@ -39,7 +39,7 @@ async def download_watcher():
     return FileResponse(path=zip_path, filename="PW_Requiem_history.zip", media_type="application/zip")
 
 
-@router.post("/api/upload")
+@router.post("/upload")
 async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """API endpoint to upload logs via utility"""
     temp_path = f"temp_upload_{file.filename}"
@@ -75,7 +75,7 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
             os.remove(temp_path)
 
 
-@router.post("/api/get_player")
+@router.post("/get_player")
 async def get_player(request: Request):
     """
     Get detailed player info including:
@@ -234,7 +234,7 @@ async def get_player(request: Request):
 # --- Management Endpoints ---
 
 
-@router.post("/api/afk/add")
+@router.post("/afk/add")
 async def afk_add(request: Request):
     try:
         data = await request.json()
@@ -255,11 +255,12 @@ async def afk_add(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/afk/delete")
+@router.post("/afk/delete")
 async def afk_delete(request: Request):
     try:
         data = await request.json()
         afk_id = data.get("afk_id")
+        logging.info(f"API afk_delete: afk_id={afk_id}")
         if not afk_id:
             return {"status": "error", "message": "Missing afk_id"}
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
@@ -267,10 +268,11 @@ async def afk_delete(request: Request):
             await conn.commit()
         return {"status": "ok"}
     except Exception as e:
+        logging.error(f"Error in afk_delete: {e}")
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/queue/join")
+@router.post("/queue/join")
 async def queue_join(request: Request):
     try:
         data = await request.json()
@@ -286,7 +288,7 @@ async def queue_join(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/queue/leave")
+@router.post("/queue/leave")
 async def queue_leave(request: Request):
     try:
         data = await request.json()
@@ -298,7 +300,7 @@ async def queue_leave(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/character/link")
+@router.post("/character/link")
 async def char_link(request: Request):
     try:
         data = await request.json()
@@ -329,7 +331,7 @@ async def char_link(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/character/unlink")
+@router.post("/character/unlink")
 async def char_unlink(request: Request):
     try:
         data = await request.json()
@@ -358,7 +360,7 @@ async def char_unlink(request: Request):
 # --- КП (Constant Party) Management ---
 
 
-@router.post("/api/party/get")
+@router.post("/party/get")
 async def party_get(request: Request):
     """Get party members for a player."""
     try:
@@ -376,7 +378,7 @@ async def party_get(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/party/add")
+@router.post("/party/add")
 async def party_add(request: Request):
     """Add a player to party. Creates party if needed."""
     try:
@@ -396,7 +398,7 @@ async def party_add(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/party/remove")
+@router.post("/party/remove")
 async def party_remove(request: Request):
     """Remove a player from party."""
     try:
@@ -415,7 +417,7 @@ async def party_remove(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/party/rename")
+@router.post("/party/rename")
 async def party_rename(request: Request):
     """Rename a party."""
     try:
@@ -435,7 +437,7 @@ async def party_rename(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/update_player")
+@router.post("/update_player")
 async def update_player(request: Request):
     """
     Update Player Data + Sync Bot Data (User, Character, AFK)
@@ -458,7 +460,7 @@ async def update_player(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/update_nickname")
+@router.post("/update_nickname")
 async def update_nickname(request: Request):
     """API endpoint to update player nickname"""
     try:
@@ -485,7 +487,7 @@ async def update_nickname(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/update_class")
+@router.post("/update_class")
 async def update_class(request: Request):
     """API endpoint to update player class"""
     try:
@@ -513,7 +515,7 @@ async def update_class(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/update_status")
+@router.post("/update_status")
 async def update_status(request: Request):
     """API endpoint to update player in_clan status"""
     try:
@@ -542,7 +544,7 @@ async def update_status(request: Request):
         return {"status": "error", "message": str(e)}
 
 
-@router.post("/api/update_event_date")
+@router.post("/update_event_date")
 async def update_event_date(request: Request):
     """API endpoint to update event date"""
     try:
@@ -631,7 +633,7 @@ async def bg_run_scraper(server: str, only_unknown: bool = False):
         SCRAPER_IS_RUNNING = False
 
 
-@router.post("/api/scrape_players")
+@router.post("/scrape_players")
 async def trigger_scrape(background_tasks: BackgroundTasks, request: Request):
     if not pwobs_scraper:
         return JSONResponse(status_code=500, content={"status": "error", "message": "Scraper module missing"})
@@ -644,7 +646,7 @@ async def trigger_scrape(background_tasks: BackgroundTasks, request: Request):
     return {"status": "ok", "message": f"Scraper started for {server}. This may take a while."}
 
 
-@router.get("/api/debug_screenshot")
+@router.get("/debug_screenshot")
 async def get_debug_screenshot():
     """Returns the login_failed.png if it exists."""
     screenshot_path = "login_failed.png"
@@ -653,7 +655,7 @@ async def get_debug_screenshot():
     return FileResponse(screenshot_path, media_type="image/png")
 
 
-@router.post("/api/scan/players")
+@router.post("/scan/players")
 async def force_player_scan(background_tasks: BackgroundTasks):
     from scripts.pwobs_scraper import run_scraper
 
@@ -661,7 +663,7 @@ async def force_player_scan(background_tasks: BackgroundTasks):
     return {"status": "ok", "message": "Player scan triggered in background"}
 
 
-@router.post("/api/add_event")
+@router.post("/add_event")
 async def add_event(request: Request):
     """
     API endpoint to manually add an event (Valor)

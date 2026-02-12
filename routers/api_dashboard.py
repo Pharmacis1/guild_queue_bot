@@ -80,6 +80,7 @@ class HistoryRow(BaseModel):
     timestamp: float
 
 class ProfileAfkHistory(BaseModel):
+    id: int
     start: str
     end: str
 

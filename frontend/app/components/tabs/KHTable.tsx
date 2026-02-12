@@ -500,7 +500,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                         sortedRows.map(row => {
                             let rowBg = 'transparent';
                             if (row.is_newcomer) rowBg = 'linear-gradient(to right, rgba(64, 224, 208, 0.3) 0%, transparent 100%)';
-                            else if (row.is_afk) rowBg = 'linear-gradient(to right, rgba(128, 128, 128, 0.25) 0%, transparent 100%)';
+                            else if (row.is_afk) rowBg = 'linear-gradient(to right, rgba(192, 192, 192, 0.3) 0%, transparent 100%)';
                             else if (row.is_mine) rowBg = 'linear-gradient(to right, rgba(50, 205, 50, 0.25) 0%, transparent 100%)';
 
                             return (
@@ -509,7 +509,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     className={`kh-row fade-in-smooth ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''}`}
                                     onMouseOver={(e) => {
                                         if (row.is_newcomer) e.currentTarget.style.background = 'rgba(64, 224, 208, 0.05)';
-                                        else if (row.is_afk) e.currentTarget.style.background = 'rgba(128, 128, 128, 0.05)';
+                                        else if (row.is_afk) e.currentTarget.style.background = 'rgba(192, 192, 192, 0.1)';
                                         else if (!row.is_mine) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
                                     }}
                                     onMouseOut={(e) => {

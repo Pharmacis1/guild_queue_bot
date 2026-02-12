@@ -943,7 +943,12 @@ async def afk_menu(callback: types.CallbackQuery, state: FSMContext):
     if user.afk_start and user.afk_end:
         s = user.afk_start.strftime("%d.%m.%Y")
         e = user.afk_end.strftime("%d.%m.%Y")
-        text += f"✅ <b>Включен:</b>\nC {s} по {e}\n\n<i>В этот период на вас не будет распределяться награда из очередей.</i>"
+        
+        now = get_msk_now()
+        if user.afk_end >= now:
+            text += f"✅ <b>Включен:</b>\nC {s} по {e}\n\n<i>В этот период на вас не будет распределяться награда из очередей.</i>"
+        else:
+            text += f"❌ <b>Истек:</b>\nC {s} по {e}\n\n<i>Срок действия режима AFK закончился. Вы можете задать новый период или очистить историю.</i>"
     else:
         text += "❌ <b>Выключен</b>\n\n<i>Включите этот режим, если планируете отсутствовать в игре длительное время (отпуск, командировка и т.д.).</i>"
 

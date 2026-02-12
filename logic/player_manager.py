@@ -219,11 +219,12 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
             # But we'll return the log.
             
             # Fetch history
-            h_sql = "SELECT start_date, end_date FROM afk_history WHERE user_id = ? ORDER BY start_date DESC LIMIT 5"
+            h_sql = "SELECT id, start_date, end_date FROM afk_history WHERE user_id = ? ORDER BY start_date DESC LIMIT 5"
             async with conn.execute(h_sql, (user_id,)) as cursor:
                 h_rows = await cursor.fetchall()
                 for hr in h_rows:
                     data["afk_history"].append({
+                        "id": hr["id"],
                         "start": str(hr["start_date"]), 
                         "end": str(hr["end_date"])
                     })

@@ -1,6 +1,31 @@
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Montserrat:wght@300;400;600&family=Cormorant+Garamond:wght@600&display=swap');
 @import './table-styles.css';
 
+/* Flexbox Utilities */
+.d-flex {
+    display: flex !important;
+}
+
+.justify-content-between {
+    justify-content: space-between !important;
+}
+
+.align-items-center {
+    align-items: center !important;
+}
+
+.flex-nowrap {
+    flex-wrap: nowrap !important;
+}
+
+.flex-grow-1 {
+    flex-grow: 1 !important;
+}
+
+.gap-2 {
+    gap: 0.5rem !important;
+}
+
 :root {
     --bg-onyx: #050505;
     --text-silver: #E0E0E0;
@@ -1371,7 +1396,7 @@ select.profile-field {
 
 .kh-row.afk-row .kh-participant,
 .money-row.afk-row .participant-cell {
-    background-image: linear-gradient(90deg, rgba(255, 179, 0, 0.35) 0%, rgba(255, 179, 0, 0) 100%) !important;
+    background-image: linear-gradient(90deg, rgba(192, 192, 192, 0.35) 0%, rgba(192, 192, 192, 0) 100%) !important;
 }
 
 .kh-row.newcomer-row:hover .kh-participant,
@@ -1381,7 +1406,7 @@ select.profile-field {
 
 .kh-row.afk-row:hover .kh-participant,
 .money-row.afk-row:hover .participant-cell {
-    background-image: linear-gradient(90deg, rgba(255, 179, 0, 0.45) 0%, rgba(255, 179, 0, 0) 100%) !important;
+    background-image: linear-gradient(90deg, rgba(192, 192, 192, 0.45) 0%, rgba(192, 192, 192, 0) 100%) !important;
 }
 
 /* --- Status Tab Components --- */

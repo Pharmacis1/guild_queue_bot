@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchProfile, updateProfile, ProfileResponse, fetchInitData, InitData, addEvent, addAfkHistory } from '@/lib/api';
+import { fetchProfile, updateProfile, ProfileResponse, fetchInitData, InitData, addEvent, addAfkHistory, deleteAfkHistory } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 
 interface PlayerModalProps {
@@ -113,6 +113,20 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
             }
         } catch (e: any) {
             alert("Ошибка при отвязке: " + e.message);
+        }
+    };
+
+    const handleDeleteAfk = async (id: number) => {
+        if (!confirm("Удалить запись об отпуске?")) return;
+        try {
+            await deleteAfkHistory(id);
+            // Refresh
+            if (roleId) {
+                const profile = await fetchProfile(roleId);
+                setData(profile);
+            }
+        } catch (e: any) {
+            alert("Ошибка при удалении: " + e.message);
         }
     };
 
@@ -398,7 +412,32 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                         {data?.afk_history && data.afk_history.length > 0 ? (
                                                             <ul className="list-unstyled small text-silver mt-1 px-2">
                                                                 {data.afk_history.map((h, i) => (
-                                                                    <li key={i} className="mb-1 opacity-75">• {h.start.split(' ')[0]} - {h.end.split(' ')[0]}</li>
+                                                                    <li key={i} className="mb-1 d-flex justify-content-between align-items-center flex-nowrap" style={{ opacity: 0.9, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'nowrap' }}>
+                                                                        <span className="opacity-75" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>• {h.start.split(' ')[0]} - {h.end.split(' ')[0]}</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="btn-delete-afk"
+                                                                            onClick={() => handleDeleteAfk(h.id)}
+                                                                            title="Удалить"
+                                                                            style={{
+                                                                                background: 'rgba(139, 0, 0, 0.2)',
+                                                                                border: '1px solid rgba(139, 0, 0, 0.4)',
+                                                                                borderRadius: '4px',
+                                                                                color: '#ff4d4d',
+                                                                                cursor: 'pointer',
+                                                                                padding: '1px 8px',
+                                                                                fontSize: '0.9rem',
+                                                                                lineHeight: 1,
+                                                                                marginLeft: '8px',
+                                                                                transition: 'all 0.2s',
+                                                                                display: 'flex',
+                                                                                alignItems: 'center',
+                                                                                justifyContent: 'center',
+                                                                                height: '24px',
+                                                                                flexShrink: 0
+                                                                            }}
+                                                                        >&times;</button>
+                                                                    </li>
                                                                 ))}
                                                             </ul>
                                                         ) : (

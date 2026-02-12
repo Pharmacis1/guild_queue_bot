@@ -60,16 +60,31 @@ async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
             
     return afk_map
 
-def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: Dict[int, List]) -> Tuple[bool, Optional[str]]:
+def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: Dict[int, List], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Tuple[bool, Optional[str]]:
     if not role_id: return False, None
     uid = role_user_map.get(role_id)
     if not uid or uid not in afk_map: return False, None
     
     periods = afk_map[uid]
-    if not periods: return True, None # Should not happen if key exists
+    if not periods: return False, None
 
-    # Return most recent
-    sorted_periods = sorted(periods, key=lambda x: x[1], reverse=True)
+    # Filter periods that overlap with [start_dt, end_dt]
+    overlapping_periods = []
+    if start_dt and end_dt:
+        # User requested specific period
+        for s, e in periods:
+            if max(s, start_dt) <= min(e, end_dt):
+                overlapping_periods.append((s, e))
+    else:
+        # No range provided? Fallback to "currently AFK" check or just show most recent
+        # Given the requirements, we likely always have start/end for table data.
+        overlapping_periods = periods
+
+    if not overlapping_periods:
+        return False, None
+
+    # Return most recent among overlapping
+    sorted_periods = sorted(overlapping_periods, key=lambda x: x[1], reverse=True)
     s, e = sorted_periods[0]
     return True, f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}"
 
@@ -140,7 +155,7 @@ async def get_kh_table_data(
             except: pass
 
         # AFK
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map)
+        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, d1, d2)
 
         # Tiers
         v_tier = get_valor_tier(r["total_valor"], active_valors, t_v, days_diff)
@@ -224,8 +239,14 @@ async def get_money_table_data(
         role_id = r["role_id"]
         
         # Helper wrappers
+        try:
+            m_s_dt = datetime.strptime(m_s, "%Y-%m-%d")
+            m_e_dt = datetime.strptime(m_e, "%Y-%m-%d")
+        except:
+            m_s_dt, m_e_dt = None, None
+            
         is_nc = is_newcomer(role_id, join_dates, m_s)
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map)
+        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, m_s_dt, m_e_dt)
 
         # Newcomer Filter
         if newcomers_mode == "only" and not is_nc: continue
@@ -383,7 +404,13 @@ async def get_history_data(
             except: pass
             
         # AFK logic
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map)
+        try:
+            s_dt = datetime.strptime(start, "%Y-%m-%d") if start else None
+            e_dt = datetime.strptime(end, "%Y-%m-%d") if end else None
+        except:
+            s_dt, e_dt = None, None
+            
+        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, s_dt, e_dt)
 
         result.append({
             "date": date_evt,

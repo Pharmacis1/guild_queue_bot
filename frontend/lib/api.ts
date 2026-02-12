@@ -151,7 +151,7 @@ export interface ProfileResponse {
     username: string | null;
     afk_start: string | null;
     afk_end: string | null;
-    afk_history: { start: string; end: string }[];
+    afk_history: { id: number; start: string; end: string }[];
     queues: { id: number; name: string; auto_requeue: boolean; character_name?: string }[];
     linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];
     party: { id: number; name: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
@@ -174,6 +174,11 @@ export const addEvent = async (data: { role_id: number, date: string, value: num
 
 export const addAfkHistory = async (data: { user_id: number, start: string, end: string }): Promise<any> => {
     const response = await api.post('/afk/add', data);
+    return response.data;
+};
+
+export const deleteAfkHistory = async (afkId: number): Promise<any> => {
+    const response = await api.post('/afk/delete', { afk_id: afkId });
     return response.data;
 };
 
