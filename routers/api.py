@@ -188,25 +188,28 @@ async def char_link(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
-        nickname = data.get("nickname")
+        nickname = data.get("nickname", "").strip()
         if not user_id or not nickname:
             return {"status": "error", "message": "Missing fields"}
 
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
             # Upsert into characters
-            # Check if exists
-            async with conn.execute("SELECT id FROM characters WHERE nickname = ?", (nickname,)) as cursor:
+            # Check if exists (case-insensitive)
+            async with conn.execute("SELECT id, nickname FROM characters WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,)) as cursor:
                 row = await cursor.fetchone()
 
             if row:
-                await conn.execute("UPDATE characters SET user_id = ? WHERE nickname = ?", (user_id, nickname))
+                char_id, db_nick = row
+                await conn.execute("UPDATE characters SET user_id = ? WHERE id = ?", (user_id, char_id))
+                target_nick = db_nick # Use case from DB
             else:
                 await conn.execute(
                     "INSERT INTO characters (user_id, nickname, is_main) VALUES (?, ?, 0)", (user_id, nickname)
                 )
+                target_nick = nickname
 
             # Sync to players
-            await conn.execute("UPDATE players SET user_id = ? WHERE nickname = ?", (user_id, nickname))
+            await conn.execute("UPDATE players SET user_id = ? WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (user_id, target_nick))
             await conn.commit()
 
         return {"status": "ok"}
@@ -231,8 +234,9 @@ async def char_unlink(request: Request):
                         nickname = r[0]
 
             if nickname:
-                await conn.execute("DELETE FROM characters WHERE nickname = ?", (nickname,))
-                await conn.execute("UPDATE players SET user_id = NULL WHERE nickname = ?", (nickname,))
+                nickname = nickname.strip()
+                await conn.execute("DELETE FROM characters WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,))
+                await conn.execute("UPDATE players SET user_id = NULL WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,))
 
             await conn.commit()
         return {"status": "ok"}

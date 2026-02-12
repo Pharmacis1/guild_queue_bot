@@ -72,17 +72,39 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
             if s_tg == "":
                 new_user_id = None
             else:
-                try:
-                    tg_id = int(s_tg)
-                except ValueError:
-                    raise ValueError("Invalid TG ID format")
-
-                async with conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,)) as cursor:
-                    u_row = await cursor.fetchone()
-                    if u_row:
-                        new_user_id = u_row[0]
-                    else:
-                        raise ValueError(f"User with TG ID {tg_id} not found.")
+                if s_tg.startswith("@"):
+                    # Search by username (case-insensitive)
+                    username = s_tg[1:] # Remove @
+                    async with conn.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (username,)) as cursor:
+                        u_row = await cursor.fetchone()
+                        if u_row:
+                            new_user_id = u_row[0]
+                        else:
+                            # Create stub user
+                            async with conn.execute("INSERT INTO users (username) VALUES (?)", (username,)) as cursor:
+                                new_user_id = cursor.lastrowid
+                else:
+                    # Search by telegram_id (must be numeric)
+                    try:
+                        tg_id = int(s_tg)
+                        async with conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,)) as cursor:
+                            u_row = await cursor.fetchone()
+                            if u_row:
+                                new_user_id = u_row[0]
+                            else:
+                                # Create stub user with telegram_id
+                                async with conn.execute("INSERT INTO users (telegram_id) VALUES (?)", (tg_id,)) as cursor:
+                                    new_user_id = cursor.lastrowid
+                    except ValueError:
+                        # NOT a number and NOT @ -> Virtual Group (treat as username)
+                        async with conn.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (s_tg,)) as cursor:
+                            u_row = await cursor.fetchone()
+                            if u_row:
+                                new_user_id = u_row[0]
+                            else:
+                                # Create virtual user record
+                                async with conn.execute("INSERT INTO users (username) VALUES (?)", (s_tg,)) as cursor:
+                                    new_user_id = cursor.lastrowid
 
         # 3. Prepare Updates for Players Table
         updates = []

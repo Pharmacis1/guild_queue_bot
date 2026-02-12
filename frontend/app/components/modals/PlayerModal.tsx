@@ -50,7 +50,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
     const syncProfile = async (overrides: any = {}) => {
         if (!roleId) return;
         try {
-            await updateProfile(roleId, {
+            const res = await updateProfile(roleId, {
                 nickname,
                 class_id: classId,
                 telegram_id: telegramId || null,
@@ -60,6 +60,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                 afk_end: afkEnd || null,
                 ...overrides
             });
+            if (res.user_id && data && !data.user_id) {
+                setData(prev => prev ? { ...prev, user_id: res.user_id } : null);
+            }
             setHasChanged(true);
         } catch (error) {
             console.error("Sync error:", error);
@@ -218,7 +221,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
 
     const handleCharLink = async () => {
         const nick = newCharNickname.trim();
-        if (!nick || !data?.user_id) return;
+        if (!nick) return;
+        if (!data?.user_id) {
+            alert("Сначала укажите Telegram/ID и сохраните (нажав в поле и выйдя из него), чтобы создать аккаунт для привязки.");
+            return;
+        }
         try {
             const resp = await fetch('/api/character/link', {
                 method: 'POST',

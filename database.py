@@ -541,13 +541,26 @@ def init_db():
 
 
 def ensure_user(telegram_id, username):
-    """Получает или создает пользователя."""
+    """Получает или создает пользователя. Учитывает миграцию из заглушек."""
+    # 1. Ищем по telegram_id
     user = session.query(User).filter_by(telegram_id=telegram_id).first()
+    
+    if not user and username:
+        # 2. Если не нашли по ID, ищем по username (заглушка из админки)
+        user = session.query(User).filter(User.username.ilike(username)).filter(User.telegram_id.is_(None)).first()
+        if user:
+            # Превращаем заглушку в реального пользователя
+            user.telegram_id = telegram_id
+            session.commit()
+            print(f"Migrated stub user {username} to telegram_id {telegram_id}")
+
     if not user:
+        # 3. Создаем нового, если совсем ничего не нашли
         is_first = session.query(User).count() == 0
         user = User(telegram_id=telegram_id, username=username, is_master=is_first)
         session.add(user)
         session.commit()
+        
     return user
 
 

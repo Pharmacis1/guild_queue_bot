@@ -235,11 +235,27 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
     # Check if nick taken by SOMEONE ELSE?
     taken = session.query(Character).filter_by(nickname=nick).first()
     if taken and taken.user_id != user.id:
-        return await message.answer(
-            f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
-            parse_mode="HTML",
-            reply_markup=get_back_btn("menu_chars"),
-        )
+        old_user = taken.user
+        if old_user and old_user.telegram_id is None:
+            # MERGE LOGIC: Transfer all characters from stub to real user
+            print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id}")
+            other_chars = session.query(Character).filter_by(user_id=old_user.id).all()
+            for oc in other_chars:
+                oc.user_id = user.id
+            
+            # Transfer AFK history or other links if needed? 
+            # For now, characters are the main thing.
+            
+            session.delete(old_user)
+            session.commit()
+            # After merge, 'taken' now belongs to user.id (or it will be updated below)
+            taken = session.query(Character).filter_by(nickname=nick).first()
+        else:
+            return await message.answer(
+                f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
+                parse_mode="HTML",
+                reply_markup=get_back_btn("menu_chars"),
+            )
 
     if taken and taken.user_id == user.id:
         taken.is_main = True
@@ -321,7 +337,27 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
             "⛔ Сначала добавь <b>Основу</b>.", parse_mode="HTML", reply_markup=get_back_btn("menu_chars")
         )
 
-    if session.query(Character).filter_by(user_id=user.id, nickname=nick).first():
+    # Check if nick taken by SOMEONE ELSE
+    taken = session.query(Character).filter_by(nickname=nick).first()
+    if taken and taken.user_id != user.id:
+        old_user = taken.user
+        if old_user and old_user.telegram_id is None:
+            # MERGE LOGIC
+            print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id} (via alt)")
+            other_chars = session.query(Character).filter_by(user_id=old_user.id).all()
+            for oc in other_chars:
+                oc.user_id = user.id
+            session.delete(old_user)
+            session.commit()
+            taken = session.query(Character).filter_by(nickname=nick).first()
+        else:
+            return await message.answer(
+                f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
+                parse_mode="HTML",
+                reply_markup=get_back_btn("menu_chars"),
+            )
+
+    if taken and taken.user_id == user.id:
         return await message.answer("⚠️ Уже добавлен.", reply_markup=get_back_btn("menu_chars"))
 
     session.add(Character(user_id=user.id, nickname=nick, is_main=False))
