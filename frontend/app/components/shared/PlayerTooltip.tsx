@@ -6,6 +6,9 @@ interface PlayerTooltipProps {
     joinDaysAgo: number;
     afkDates?: string;
     isAfk: boolean;
+    afkReason?: string;
+    mainNickname?: string;
+    parties?: { name: string; color: string }[];
     children: React.ReactNode;
 }
 
@@ -14,22 +17,25 @@ const PlayerTooltip: React.FC<PlayerTooltipProps> = ({
     joinDaysAgo,
     afkDates,
     isAfk,
+    afkReason,
+    mainNickname,
+    parties,
     children
 }) => {
+    const triggerRef = useRef<HTMLDivElement>(null);
     const [isVisible, setIsVisible] = useState(false);
     const [coords, setCoords] = useState({ top: 0, left: 0 });
-    const triggerRef = useRef<HTMLDivElement>(null);
 
     // Don't show tooltip if no data
-    if (!joinDate && !isAfk) {
+    if (!joinDate && !isAfk && !mainNickname && (!parties || parties.length === 0)) {
         return <>{children}</>;
     }
 
-    const handleMouseEnter = () => {
+    const onMouseEnter = () => {
         if (triggerRef.current) {
             const rect = triggerRef.current.getBoundingClientRect();
             setCoords({
-                top: rect.top + window.scrollY - 10, // 10px spacing above element
+                top: rect.top + window.scrollY - 10,
                 left: rect.left + window.scrollX + (rect.width / 2)
             });
             setIsVisible(true);
@@ -42,7 +48,7 @@ const PlayerTooltip: React.FC<PlayerTooltipProps> = ({
                 ref={triggerRef}
                 className="player-tooltip-wrapper"
                 style={{ position: 'relative', display: 'inline-block', cursor: 'pointer' }}
-                onMouseEnter={handleMouseEnter}
+                onMouseEnter={onMouseEnter}
                 onMouseLeave={() => setIsVisible(false)}
             >
                 {children}
@@ -61,15 +67,52 @@ const PlayerTooltip: React.FC<PlayerTooltipProps> = ({
                         border: '1px solid rgba(255, 255, 255, 0.15)',
                         borderRadius: '8px',
                         padding: '12px 16px',
-                        zIndex: 99999, // Max z-index
+                        zIndex: 99999,
                         width: 'max-content',
-                        minWidth: '200px',
+                        minWidth: '220px',
                         boxShadow: '0 10px 30px rgba(0,0,0,0.9)',
                         pointerEvents: 'none',
-                        animation: 'fadeIn 0.2s ease-out'
+                        animation: 'fadeIn 0.2s ease-out',
+                        color: '#eee',
+                        fontFamily: 'Montserrat, sans-serif'
                     }}
                 >
-                    <div style={{ marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '6px' }}>
+                    {/* Character Context */}
+                    {mainNickname && (
+                        <div style={{ marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '6px' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Основа</div>
+                            <div style={{ fontSize: '0.9rem', color: '#fff', fontWeight: 600 }}>{mainNickname}</div>
+                        </div>
+                    )}
+
+                    {/* Parties */}
+                    {parties && parties.length > 0 && (
+                        <div style={{ marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '6px' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Состоит в КП</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                                {parties.map((p, idx) => (
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: p.color || '#fff', boxShadow: `0 0 5px ${p.color} ` }}></div>
+                                        <div style={{ fontSize: '0.85rem', color: '#ccc' }}>{p.name}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AFK Status and Reason */}
+                    {isAfk && (
+                        <div style={{ marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '6px' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Статус</div>
+                            <div style={{ fontSize: '0.9rem', color: 'var(--accent-ruby)', fontWeight: 600 }}>
+                                ⛔ AFK
+                                {afkReason && <span style={{ marginLeft: '6px', fontSize: '0.8rem', color: '#ccc' }}>({afkReason})</span>}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Dates */}
+                    <div style={{ marginBottom: isAfk ? '8px' : '0' }}>
                         <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Дата вступления</div>
                         <div style={{ fontSize: '0.9rem', color: '#ccc', fontWeight: 600 }}>
                             {joinDate || 'Неизвестно'}
@@ -78,13 +121,13 @@ const PlayerTooltip: React.FC<PlayerTooltipProps> = ({
                     </div>
 
                     {isAfk && afkDates && (
-                        <div>
+                        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '6px' }}>
                             <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Период АФК</div>
                             <div style={{ fontSize: '0.9rem', color: 'var(--accent-ruby)', fontWeight: 600 }}>{afkDates}</div>
                         </div>
                     )}
 
-                    {/* Arrow (Visual only, pointing down) */}
+                    {/* Arrow */}
                     <div style={{
                         position: 'absolute',
                         top: '100%',

@@ -82,12 +82,12 @@ async def on_startup():
     # Also run one immediately on startup if needed, or just rely on schedule.
     # Let's run safe backup on startup to be sure.
     perform_backup("startup_auto")
-    print("✅ Backup system initialized.")
+    print("Backup system initialized.")
 
     # 4. Start Scheduler
     scheduler.start()
-    print(f"✅ Bot started. Jobs restored: {count}")
-    print("🚀 Version: 2.5.0 (AI Features + RAG + Summary)")
+    print(f"Bot started. Jobs restored: {count}")
+    print("Version: 2.5.0 (AI Features + RAG + Summary)")
 
 
 async def main():

@@ -26,10 +26,11 @@ async def get_party(role_id: int) -> Dict[str, Any]:
 
             party_id, is_leader = row
 
-            # Get party name
-            async with conn.execute("SELECT name FROM constant_parties WHERE id = ?", (party_id,)) as cursor:
+            # Get party name and color
+            async with conn.execute("SELECT name, color FROM constant_parties WHERE id = ?", (party_id,)) as cursor:
                 party_row = await cursor.fetchone()
                 party_name = party_row[0] if party_row and party_row[0] else None
+                party_color = party_row[1] if party_row and party_row[1] else None
 
             # Get all party members
             members = []
@@ -56,7 +57,7 @@ async def get_party(role_id: int) -> Dict[str, Any]:
 
             return {
                 "status": "ok",
-                "party": {"id": party_id, "name": party_name, "is_leader": bool(is_leader)},
+                "party": {"id": party_id, "name": party_name, "color": party_color, "is_leader": bool(is_leader)},
                 "members": members,
             }
     except Exception as e:
@@ -77,13 +78,12 @@ async def add_to_party(leader_role_id: int, member_nickname: str) -> Dict[str, A
 
             member_role_id = member_row[0]
 
-            # Check if member already in a party
-            async with conn.execute(
-                "SELECT party_id FROM party_members WHERE player_role_id = ?", (member_role_id,)
-            ) as cursor:
-                existing = await cursor.fetchone()
-                if existing:
-                    return {"status": "error", "message": "Игрок уже состоит в другой КП"}
+            # Check if member already in THIS party?
+            # We don't have party_id yet, we are creating or finding leader's party.
+            # But wait, if leader has a party, we add to it.
+            # We should check if member is already in THAT party later.
+            
+            # Removed restriction: "Игрок уже состоит в другой КП"
 
             # Find or create party for leader
             async with conn.execute(
@@ -163,6 +163,7 @@ async def remove_from_party(member_role_id: int) -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 
+
 async def rename_party(party_id: int, new_name: str) -> Dict[str, Any]:
     """Rename a party."""
     try:
@@ -175,4 +176,47 @@ async def rename_party(party_id: int, new_name: str) -> Dict[str, Any]:
         return {"status": "ok"}
     except Exception as e:
         logging.error(f"Error in party_rename logic: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+async def update_party_color(party_id: int, color: str) -> Dict[str, Any]:
+    """Update party color."""
+    try:
+        processed_color = color.strip() if color else None
+
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+            await conn.execute("UPDATE constant_parties SET color = ? WHERE id = ?", (processed_color, party_id))
+            await conn.commit()
+
+        return {"status": "ok"}
+    except Exception as e:
+        logging.error(f"Error in update_party_color logic: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+async def transfer_leadership(party_id: int, new_leader_role_id: int) -> Dict[str, Any]:
+    """Transfer party leadership to another member."""
+    try:
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+            # Check if new leader is in the party
+            async with conn.execute(
+                "SELECT 1 FROM party_members WHERE party_id = ? AND player_role_id = ?",
+                (party_id, new_leader_role_id),
+            ) as cursor:
+                if not await cursor.fetchone():
+                    return {"status": "error", "message": "Игрок не состоит в этой КП"}
+
+            # Reset current leader(s)
+            await conn.execute("UPDATE party_members SET is_leader = 0 WHERE party_id = ?", (party_id,))
+            
+            # Set new leader
+            await conn.execute(
+                "UPDATE party_members SET is_leader = 1 WHERE party_id = ? AND player_role_id = ?",
+                (party_id, new_leader_role_id),
+            )
+            await conn.commit()
+
+        return {"status": "ok", "message": "Лидерство передано"}
+    except Exception as e:
+        logging.error(f"Error in transfer_leadership logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}

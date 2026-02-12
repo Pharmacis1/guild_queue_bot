@@ -33,6 +33,10 @@ class KHTableRow(BaseModel):
     role_id: int
     name: str
     class_id: int
+    user_id: Optional[int] = None
+    is_alt: bool = False
+    cp_id: Optional[int] = None
+    cp_color: Optional[str] = None
     s1: int = 0
     s2: int = 0
     s3: int = 0
@@ -59,6 +63,8 @@ class KHTableRow(BaseModel):
     s5_details: Optional[List[str]] = []
     s6_details: Optional[List[str]] = []
     s7_details: Optional[List[str]] = []
+    main_nickname: Optional[str] = None
+    parties: Optional[List[dict]] = []
 
 class KHResponse(BaseModel):
     rows: List[KHTableRow]
@@ -83,6 +89,7 @@ class ProfileAfkHistory(BaseModel):
     id: int
     start: str
     end: str
+    reason: Optional[str] = None
 
 class ProfileQueue(BaseModel):
     id: int
@@ -121,6 +128,7 @@ class ProfileResponse(BaseModel):
     afk_history: List[ProfileAfkHistory]
     queues: List[ProfileQueue]
     linked_chars: List[ProfileLinkedChar]
+    parties: List[ProfileParty] = []
     party: Optional[ProfileParty]
 
 

@@ -1512,14 +1512,18 @@ select.profile-field {
     background: #8B0000 !important;
     color: #fff !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    width: 38px !important;
+    width: auto !important;
+    /* Allow auto width */
     height: 38px !important;
+    padding: 0 16px !important;
+    /* Add padding */
     border-radius: 4px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    font-size: 1.4rem !important;
-    font-weight: 300 !important;
+    font-size: 0.9rem !important;
+    /* Reduce font size */
+    font-weight: 600 !important;
     cursor: pointer !important;
     transition: all 0.2s !important;
 }

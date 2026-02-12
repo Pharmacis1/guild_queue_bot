@@ -105,6 +105,13 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                 setRows(data.rows);
                 setIntervals(data.intervals || []);
                 setDateRange({ start: data.start_date, end: data.end_date });
+
+                // Expand all twins by default on first successful load
+                if (!initialExpansionDone && data.rows.length > 0) {
+                    const allUserIds = new Set(data.rows.map(r => r.user_id).filter((id): id is number => !!id));
+                    setExpandedUsers(allUserIds);
+                    setInitialExpansionDone(true);
+                }
             })
             .catch((err) => console.error("Failed to fetch Money Table:", err))
             .finally(() => setLoading(false));
@@ -146,6 +153,24 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
         fetchData({ start: sStr, end: eStr });
     };
 
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
+    const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
+    const [initialExpansionDone, setInitialExpansionDone] = useState(false);
+
+    useEffect(() => {
+        setIsInitialLoading(loading && rows.length === 0);
+    }, [loading, rows]);
+
+    const toggleExpand = (userId: number) => {
+        const newSet = new Set(expandedUsers);
+        if (newSet.has(userId)) {
+            newSet.delete(userId);
+        } else {
+            newSet.add(userId);
+        }
+        setExpandedUsers(newSet);
+    };
+
     // Client-side filtering
     const filteredRows = rows.filter(r => {
         const matchesSearch = r.name.toLowerCase().includes(search.toLowerCase());
@@ -173,7 +198,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
     };
 
     // Sort logic
-    const sortedRows = [...filteredRows].sort((a: any, b: any) => {
+    const sortedFilteredRows = [...filteredRows].sort((a: any, b: any) => {
         const field = sortConfig.field;
         const order = sortConfig.order === 'asc' ? 1 : -1;
 
@@ -199,12 +224,82 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
         return b.total_valor - a.total_valor;
     });
 
+    // Grouping Logic:
+    // 1. Identify "groups" based on user_id.
+    // 2. If user_id is null, it's a standalone group.
+    // 3. If user_id present, collect all chars.
+    // 4. Sort the GROUPS based on the SORTED FILTERED ROWS order of their MAIN char (or best char if no main).
+
+    // Helper to find the "representative" row for a user_id group from the sorted list
+    // We want to respect the current sort order. So the "rank" of a group is the index of its First Appearing Member in the sorted list.
+
+    // But wait, if we group, we must show Main first? Or just show the structure?
+    // Requirement: "Twins always show under mains".
+    // So Main is the anchor.
+    // If Main is filtered out? We might need to show hidden main? Or just show twin as standalone if main is missing?
+    // Let's assume we operate on the FULL dataset for grouping, then filter? 
+    // No, filtering removes rows. If I filter by "Archer", and Main is "Warrior", I only see twin.
+    // In that case, maybe grouping shouldn't apply or it should just show the twin.
+    // "Show twins under mains" implies a hierarchical view.
+    // Let's go with: Group visible rows. If multiple rows share a user_id:
+    //   - Find the "Main" among them (is_alt=false).
+    //   - If Valid Main exists in visible rows, put it first. Others under it.
+    //   - If NO Main in visible rows (e.g. filtered out), just pick the first one as anchor? 
+    //   - Or maybe we should allow expanding to see ALL twins even if filtered? 
+    //      -> Complex. Standard table filtering usually hides non-matching.
+    // Let's stick to: Group visible rows by user_id.
+
+    const columnMaxes = React.useMemo(() => {
+        const maxes: number[] = [];
+        if (rows.length === 0) return [];
+        const stageCount = rows[0].interval_stats?.length || 0;
+        for (let i = 0; i < stageCount; i++) {
+            maxes.push(Math.max(1, ...rows.map(r => r.interval_stats?.[i]?.valor || 0)));
+        }
+        return maxes;
+    }, [rows]);
+
+    const finalDisplayRows: MoneyTableRow[] = [];
+
+    const processedUserIds = new Set<number>();
+    console.log("Building finalDisplayRows from", sortedFilteredRows.length, "rows");
+
+
+    // We iterate through the SORTED rows.
+    for (const row of sortedFilteredRows) {
+        if (row.user_id) {
+            if (processedUserIds.has(row.user_id)) continue; // Already handled this group
+            processedUserIds.add(row.user_id);
+
+            // Find all visible rows for this user
+            const groupRows = sortedFilteredRows.filter(r => r.user_id === row.user_id);
+
+            // Find Main
+            const mainRow = groupRows.find(r => !r.is_alt);
+            const anchor = mainRow || groupRows[0];
+            const others = groupRows.filter(r => r !== anchor).map(r => ({ ...r, _is_child: true }));
+
+            // Add Anchor
+            finalDisplayRows.push(anchor);
+
+            // If expanded, add others
+            if (expandedUsers.has(row.user_id) && others.length > 0) {
+                finalDisplayRows.push(...others);
+            }
+        } else {
+            // Standalone
+            finalDisplayRows.push(row);
+        }
+    }
+
+    const maxTotalValor = Math.max(1, ...sortedFilteredRows.map(r => r.total_valor));
+
+
     const getSortIcon = (field: string) => {
+
         if (sortConfig.field !== field) return '♦';
         return sortConfig.order === 'desc' ? '▼' : '▲';
     };
-
-    const isInitialLoading = loading && rows.length === 0;
 
     return (
         <div className="table-container fade-in-smooth" style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -652,7 +747,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                             (() => {
                                 const columnMaxes = intervals.map((_, i) => {
                                     let max = 0;
-                                    sortedRows.forEach(row => {
+                                    finalDisplayRows.forEach(row => {
                                         if (row.interval_stats && row.interval_stats[i]) {
                                             if (row.interval_stats[i].valor > max) max = row.interval_stats[i].valor;
                                         }
@@ -660,9 +755,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     return max;
                                 });
 
-                                const maxTotalValor = Math.max(...sortedRows.map(row => row.total_valor), 1);
-
-                                return sortedRows.map((row) => {
+                                return finalDisplayRows.map((row) => {
                                     let rowBg = 'transparent';
                                     let stickyStyle: React.CSSProperties = {
                                         background: 'rgba(5, 5, 5, 1)'
@@ -685,11 +778,33 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                         };
                                     }
 
+                                    // Check if this row is part of a group and if it's main or alt
+                                    const isGroupHead = row.user_id && !row.is_alt; // Simplified assumption for display logic based on our sorting
+                                    // Actually, we rely on finalDisplayRows order. 
+                                    // If row is !is_alt and has user_id, it MIGHT have twins.
+                                    // But we need to know if there ARE twins to show the expand button.
+                                    // We can just check original sortedFilteredRows
+                                    const isExpanded = row.user_id ? expandedUsers.has(row.user_id) : false;
+                                    const hasTwins = row.user_id ? sortedFilteredRows.filter(r => r.user_id === row.user_id).length > 1 : false;
+                                    const isGroupAnchor = row.user_id && !row.is_alt && hasTwins;
+                                    const isChild = !!(row as any)._is_child;
+                                    const participantAllocatedPadding = isChild ? '64px' : '16px';
+
+                                    // CP Neon Strip
+                                    // If cp_color exists, add a left border or box-shadow
+                                    const cpColor = row.cp_color;
+                                    const customStickyStyle = { ...stickyStyle };
+                                    if (cpColor) {
+                                        customStickyStyle.boxShadow = `inset 4px 0 0 0 ${cpColor}`;
+                                    }
+
+                                    // Indentation for children
+
+
                                     return (
                                         <div
                                             key={row.role_id}
                                             className={`kh-row fade-in-smooth kh-row-interactive ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''}`}
-                                            // onClick={() => onRowClick?.(row.role_id)} // Removed
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: intervals.length > 10
@@ -704,13 +819,15 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                 background: rowBg, // Soft gradient for the rest of the row
                                                 borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
                                                 alignItems: 'stretch',
-                                                cursor: 'default' // Changed from pointer
+                                                cursor: 'default', // Changed from pointer
+                                                fontSize: isChild ? '0.9em' : '1em',
+                                                opacity: isChild ? 0.9 : 1
                                             }}
                                         >
                                             {/* Participant */}
                                             <div className="kh-col kh-participant sticky-col" style={{
-                                                ...stickyStyle,
-                                                padding: '10px 16px',
+                                                ...customStickyStyle,
+                                                padding: `10px ${16}px 10px ${participantAllocatedPadding}`,
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 gap: '8px',
@@ -722,19 +839,23 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                 borderRight: 'none',
                                                 backdropFilter: 'blur(10px)'
                                             }}>
-                                                <ClassIcon classId={row.class_id} size={24} />
+
+                                                <ClassIcon classId={row.class_id} size={isChild ? 20 : 24} />
                                                 <PlayerTooltip
                                                     joinDate={row.join_date}
                                                     joinDaysAgo={row.join_days_ago}
                                                     isAfk={row.is_afk}
                                                     afkDates={row.afk_dates}
+                                                    mainNickname={row.main_nickname}
+                                                    parties={row.parties}
                                                 >
                                                     <span
                                                         className="player-name"
                                                         style={{
                                                             marginRight: '4px',
                                                             whiteSpace: 'nowrap',
-                                                            cursor: currentUser?.is_master ? 'pointer' : 'default'
+                                                            cursor: currentUser?.is_master ? 'pointer' : 'default',
+                                                            color: isChild ? '#ccc' : '#fff'
                                                         }}
                                                         onClick={(e) => {
                                                             if (currentUser?.is_master && onRowClick) {
@@ -743,6 +864,34 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                             }
                                                         }}
                                                     >{row.name}</span>
+                                                    {hasTwins && !isChild && (
+                                                        <span
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (row.user_id) toggleExpand(row.user_id);
+                                                            }}
+                                                            style={{
+                                                                cursor: 'pointer',
+                                                                fontSize: '10px',
+                                                                color: '#888',
+                                                                marginLeft: '8px',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                transition: 'all 0.2s',
+                                                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                                                padding: '2px',
+                                                                border: '1px solid #444',
+                                                                borderRadius: '3px',
+                                                                background: 'rgba(255,255,255,0.05)',
+                                                                width: '18px',
+                                                                height: '18px',
+                                                                lineHeight: 1
+                                                            }}
+                                                        >
+                                                            ▼
+                                                        </span>
+                                                    )}
                                                 </PlayerTooltip>
                                                 {onObserverClick && currentUser?.is_master && (
                                                     <button
@@ -777,66 +926,68 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                             </div>
 
                                             {/* Interval Data */}
-                                            {row.interval_stats?.map((stat, i) => {
-                                                const isZero = stat.valor === 0;
-                                                let bg = `rgba(139, 0, 0, ${0.15 + (stat.valor / (columnMaxes[i] || 1)) * 0.35})`;
-                                                let boxShadow = `0 0 10px rgba(139, 0, 0, ${0.1 + (stat.valor / (columnMaxes[i] || 1)) * 0.2})`;
-                                                let border = 'none';
-                                                let color = '#fff';
+                                            {
+                                                row.interval_stats?.map((stat, i) => {
+                                                    const isZero = stat.valor === 0;
+                                                    let bg = `rgba(139, 0, 0, ${0.15 + (stat.valor / (columnMaxes[i] || 1)) * 0.35})`;
+                                                    let boxShadow = `0 0 10px rgba(139, 0, 0, ${0.1 + (stat.valor / (columnMaxes[i] || 1)) * 0.2})`;
+                                                    let border = 'none';
+                                                    let color = '#fff';
 
-                                                if (stat.is_newcomer_stay) {
-                                                    bg = 'rgba(64, 224, 208, 0.2)';
-                                                    boxShadow = 'none';
-                                                    border = '1px solid rgba(64, 224, 208, 0.3)';
-                                                    color = '#fff';
-                                                } else if (stat.is_afk_stay) {
-                                                    bg = 'rgba(128, 128, 128, 0.2)';
-                                                    boxShadow = 'none';
-                                                    border = '1px solid rgba(128, 128, 128, 0.3)';
-                                                }
+                                                    if (stat.is_newcomer_stay) {
+                                                        bg = 'rgba(64, 224, 208, 0.2)';
+                                                        boxShadow = 'none';
+                                                        border = '1px solid rgba(64, 224, 208, 0.3)';
+                                                        color = '#fff';
+                                                    } else if (stat.is_afk_stay) {
+                                                        bg = 'rgba(128, 128, 128, 0.2)';
+                                                        boxShadow = 'none';
+                                                        border = '1px solid rgba(128, 128, 128, 0.3)';
+                                                    }
 
-                                                if (stat.is_pre_join) {
-                                                    color = '#444';
-                                                    bg = 'transparent';
-                                                    boxShadow = 'none';
-                                                    border = 'none';
-                                                } else if (stat.valor === 0 && !stat.is_newcomer_stay && !stat.is_afk_stay) {
-                                                    color = '#666';
-                                                }
+                                                    if (stat.is_pre_join) {
+                                                        color = '#444';
+                                                        bg = 'transparent';
+                                                        boxShadow = 'none';
+                                                        border = 'none';
+                                                    } else if (stat.valor === 0 && !stat.is_newcomer_stay && !stat.is_afk_stay) {
+                                                        color = '#666';
+                                                    }
 
-                                                return (
-                                                    <div key={i} className="kh-col kh-stage" style={{ justifyContent: 'center' }}>
-                                                        {stat.is_pre_join ? (
-                                                            <span style={{ opacity: 0.15, fontSize: '1.2rem' }}>—</span>
-                                                        ) : isZero && !stat.is_newcomer_stay && !stat.is_afk_stay ? (
-                                                            <span style={{ opacity: 0.2, fontSize: '0.8rem' }}>0</span>
-                                                        ) : (
-                                                            <GenericTooltip
-                                                                title="Детализация по периоду"
-                                                                content={stat.valor_details || []}
-                                                            >
-                                                                <span style={{
-                                                                    background: bg,
-                                                                    color: color,
-                                                                    width: '34px',
-                                                                    height: '34px',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    borderRadius: '4px',
-                                                                    fontSize: '0.9rem',
-                                                                    fontWeight: 700,
-                                                                    boxShadow: boxShadow,
-                                                                    border: border,
-                                                                    textAlign: 'center'
-                                                                }}>
-                                                                    {stat.is_pre_join ? '-' : stat.valor.toLocaleString()}
-                                                                </span>
-                                                            </GenericTooltip>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
+                                                    return (
+                                                        <div key={i} className="kh-col kh-stage" style={{ justifyContent: 'center' }}>
+                                                            {stat.is_pre_join ? (
+                                                                <span style={{ opacity: 0.15, fontSize: '1.2rem' }}>—</span>
+                                                            ) : isZero && !stat.is_newcomer_stay && !stat.is_afk_stay ? (
+                                                                <span style={{ opacity: 0.2, fontSize: '0.8rem' }}>0</span>
+                                                            ) : (
+                                                                <GenericTooltip
+                                                                    title="Детализация по периоду"
+                                                                    content={stat.valor_details || []}
+                                                                >
+                                                                    <span style={{
+                                                                        background: bg,
+                                                                        color: color,
+                                                                        width: '34px',
+                                                                        height: '34px',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        borderRadius: '4px',
+                                                                        fontSize: '0.9rem',
+                                                                        fontWeight: 700,
+                                                                        boxShadow: boxShadow,
+                                                                        border: border,
+                                                                        textAlign: 'center'
+                                                                    }}>
+                                                                        {stat.is_pre_join ? '-' : stat.valor.toLocaleString()}
+                                                                    </span>
+                                                                </GenericTooltip>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })
+                                            }
 
                                             {/* TOTAL SUM */}
                                             <div className="kh-col kh-stage" style={{ justifyContent: 'center' }}>
@@ -864,12 +1015,13 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                             })()
                         )}
 
-                        {!loading && sortedRows.length === 0 && (
+                        {!loading && finalDisplayRows.length === 0 && (
                             <div className="text-center p-4 text-muted">No data found for this period.</div>
                         )}
+
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

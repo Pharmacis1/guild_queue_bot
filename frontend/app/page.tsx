@@ -21,6 +21,9 @@ export default function Home() {
             .catch((err) => console.error("Failed to fetch init data:", err));
     }, []);
 
+    const [refreshKey, setRefreshKey] = useState(0);
+    const handleRefresh = () => setRefreshKey(prev => prev + 1);
+
     return (
         <main>
             <Header data={initData} activeTab={activeTab} onTabChange={setActiveTab} />
@@ -28,6 +31,7 @@ export default function Home() {
             <div className="container mt-4" style={{ minHeight: '100vh', padding: '20px' }}>
                 {activeTab === 'kh' && (
                     <KHTable
+                        key={`kh-${refreshKey}`}
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
@@ -37,6 +41,7 @@ export default function Home() {
 
                 {activeTab === 'money' && (
                     <MoneyTable
+                        key={`money-${refreshKey}`}
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
@@ -46,6 +51,7 @@ export default function Home() {
 
                 {activeTab === 'history' && (
                     <HistoryTable
+                        key={`history-${refreshKey}`}
                         onRowClick={setSelectedRoleId}
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
@@ -57,10 +63,11 @@ export default function Home() {
             {selectedRoleId && (
                 <PlayerModal
                     roleId={selectedRoleId}
-                    onClose={() => setSelectedRoleId(null)}
-                    onSave={() => {
+                    onClose={() => {
                         setSelectedRoleId(null);
-                        window.location.reload();
+                    }}
+                    onSave={() => {
+                        handleRefresh();
                     }}
                 />
             )}

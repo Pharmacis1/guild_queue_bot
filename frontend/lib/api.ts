@@ -33,6 +33,10 @@ export interface KHTableRow {
     role_id: number;
     name: string;
     class_id: number;
+    user_id: number | null;
+    is_alt: boolean;
+    cp_id: number | null;
+    cp_color: string | null;
     s1: number;
     s2: number;
     s3: number;
@@ -61,6 +65,15 @@ export interface KHTableRow {
     s5_details?: string[];
     s6_details?: string[];
     s7_details?: string[];
+    main_nickname?: string;
+    parties?: { name: string; color: string }[];
+}
+
+export interface AfkHistoryItem {
+    id: number;
+    start: string;
+    end: string;
+    reason?: string;
 }
 
 export interface KHResponse {
@@ -89,6 +102,11 @@ export interface MoneyTableRow {
     join_date: string;
     join_days_ago: number;
     afk_dates?: string;
+    // New fields for Grouping & CP
+    user_id: number | null;
+    is_alt: boolean;
+    cp_id: number | null;
+    cp_color: string | null;
     // Interval specific
     interval_stats?: {
         label: string; // Added label 
@@ -101,6 +119,8 @@ export interface MoneyTableRow {
         is_afk_stay: boolean;
         valor_details?: string[];
     }[];
+    main_nickname?: string;
+    parties?: { name: string; color: string }[];
 }
 
 export interface MoneyResponse {
@@ -151,10 +171,11 @@ export interface ProfileResponse {
     username: string | null;
     afk_start: string | null;
     afk_end: string | null;
-    afk_history: { id: number; start: string; end: string }[];
+    afk_history: { id: number; start: string; end: string; reason?: string }[];
     queues: { id: number; name: string; auto_requeue: boolean; character_name?: string }[];
     linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];
-    party: { id: number; name: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
+    parties: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] }[];
+    party: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
 }
 
 export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => {
@@ -167,18 +188,39 @@ export const updateProfile = async (roleId: number, data: any): Promise<any> => 
     return response.data;
 };
 
+export const updatePartyName = async (partyId: number, name: string): Promise<any> => {
+    const response = await api.post('/party/rename', { party_id: partyId, name });
+    return response.data;
+};
+
+export const updatePartyColor = async (partyId: number, color: string): Promise<any> => {
+    const response = await api.post('/party/color', { party_id: partyId, color });
+    return response.data;
+};
+
 export const addEvent = async (data: { role_id: number, date: string, value: number, description?: string }): Promise<any> => {
     const response = await api.post('/add_event', data);
     return response.data;
 };
 
-export const addAfkHistory = async (data: { user_id: number, start: string, end: string }): Promise<any> => {
+export const addAfkHistory = async (data: { user_id?: number, role_id?: number, start: string, end: string, reason?: string }): Promise<any> => {
     const response = await api.post('/afk/add', data);
     return response.data;
 };
 
+
 export const deleteAfkHistory = async (afkId: number): Promise<any> => {
     const response = await api.post('/afk/delete', { afk_id: afkId });
+    return response.data;
+};
+
+export const transferPartyLeadership = async (partyId: number, newLeaderRoleId: number): Promise<any> => {
+    const response = await api.post('/party/transfer_leadership', { party_id: partyId, new_leader_role_id: newLeaderRoleId });
+    return response.data;
+};
+
+export const kickPartyMember = async (memberRoleId: number): Promise<any> => {
+    const response = await api.post('/party/kick', { member_role_id: memberRoleId });
     return response.data;
 };
 

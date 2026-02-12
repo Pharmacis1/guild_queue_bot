@@ -48,6 +48,17 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
     const [selectedClasses, setSelectedClasses] = useState<number[]>([]); // Empty = all classes
     const [showClassDropdown, setShowClassDropdown] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ field: string, order: 'asc' | 'desc' }>({ field: 's7', order: 'desc' });
+    const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
+    const [initialExpansionDone, setInitialExpansionDone] = useState(false);
+
+    const toggleUserExpansion = (userId: number) => {
+        setExpandedUsers(prev => {
+            const next = new Set(prev);
+            if (next.has(userId)) next.delete(userId);
+            else next.add(userId);
+            return next;
+        });
+    };
 
     const fetchData = (params: any = {}) => {
         setLoading(true);
@@ -55,6 +66,13 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
             .then((data) => {
                 setRows(data.rows);
                 setDateRange({ start: data.start_date, end: data.end_date });
+
+                // Expand all twins by default on first successful load
+                if (!initialExpansionDone && data.rows.length > 0) {
+                    const allUserIds = new Set(data.rows.map(r => r.user_id).filter((id): id is number => !!id));
+                    setExpandedUsers(allUserIds);
+                    setInitialExpansionDone(true);
+                }
             })
             .catch((err) => console.error("Failed to fetch KH Table:", err))
             .finally(() => setLoading(false));
@@ -138,6 +156,30 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
         // Secondary sort: total_valor desc
         return b.total_valor - a.total_valor;
     });
+
+    const finalDisplayRows: KHTableRow[] = [];
+    const processedUserIds = new Set<number>();
+
+    for (const row of sortedRows) {
+        if (row.user_id) {
+            if (processedUserIds.has(row.user_id)) continue;
+            processedUserIds.add(row.user_id);
+
+            const groupRows = sortedRows.filter(r => r.user_id === row.user_id);
+            // Search for primary character (not an alt)
+            const mainRow = groupRows.find(r => !r.is_alt);
+            const anchor = mainRow || groupRows[0];
+            const others = groupRows.filter(r => r !== anchor).map(r => ({ ...r, _is_child: true }));
+
+            finalDisplayRows.push(anchor);
+
+            if (expandedUsers.has(row.user_id) && others.length > 0) {
+                finalDisplayRows.push(...others);
+            }
+        } else {
+            finalDisplayRows.push(row);
+        }
+    }
 
     const getSortIcon = (field: string) => {
         if (sortConfig.field !== field) return '♦';
@@ -497,11 +539,17 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                             </div>
                         ))
                     ) : (
-                        sortedRows.map(row => {
+                        finalDisplayRows.map(row => {
                             let rowBg = 'transparent';
                             if (row.is_newcomer) rowBg = 'linear-gradient(to right, rgba(64, 224, 208, 0.3) 0%, transparent 100%)';
                             else if (row.is_afk) rowBg = 'linear-gradient(to right, rgba(192, 192, 192, 0.3) 0%, transparent 100%)';
                             else if (row.is_mine) rowBg = 'linear-gradient(to right, rgba(50, 205, 50, 0.25) 0%, transparent 100%)';
+
+                            const isExpanded = row.user_id ? expandedUsers.has(row.user_id) : false;
+                            const hasTwins = row.user_id ? sortedRows.filter(r => r.user_id === row.user_id).length > 1 : false;
+                            const isGroupAnchor = row.user_id && !row.is_alt && hasTwins;
+                            const isChild = !!(row as any)._is_child;
+                            const participantAllocatedPadding = isChild ? '64px' : '16px';
 
                             return (
                                 <div
@@ -536,14 +584,33 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                         background: rowBg,
                                         padding: '10px 16px 10px 16px',
                                         height: '100%',
-                                        boxSizing: 'border-box'
+                                        boxSizing: 'border-box',
+                                        position: 'relative',
+                                        paddingLeft: participantAllocatedPadding
                                     }}>
+                                        {/* CP Neon Strip */}
+                                        {row.cp_color && (
+                                            <div style={{
+                                                position: 'absolute',
+                                                left: 0,
+                                                top: 0,
+                                                bottom: 0,
+                                                width: '4px',
+                                                background: row.cp_color,
+                                                boxShadow: `0 0 10px ${row.cp_color}`
+                                            }} />
+                                        )}
+
+
+
                                         <ClassIcon classId={row.class_id} size={24} />
                                         <PlayerTooltip
                                             joinDate={row.join_date}
                                             joinDaysAgo={row.join_days_ago}
                                             isAfk={row.is_afk}
                                             afkDates={row.afk_dates}
+                                            mainNickname={row.main_nickname}
+                                            parties={row.parties}
                                         >
                                             <span
                                                 className="player-name"
@@ -558,7 +625,37 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                                         onRowClick(row.role_id);
                                                     }
                                                 }}
-                                            >{row.name}</span>
+                                            >
+                                                {row.name}
+                                                {hasTwins && !isChild && (
+                                                    <span
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (row.user_id) toggleUserExpansion(row.user_id);
+                                                        }}
+                                                        style={{
+                                                            cursor: 'pointer',
+                                                            fontSize: '10px',
+                                                            color: '#888',
+                                                            marginLeft: '8px',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            transition: 'all 0.2s',
+                                                            transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                                            padding: '2px',
+                                                            border: '1px solid #444',
+                                                            borderRadius: '3px',
+                                                            background: 'rgba(255,255,255,0.05)',
+                                                            width: '18px',
+                                                            height: '18px',
+                                                            lineHeight: 1
+                                                        }}
+                                                    >
+                                                        ▼
+                                                    </span>
+                                                )}
+                                            </span>
                                         </PlayerTooltip>
                                         {onObserverClick && currentUser?.is_master && (
                                             <button
@@ -576,31 +673,33 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                         )}
                                     </div>
 
-                                    {[
-                                        { val: row.s1, det: row.s1_details, t: 'I' },
-                                        { val: row.s2, det: row.s2_details, t: 'II' },
-                                        { val: row.s3, det: row.s3_details, t: 'III' },
-                                        { val: row.s4, det: row.s4_details, t: 'IV' },
-                                        { val: row.s5, det: row.s5_details, t: 'V' },
-                                        { val: row.s6, det: row.s6_details, t: 'VI' },
-                                        { val: row.s7, det: row.s7_details, t: 'VII' },
-                                        { val: row.adepts || row.s8, det: [], t: 'A' },
-                                        { val: row.dances || row.s9, det: [], t: 'D' }
-                                    ].map((item, idx) => {
-                                        let stageClass = "kh-col";
-                                        if (idx < 2) stageClass += " stage-early";
-                                        else if (idx < 4) stageClass += " stage-mid";
-                                        else if (idx < 6) stageClass += " stage-late";
-                                        else if (idx === 6) stageClass += " kh-stage-vii";
-                                        else if (idx === 7) stageClass += " kh-stage-a";
-                                        else if (idx === 8) stageClass += " kh-stage-d";
+                                    {
+                                        [
+                                            { val: row.s1, det: row.s1_details, t: 'I' },
+                                            { val: row.s2, det: row.s2_details, t: 'II' },
+                                            { val: row.s3, det: row.s3_details, t: 'III' },
+                                            { val: row.s4, det: row.s4_details, t: 'IV' },
+                                            { val: row.s5, det: row.s5_details, t: 'V' },
+                                            { val: row.s6, det: row.s6_details, t: 'VI' },
+                                            { val: row.s7, det: row.s7_details, t: 'VII' },
+                                            { val: row.adepts || row.s8, det: [], t: 'A' },
+                                            { val: row.dances || row.s9, det: [], t: 'D' }
+                                        ].map((item, idx) => {
+                                            let stageClass = "kh-col";
+                                            if (idx < 2) stageClass += " stage-early";
+                                            else if (idx < 4) stageClass += " stage-mid";
+                                            else if (idx < 6) stageClass += " stage-late";
+                                            else if (idx === 6) stageClass += " kh-stage-vii";
+                                            else if (idx === 7) stageClass += " kh-stage-a";
+                                            else if (idx === 8) stageClass += " kh-stage-d";
 
-                                        return (
-                                            <div key={idx} className={stageClass} style={{ textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                {renderStage(item.val, item.det, item.t ? `Этап ${item.t}` : undefined)}
-                                            </div>
-                                        );
-                                    })}
+                                            return (
+                                                <div key={idx} className={stageClass} style={{ textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    {renderStage(item.val, item.det, item.t ? `Этап ${item.t}` : undefined)}
+                                                </div>
+                                            );
+                                        })
+                                    }
                                 </div>
                             )
                         })
@@ -611,6 +710,6 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

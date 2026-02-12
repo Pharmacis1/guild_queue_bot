@@ -1065,7 +1065,26 @@ async def afk_end_quick(callback: types.CallbackQuery, state: FSMContext):
         days = int(action)
         end_dt = start_dt + timedelta(days=days)
 
-    await finish_afk_setup(callback, state, start_dt, end_dt)
+    await state.update_data(end_date=end_dt)
+    
+    # Ask for Reason (Optional)
+    await callback.message.edit_text(
+        "📝 <b>Укажите причину отсутствия</b> (необязательно, можно пропустить):",
+        parse_mode="HTML",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+            types.InlineKeyboardButton(text="➡️ Пропустить", callback_data="afk_reason_skip")
+        ]])
+    )
+    await state.set_state(AFKState.waiting_for_reason)
+
+
+@router.callback_query(AFKState.waiting_for_reason, F.data == "afk_reason_skip")
+async def afk_reason_skip_callback(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    end_dt = data.get("end_date")
+    
+    await finish_afk_setup(callback, state, start_dt, end_dt, reason=None)
 
 
 @router.message(AFKState.waiting_for_end)
@@ -1082,36 +1101,55 @@ async def afk_end_manual(message: types.Message, state: FSMContext):
     if end_dt < start_dt:
         return await message.answer("⚠️ Дата окончания не может быть раньше начала!", reply_markup=get_afk_end_kb())
 
-    # Mock callback for consistency in finish function, or refactor
-    # We can't easily mock callback. Let's make finish_afk_setup accept message too.
-    user = ensure_user(message.from_user.id, message.from_user.username)
-    user.afk_start = start_dt
-    user.afk_end = end_dt
-
-    # History
-    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
-    session.commit()
-
+    await state.update_data(end_date=end_dt)
+    
+    # Ask for Reason (Optional)
     await message.answer(
-        f"✅ <b>Режим AFK установлен!</b>\n\n📅 {start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')}",
+        "📝 <b>Укажите причину отсутствия</b> (необязательно, можно пропустить):",
         parse_mode="HTML",
-        reply_markup=get_afk_menu(user),
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="➡️ Пропустить")]],
+            resize_keyboard=True
+        )
     )
-    await state.clear()
+    await state.set_state(AFKState.waiting_for_reason)
 
 
-async def finish_afk_setup(callback: types.CallbackQuery, state: FSMContext, start_dt, end_dt):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+async def finish_afk_setup(callback_or_message, state: FSMContext, start_dt, end_dt, reason=None):
+    # Handle both CallbackQuery and Message
+    user_id = callback_or_message.from_user.id
+    username = callback_or_message.from_user.username
+    
+    user = ensure_user(user_id, username)
     user.afk_start = start_dt
     user.afk_end = end_dt
 
     # History
-    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
+    session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt, reason=reason))
     session.commit()
+    
+    reason_text = f"\n📝 Причина: {reason}" if reason else ""
 
-    await callback.message.edit_text(
-        f"✅ <b>Режим AFK установлен!</b>\n\n📅 {start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')}",
-        parse_mode="HTML",
-        reply_markup=get_afk_menu(user),
-    )
+    text = f"✅ <b>Режим AFK установлен!</b>\n\n📅 {start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')}{reason_text}"
+
+    if isinstance(callback_or_message, types.CallbackQuery):
+        await callback_or_message.message.edit_text(text, parse_mode="HTML", reply_markup=get_afk_menu(user))
+    else:
+        await callback_or_message.answer(text, parse_mode="HTML", reply_markup=get_afk_menu(user))
+        
     await state.clear()
+
+
+@router.message(AFKState.waiting_for_reason)
+async def afk_reason_input(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    start_dt = data.get("start_date")
+    end_dt = data.get("end_date")
+    
+    text = message.text.strip()
+    reason = None
+    
+    if text != "➡️ Пропустить":
+        reason = text
+
+    await finish_afk_setup(message, state, start_dt, end_dt, reason)

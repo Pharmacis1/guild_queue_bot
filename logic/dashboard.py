@@ -15,29 +15,59 @@ async def get_join_dates() -> Tuple[Dict[int, str], Dict[int, int]]:
     Returns:
     1. join_dates: {role_id: first_seen_date_str}
     2. role_user_map: {role_id: user_id}
+       Enriched with character linkage so all linked chars
+       (main + twins) share the same user_id for AFK spreading.
     """
     async with aiosqlite.connect(DB_NAME) as conn:
         cursor = await conn.execute("SELECT role_id, first_seen, user_id FROM players WHERE in_clan = 1")
         join_data = await cursor.fetchall()
-        
+
+        # Enrich role_user_map with character linkage
+        # This ensures twins (alts) linked via the characters table
+        # inherit the same user_id for AFK status spreading
+        cursor = await conn.execute("""
+            SELECT c.user_id, p.role_id
+            FROM characters c
+            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
+            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
+        """)
+        char_links = await cursor.fetchall()
+
     join_dates = {role_id: first_seen for role_id, first_seen, _ in join_data if first_seen}
     role_user_map = {role_id: user_id for role_id, _, user_id in join_data if user_id}
+
+    # Add character linkage entries (don't overwrite existing)
+    for uid, rid in char_links:
+        if rid not in role_user_map:
+            role_user_map[rid] = uid
+
     return join_dates, role_user_map
 
 async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
     """
-    Returns: {user_id: [(start_dt, end_dt), ...]}
+    Returns: {key: [(start_dt, end_dt), ...]}
+    Keys are user_id (positive) for linked players,
+    or -role_id (negative) for unlinked players with role_id-only AFK entries.
     """
     async with aiosqlite.connect(DB_NAME) as conn:
-        # 1. Current AFK
+        # 1. Current AFK (from users table)
         cursor = await conn.execute("SELECT id, afk_start, afk_end FROM users WHERE afk_start IS NOT NULL")
         afk_rows = await cursor.fetchall()
 
-        # 2. History AFK
-        cursor = await conn.execute("SELECT user_id, start_date, end_date FROM afk_history")
+        # 2. History AFK (includes user_id and role_id)
+        cursor = await conn.execute("SELECT user_id, role_id, start_date, end_date FROM afk_history")
         afk_history_rows = await cursor.fetchall()
 
-    afk_map = {}
+        # 3. Character linkage: role_id -> user_id (for promoting role-only AFK to user)
+        cursor = await conn.execute("""
+            SELECT p.role_id, c.user_id
+            FROM characters c
+            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
+            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
+        """)
+        role_to_user = {r[0]: r[1] for r in await cursor.fetchall()}
+
+    afk_map: Dict[int, List[Tuple[datetime, datetime]]] = {}
 
     def parse_date(date_val):
         if not date_val: return None
@@ -49,21 +79,45 @@ async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
             else: return datetime.strptime(s_val, "%Y-%m-%d")
         except: return None
 
-    all_rows = [(uid, s, e) for uid, s, e in afk_rows] + [(uid, s, e) for uid, s, e in afk_history_rows]
+    def add_period(key, s_dt, e_dt):
+        if key is None: return
+        if key not in afk_map: afk_map[key] = []
+        afk_map[key].append((s_dt, e_dt))
 
-    for uid, start_ts, end_ts in all_rows:
+    # Users table entries (keyed by user_id)
+    for uid, start_ts, end_ts in afk_rows:
         s_dt = parse_date(start_ts)
         e_dt = parse_date(end_ts) or s_dt
         if s_dt and e_dt:
-            if uid not in afk_map: afk_map[uid] = []
-            afk_map[uid].append((s_dt, e_dt))
-            
+            add_period(uid, s_dt, e_dt)
+
+    # History entries
+    for uid, rid, start_ts, end_ts in afk_history_rows:
+        s_dt = parse_date(start_ts)
+        e_dt = parse_date(end_ts) or s_dt
+        if s_dt and e_dt:
+            if uid:
+                add_period(uid, s_dt, e_dt)
+            elif rid:
+                # Role-only entry: also promote to user_id if character is linked
+                linked_uid = role_to_user.get(rid)
+                if linked_uid:
+                    add_period(linked_uid, s_dt, e_dt)
+                else:
+                    add_period(-rid, s_dt, e_dt)
+
     return afk_map
 
 def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: Dict[int, List], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Tuple[bool, Optional[str]]:
     if not role_id: return False, None
     uid = role_user_map.get(role_id)
-    if not uid or uid not in afk_map: return False, None
+    # Check by user_id first, then fall back to -role_id for unlinked players
+    if uid and uid in afk_map:
+        pass  # uid is valid
+    elif -role_id in afk_map:
+        uid = -role_id
+    else:
+        return False, None
     
     periods = afk_map[uid]
     if not periods: return False, None
@@ -87,6 +141,82 @@ def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: D
     sorted_periods = sorted(overlapping_periods, key=lambda x: x[1], reverse=True)
     s, e = sorted_periods[0]
     return True, f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}"
+
+async def get_party_map() -> Dict[int, List[Dict[str, str]]]:
+    """Returns {role_id: [{'name': str, 'color': str}, ...]}"""
+    async with aiosqlite.connect(DB_NAME) as conn:
+        conn.row_factory = aiosqlite.Row
+        sql = """
+            SELECT pm.player_role_id, cp.name, cp.color
+            FROM party_members pm
+            JOIN constant_parties cp ON pm.party_id = cp.id
+        """
+        cursor = await conn.execute(sql)
+        rows = await cursor.fetchall()
+        
+    party_map = {}
+    for r in rows:
+        rid = r["player_role_id"]
+        if rid not in party_map: party_map[rid] = []
+        party_map[rid].append({"name": r["name"] or "Без названия", "color": r["color"] or "#888888"})
+    return party_map
+
+async def get_main_nick_map() -> Dict[int, str]:
+    """Returns {role_id: main_nickname} for characters that are alts."""
+    async with aiosqlite.connect(DB_NAME) as conn:
+        conn.row_factory = aiosqlite.Row
+        # 1. Get all clan members from players
+        cursor = await conn.execute("SELECT role_id, user_id, nickname, is_alt FROM players WHERE in_clan = 1")
+        player_rows = await cursor.fetchall()
+        
+        # 2. Get character linkage (much more reliable for twins)
+        cursor = await conn.execute("""
+            SELECT c.user_id, p.role_id, c.nickname, c.is_main
+            FROM characters c
+            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
+            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
+        """)
+        char_links = await cursor.fetchall()
+
+    # Build role -> user mapping and track is_main status from characters table
+    role_to_user = {}
+    is_main_status = {} # {role_id: bool}
+    
+    # First: from players table
+    for r in player_rows:
+        rid = r["role_id"]
+        if r["user_id"]:
+            role_to_user[rid] = r["user_id"]
+        # Default is_main status if we don't find it in characters table
+        is_main_status[rid] = (r["is_alt"] == 0)
+
+    # Second: enrich/override from characters table (more reliable)
+    for r in char_links:
+        rid = r["role_id"]
+        uid = r["user_id"]
+        role_to_user[rid] = uid
+        is_main_status[rid] = bool(r["is_main"])
+
+    # Group characters by user_id and find the "true" main for each user
+    user_to_main_nick = {}
+    for r in player_rows:
+        rid = r["role_id"]
+        uid = role_to_user.get(rid)
+        if uid and is_main_status.get(rid):
+            user_to_main_nick[uid] = r["nickname"]
+    
+    # Map alts to their main's nickname. 
+    # An alt is any character that is NOT the main.
+    mapping = {}
+    for r in player_rows:
+        rid = r["role_id"]
+        uid = role_to_user.get(rid)
+        if uid and uid in user_to_main_nick:
+            main_nick = user_to_main_nick[uid]
+            if r["nickname"] != main_nick:
+                mapping[rid] = main_nick
+                
+    return mapping
 
 # --- DATA PROCESSORS ---
 
@@ -120,6 +250,8 @@ async def get_kh_table_data(
     # Context Data
     join_dates, role_user_map = await get_join_dates()
     afk_map = await get_afk_map()
+    party_map = await get_party_map()
+    main_nicks = await get_main_nick_map()
 
     # Tiers logic
     active_valors = sorted([r["total_valor"] for r in rows_raw if r["total_valor"] > 0])
@@ -169,6 +301,12 @@ async def get_kh_table_data(
             "role_id": role_id,
             "name": r["name"],
             "class_id": r["class_id"],
+            "user_id": r.get("user_id"),
+            "is_alt": bool(r.get("is_alt", 0)),
+            "main_nickname": main_nicks.get(role_id),
+            "parties": party_map.get(role_id, []),
+            "cp_id": r.get("cp_id"),
+            "cp_color": r.get("cp_color"),
             "s1": r.get("s1", 0),
             "s2": r.get("s2", 0),
             "s3": r.get("s3", 0),
@@ -228,6 +366,8 @@ async def get_money_table_data(
     # Context Data
     join_dates, role_user_map = await get_join_dates()
     afk_map = await get_afk_map()
+    party_map = await get_party_map()
+    main_nicks = await get_main_nick_map()
 
     # Filter Classes
     if class_list:
@@ -257,6 +397,8 @@ async def get_money_table_data(
         row["is_newcomer"] = is_nc
         row["is_afk"] = is_afk
         row["afk_dates"] = afk_text
+        row["main_nickname"] = main_nicks.get(role_id)
+        row["parties"] = party_map.get(role_id, [])
         
         # Join Date
         if role_id in join_dates:

@@ -14,12 +14,14 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
     const [initData, setInitData] = useState<InitData | null>(null); // New state for initData
     const [activeTab, setActiveTab] = useState<'account' | 'status' | 'links' | 'queues'>('account');
     const [isClosing, setIsClosing] = useState(false);
+    const [hasChanged, setHasChanged] = useState(false);
 
     const handleClose = () => {
         setIsClosing(true);
         setTimeout(() => {
+            if (hasChanged && onSave) onSave();
             onClose();
-        }, 200); // Match animation duration
+        }, 200); // match animation
     };
 
     // Form States
@@ -30,6 +32,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
     const [inClan, setInClan] = useState(false); // Default to false
     const [afkStart, setAfkStart] = useState('');
     const [afkEnd, setAfkEnd] = useState('');
+    const [afkReason, setAfkReason] = useState('');
     const [showAFK, setShowAFK] = useState(false);
     const [isValourOpen, setIsValourOpen] = useState(false);
 
@@ -38,6 +41,30 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
     const [queueCharName, setQueueCharName] = useState('');
     const [isAutoRequeue, setIsAutoRequeue] = useState(false);
     const [isCalendarMode, setIsCalendarMode] = useState(false);
+
+    // Links Tab States
+    const [newCharNickname, setNewCharNickname] = useState('');
+    // const [newPartyMemberNickname, setNewPartyMemberNickname] = useState(''); // Removed global state
+    const [showColorPicker, setShowColorPicker] = useState<number | null>(null); // store party ID
+
+    const syncProfile = async (overrides: any = {}) => {
+        if (!roleId) return;
+        try {
+            await updateProfile(roleId, {
+                nickname,
+                class_id: classId,
+                telegram_id: telegramId || null,
+                is_alt: !isMain,
+                in_clan: inClan,
+                afk_start: afkStart || null,
+                afk_end: afkEnd || null,
+                ...overrides
+            });
+            setHasChanged(true);
+        } catch (error) {
+            console.error("Sync error:", error);
+        }
+    };
 
     useEffect(() => {
         if (!roleId) {
@@ -75,25 +102,6 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
         };
     }, [roleId]);
 
-    const handleSave = async () => {
-        if (!roleId) return;
-        try {
-            await updateProfile(roleId, {
-                nickname,
-                class_id: classId,
-                telegram_id: telegramId || null,
-                is_alt: !isMain,
-                in_clan: inClan,
-                afk_start: afkStart || null,
-                afk_end: afkEnd || null
-            });
-            alert("Saved!");
-            if (onSave) onSave();
-            onClose();
-        } catch (e: any) {
-            alert("Error saving: " + e.message);
-        }
-    };
 
     const handleUnlink = async (nickname: string) => {
         if (!confirm(`Отвязать персонажа ${nickname}?`)) return;
@@ -136,19 +144,21 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
             return;
         }
         try {
-            // 1. Update current status
+            // 1. Update current status in 'players' table
             await updateProfile(roleId, {
                 afk_start: afkStart,
                 afk_end: afkEnd
             });
-            // 2. Add to history (if we have user_id)
-            if (data?.user_id) {
-                await addAfkHistory({
-                    user_id: data.user_id,
-                    start: afkStart,
-                    end: afkEnd
-                });
-            }
+            // 2. Add to history
+            // Use user_id if linked, otherwise use role_id
+            await addAfkHistory({
+                user_id: data?.user_id || undefined,
+                role_id: !data?.user_id ? roleId : undefined,
+                start: afkStart,
+                end: afkEnd,
+                reason: afkReason
+            });
+
             alert("Отпуск добавлен!");
             // Refresh profile to show new history
             const profile = await fetchProfile(roleId);
@@ -206,7 +216,66 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
         }
     };
 
+    const handleCharLink = async () => {
+        const nick = newCharNickname.trim();
+        if (!nick || !data?.user_id) return;
+        try {
+            const resp = await fetch('/api/character/link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: data.user_id, nickname: nick })
+            });
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                setNewCharNickname('');
+                if (roleId) fetchProfile(roleId).then(setData);
+            } else {
+                alert("Ошибка: " + result.message);
+            }
+        } catch (e: any) {
+            alert("Ошибка при привязке: " + e.message);
+        }
+    };
+
+    const handlePartyAdd = async (nickname: string, targetPartyId?: number) => {
+        const nick = nickname.trim();
+        if (!nick || !roleId) return;
+
+        try {
+            let resp;
+            if (targetPartyId) {
+                // Add to existing party
+                resp = await fetch('/api/party/add_member', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ party_id: targetPartyId, nickname: nick })
+                });
+            } else {
+                // Create new party with current player as leader
+                resp = await fetch('/api/party/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leader_role_id: roleId, nickname: nick })
+                });
+            }
+
+            const result = await resp.json();
+            if (result.status === 'ok') {
+                if (roleId) fetchProfile(roleId).then(setData);
+                // Clear input if successful (handled by individual inputs)
+                return true;
+            } else {
+                alert("Ошибка: " + result.message);
+                return false;
+            }
+        } catch (e: any) {
+            alert("Ошибка при добавлении в КП: " + e.message);
+            return false;
+        }
+    };
+
     const handleJoinQueue = async () => {
+
         if (!selectedQueueId || !queueCharName) {
             alert("Выберите очередь и персонажа");
             return;
@@ -249,7 +318,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                             </div>
                             <div className="profile-hero-info">
                                 <h4 className="profile-hero-name">
-                                    {(nickname || 'Unknown').toUpperCase()}
+                                    {nickname || 'Unknown'}
                                 </h4>
                                 <div className="profile-hero-meta">
                                     <span>{data?.class_id !== undefined && data?.class_id !== null ? (initData?.classes[data.class_id]?.[0] || 'Unknown Class') : '...'}</span>
@@ -301,6 +370,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                         className="profile-field"
                                                         value={nickname}
                                                         onChange={(e) => setNickname(e.target.value)}
+                                                        onBlur={(e) => {
+                                                            if (data && e.target.value !== (data.nickname || '')) syncProfile();
+                                                        }}
                                                     />
                                                 </div>
                                             </div>
@@ -313,7 +385,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                     <select
                                                         className="profile-field"
                                                         value={classId}
-                                                        onChange={(e) => setClassId(Number(e.target.value))}
+                                                        onChange={(e) => {
+                                                            const cid = parseInt(e.target.value);
+                                                            setClassId(cid);
+                                                            syncProfile({ class_id: cid });
+                                                        }}
                                                     >
                                                         {initData && Object.entries(initData.classes).map(([id, info]) => (
                                                             <option key={id} value={id}>{(info as [string, string, string])[0]}</option>
@@ -324,14 +400,16 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                         </div>
 
                                         <div className="profile-input-group">
-                                            <label>Telegram ID</label>
+                                            <label>Telegram ID / @user</label>
                                             <div className="profile-input-container">
                                                 <input
                                                     type="text"
                                                     className="profile-field"
                                                     value={telegramId}
                                                     onChange={(e) => setTelegramId(e.target.value)}
-                                                    placeholder="1746503476"
+                                                    onBlur={(e) => {
+                                                        if (data && e.target.value !== (data.telegram_id?.toString() || '')) syncProfile();
+                                                    }}
                                                 />
                                                 <button className="btn-field-action">✈️</button>
                                             </div>
@@ -342,12 +420,18 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                             <button
                                                 type="button"
                                                 className={`profile-toggle-btn ${isMain ? 'active' : ''}`}
-                                                onClick={() => setIsMain(true)}
+                                                onClick={() => {
+                                                    setIsMain(true);
+                                                    syncProfile({ is_alt: false });
+                                                }}
                                             >⭐ ОСНОВА</button>
                                             <button
                                                 type="button"
                                                 className={`profile-toggle-btn ${!isMain ? 'active' : ''}`}
-                                                onClick={() => setIsMain(false)}
+                                                onClick={() => {
+                                                    setIsMain(false);
+                                                    syncProfile({ is_alt: true });
+                                                }}
                                             >👤 ТВИН</button>
                                         </div>
                                     </div>
@@ -360,12 +444,18 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                             <button
                                                 type="button"
                                                 className={`profile-toggle-btn ${inClan ? 'active' : ''}`}
-                                                onClick={() => setInClan(true)}
+                                                onClick={() => {
+                                                    setInClan(true);
+                                                    syncProfile({ in_clan: true });
+                                                }}
                                             >🟢 В КЛАНЕ</button>
                                             <button
                                                 type="button"
                                                 className={`profile-toggle-btn ${!inClan ? 'active' : ''}`}
-                                                onClick={() => setInClan(false)}
+                                                onClick={() => {
+                                                    setInClan(false);
+                                                    syncProfile({ in_clan: false });
+                                                }}
                                             >⚫ ВНЕ КЛАНА</button>
                                         </div>
 
@@ -375,36 +465,49 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                 <button
                                                     className={`afk-history-btn ${showAFK ? 'active' : ''}`}
                                                     onClick={() => setShowAFK(!showAFK)}
-                                                >� История</button>
+                                                > История</button>
                                             </div>
-                                            <div className="afk-card-content">
-                                                <div className="afk-date-row">
-                                                    <div className="afk-date-group">
-                                                        <div className="afk-date-tag">С</div>
+                                            <div className="afk-card-content" style={{ padding: '16px 20px' }}>
+                                                <div className="afk-date-row" style={{ display: 'flex', gap: '30px', marginBottom: '16px', alignItems: 'flex-start' }}>
+                                                    <div style={{ flex: '0 0 160px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                        <div style={{ fontSize: '0.85rem', color: '#bbb', fontWeight: 600, letterSpacing: '0.03em', paddingLeft: '4px' }}>С</div>
                                                         <input
                                                             type="date"
-                                                            className="afk-date-input"
                                                             value={afkStart}
                                                             onChange={e => setAfkStart(e.target.value)}
-                                                            style={{ colorScheme: 'dark' }}
+                                                            style={{ colorScheme: 'dark', width: '100%', padding: '10px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid #444', color: '#fff', fontSize: '0.9rem' }}
                                                         />
                                                     </div>
-                                                    <div className="afk-date-group">
-                                                        <div className="afk-date-tag">По</div>
+                                                    <div style={{ flex: '0 0 160px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                        <div style={{ fontSize: '0.85rem', color: '#bbb', fontWeight: 600, letterSpacing: '0.03em', paddingLeft: '4px' }}>ПО</div>
                                                         <input
                                                             type="date"
-                                                            className="afk-date-input"
                                                             value={afkEnd}
                                                             onChange={e => setAfkEnd(e.target.value)}
-                                                            style={{ colorScheme: 'dark' }}
+                                                            style={{ colorScheme: 'dark', width: '100%', padding: '10px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid #444', color: '#fff', fontSize: '0.9rem' }}
                                                         />
                                                     </div>
+                                                </div>
+
+                                                <div style={{ marginBottom: '16px' }}>
+                                                    <input
+                                                        type="text"
+                                                        className="profile-field"
+                                                        placeholder="Причина (необязательно)"
+                                                        value={afkReason}
+                                                        onChange={(e) => setAfkReason(e.target.value)}
+                                                        style={{ padding: '10px 12px', width: '100%', boxSizing: 'border-box' }}
+                                                    />
+                                                </div>
+
+                                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                                                     <button
                                                         type="button"
                                                         title="Сохранить отпуск"
                                                         className="btn-afk-add"
                                                         onClick={handleAddAfk}
-                                                    >+</button>
+                                                        style={{ width: 'auto', padding: '10px 24px', borderRadius: '6px', fontWeight: 600 }}
+                                                    >ДОБАВИТЬ ПЕРИОД</button>
                                                 </div>
 
                                                 {showAFK && (
@@ -412,8 +515,11 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                         {data?.afk_history && data.afk_history.length > 0 ? (
                                                             <ul className="list-unstyled small text-silver mt-1 px-2">
                                                                 {data.afk_history.map((h, i) => (
-                                                                    <li key={i} className="mb-1 d-flex justify-content-between align-items-center flex-nowrap" style={{ opacity: 0.9, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'nowrap' }}>
-                                                                        <span className="opacity-75" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>• {h.start.split(' ')[0]} - {h.end.split(' ')[0]}</span>
+                                                                    <li key={i} className="mb-1 d-flex justify-content-between align-items-center flex-nowrap" style={{ opacity: 0.9 }}>
+                                                                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                            <span className="opacity-75">• {new Date(h.start).toLocaleDateString()} - {new Date(h.end).toLocaleDateString()}</span>
+                                                                            {h.reason && <span className="d-block text-muted small pl-2" style={{ fontSize: '0.85em' }}>└ {h.reason}</span>}
+                                                                        </div>
                                                                         <button
                                                                             type="button"
                                                                             className="btn-delete-afk"
@@ -501,173 +607,410 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                     </div>
                                 )}
 
-                                {activeTab === 'links' && (
-                                    <div className="links-tab-container">
-                                        <div className="links-card">
-                                            <div className="links-section-header">
-                                                <span>👥</span> Другие персонажи
-                                            </div>
-                                            <div className="char-grid">
-                                                {data?.linked_chars.map((c, i) => (
-                                                    <div key={i} className="char-status-card">
-                                                        <button
-                                                            className="btn-char-unlink"
-                                                            title="Отвязать"
-                                                            onClick={() => handleUnlink(c.nickname)}
-                                                        >&times;</button>
-                                                        <ClassIcon classId={c.class_id || 0} size={28} />
-                                                        <div className="char-status-name">{c.nickname}</div>
-                                                        <div className={`char-status-type ${c.is_main ? 'is-main' : ''}`}>
-                                                            <span>👤</span> {c.is_main ? 'Основа' : 'Твин'}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="links-action-row">
-                                                <input
-                                                    type="text"
-                                                    className="links-field"
-                                                    placeholder="Никнейм нового персонажа"
-                                                />
-                                                <button type="button" className="btn-links-add">ПРИВЯЗАТЬ</button>
-                                            </div>
-                                        </div>
-
-                                        <div className="links-card">
-                                            <div className="links-section-header">
-                                                <span>⚔️</span> Констовая пати (КП)
-                                            </div>
-
-                                            {data?.party ? (
+                                {
+                                    activeTab === 'links' && (
+                                        <div className="links-tab-container">
+                                            <div className="links-card">
+                                                <div className="links-section-header">
+                                                    <span>👥</span> Другие персонажи
+                                                </div>
                                                 <div className="char-grid">
-                                                    {data.party.members.map((m, i) => (
+                                                    {data?.linked_chars.filter(c => c.nickname.toLowerCase() !== (nickname || '').toLowerCase()).map((c, i) => (
                                                         <div key={i} className="char-status-card">
-                                                            <ClassIcon classId={m.class_id || 0} size={28} />
-                                                            <div className="char-status-name">
-                                                                {m.is_leader ? '👑 ' : ''}{m.nickname}
-                                                            </div>
-                                                            <div className="char-status-type">
-                                                                <span>👤</span> {m.is_leader ? 'Лидер' : 'Участник'}
+                                                            <button
+                                                                className="btn-char-unlink"
+                                                                title="Отвязать"
+                                                                onClick={() => handleUnlink(c.nickname)}
+                                                            >&times;</button>
+                                                            <ClassIcon classId={c.class_id || 0} size={28} />
+                                                            <div className="char-status-name">{c.nickname}</div>
+                                                            <div className={`char-status-type ${c.is_main ? 'is-main' : ''}`}>
+                                                                <span>👤</span> {c.is_main ? 'Основа' : 'Твин'}
                                                             </div>
                                                         </div>
                                                     ))}
                                                 </div>
-                                            ) : (
-                                                <div className="empty-state-cp">
-                                                    <div className="empty-state-icon">⚔️</div>
-                                                    <div className="empty-state-text">Не состоит в КП</div>
+                                                <div className="links-action-row">
+                                                    <input
+                                                        type="text"
+                                                        className="links-field"
+                                                        placeholder="Никнейм нового персонажа"
+                                                        value={newCharNickname}
+                                                        onChange={(e) => setNewCharNickname(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleCharLink()}
+                                                    />
+                                                    <button type="button" className="btn-links-add" onClick={handleCharLink}>ПРИВЯЗАТЬ</button>
                                                 </div>
-                                            )}
-
-                                            <div className="links-action-row">
-                                                <input
-                                                    type="text"
-                                                    className="links-field"
-                                                    placeholder="Никнейм участника КП"
-                                                />
-                                                <button type="button" className="btn-links-add">ДОБАВИТЬ</button>
                                             </div>
-                                        </div>
-                                    </div>
-                                )}
 
-                                {activeTab === 'queues' && (
-                                    <div className="tab-pane active">
-                                        <div className="queues-tab-container">
-                                            <div className="queues-card">
-                                                <div className="queues-section-header">
-                                                    <span>📋</span> Активные очереди
+                                            <div className="links-card">
+                                                <div className="links-section-header">
+                                                    <span>⚔️</span> Констовая пати (КП)
                                                 </div>
 
-                                                <div className="queues-card-body">
-                                                    <div className="queues-grid">
-                                                        {data?.queues.map((q, i) => (
-                                                            <div key={i} className="queue-chip">
-                                                                <span className="queue-chip-icon">
-                                                                    {q.auto_requeue ? '🔄' : '📅'}
-                                                                </span>
-                                                                <span className="queue-name">{q.name}</span>
-                                                                {q.character_name && (
-                                                                    <span className="queue-nick-badge">{q.character_name}</span>
+                                                {data?.parties && data.parties.length > 0 ? (
+                                                    data.parties.map((party, pIdx) => (
+                                                        <div key={party.id} className="cp-group-container" style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                                            <div className="status-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                                                <div className="header-left" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                                    <span style={{ fontSize: '1.2rem' }}>⚔️</span>
+                                                                    <span style={{ fontSize: '0.8rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Группа КП #{pIdx + 1}</span>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="status-main-info" style={{ marginBottom: '20px' }}>
+                                                                {party.is_leader || initData?.user?.is_master ? (
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                                            <input
+                                                                                type="text"
+                                                                                className="links-field"
+                                                                                placeholder="Название КП"
+                                                                                defaultValue={party.name || ''}
+                                                                                onBlur={(e) => {
+                                                                                    if (party.id && e.target.value !== party.name) {
+                                                                                        import('@/lib/api').then(({ updatePartyName }) => {
+                                                                                            updatePartyName(party.id, e.target.value).then(() => {
+                                                                                                setHasChanged(true);
+                                                                                                if (roleId) fetchProfile(roleId).then(setData);
+                                                                                            });
+                                                                                        });
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                            <button
+                                                                                onClick={() => setShowColorPicker(showColorPicker === party.id ? null : party.id)}
+                                                                                style={{
+                                                                                    background: '#1a1a1a',
+                                                                                    border: '1px solid #333',
+                                                                                    color: '#fff',
+                                                                                    padding: '6px 12px',
+                                                                                    borderRadius: '6px',
+                                                                                    fontSize: '0.8rem',
+                                                                                    cursor: 'pointer',
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '8px'
+                                                                                }}
+                                                                            >
+                                                                                {showColorPicker === party.id ? 'Закрыть палитру' : 'Выбрать цвет КП'}
+                                                                                <div style={{
+                                                                                    width: '12px', height: '12px', borderRadius: '50%',
+                                                                                    background: party.color || '#333',
+                                                                                    border: '1px solid rgba(255,255,255,0.2)'
+                                                                                }} />
+                                                                            </button>
+                                                                        </div>
+
+                                                                        {showColorPicker === party.id && (
+                                                                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', maxWidth: '320px', padding: '15px', background: 'rgba(0,0,0,0.3)', borderRadius: '10px', width: '100%', marginBottom: '10px', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)' }}>
+                                                                                {[
+                                                                                    '#ff0055', '#00ccff', '#00ff66', '#bd00ff', '#ffff00', '#ff8800',
+                                                                                    '#ff00ff', '#00ff00', '#00ffff', '#ff0000', '#ff007f', '#7f00ff',
+                                                                                    '#007fff', '#00ff7f', '#7fff00', '#ff7f00', '#ff5500', '#5500ff',
+                                                                                    '#00ffaa', '#aa00ff'
+                                                                                ].map(c => {
+                                                                                    const norm = (val: string) => (val || '').toLowerCase().trim().replace(/^(?!#)/, '#');
+                                                                                    const isSelected = norm(party.color) === norm(c);
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={c}
+                                                                                            title={`Выбрать цвет ${c}`}
+                                                                                            onClick={() => {
+                                                                                                import('@/lib/api').then(({ updatePartyColor }) => {
+                                                                                                    updatePartyColor(party.id, c).then(() => {
+                                                                                                        setHasChanged(true);
+                                                                                                        if (roleId) fetchProfile(roleId).then(setData);
+                                                                                                    });
+                                                                                                });
+                                                                                            }}
+                                                                                            style={{
+                                                                                                width: isSelected ? '32px' : '28px',
+                                                                                                height: isSelected ? '32px' : '28px',
+                                                                                                borderRadius: '50%',
+                                                                                                background: c, cursor: 'pointer',
+                                                                                                border: isSelected ? '3px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                                                                                                outline: isSelected ? `3px solid ${c}` : 'none',
+                                                                                                outlineOffset: '2px',
+                                                                                                boxShadow: isSelected ? `0 0 30px ${c}, 0 0 15px ${c}` : `0 0 5px ${c}40`,
+                                                                                                transform: isSelected ? 'scale(1.3)' : 'scale(1.0)',
+                                                                                                transition: 'all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                                                                                                position: 'relative',
+                                                                                                zIndex: isSelected ? 10 : 1,
+                                                                                                display: 'flex',
+                                                                                                alignItems: 'center',
+                                                                                                justifyContent: 'center'
+                                                                                            }}
+                                                                                        >
+                                                                                            {isSelected && (
+                                                                                                <span style={{ color: '#fff', fontSize: '18px', fontWeight: 'bold', textShadow: '0 0 6px #000, 0 0 3px #000', pointerEvents: 'none' }}>✓</span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                                <div
+                                                                                    onClick={() => {
+                                                                                        import('@/lib/api').then(({ updatePartyColor }) => {
+                                                                                            updatePartyColor(party.id, "").then(() => {
+                                                                                                setHasChanged(true);
+                                                                                                if (roleId) fetchProfile(roleId).then(setData);
+                                                                                            });
+                                                                                        });
+                                                                                    }}
+                                                                                    style={{
+                                                                                        width: '24px', height: '24px', borderRadius: '50%',
+                                                                                        background: 'transparent', cursor: 'pointer',
+                                                                                        border: '1px dashed #666',
+                                                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                                        fontSize: '14px', color: '#666',
+                                                                                        transition: 'all 0.2s'
+                                                                                    }}
+                                                                                    title="Сбросить цвет"
+                                                                                >✕</div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: party.color || '#fff', textShadow: party.color ? `0 0 10px ${party.color}` : 'none' }}>
+                                                                        {party.name || 'Без названия'}
+                                                                    </div>
                                                                 )}
-                                                                <button
-                                                                    className="btn-queue-remove"
-                                                                    onClick={() => handleLeaveQueue(q.id)}
-                                                                    title="Выйти"
-                                                                >&times;</button>
                                                             </div>
-                                                        ))}
-                                                        {data?.queues.length === 0 && (
-                                                            <div className="empty-state-text w-100 text-center py-3">
-                                                                Нет активных очередей
+
+                                                            <div className="char-grid">
+                                                                {party.members.map((m, i) => {
+                                                                    const canManage = (party.is_leader || initData?.user?.is_master);
+                                                                    // Prevent kicking self or transferring to self (redundant)
+                                                                    // Wait, if I am leader, can I kick myself? No, I leave.
+                                                                    // If I am admin viewing someone else, I can kick them using 'party_kick' endpoint (which uses 'member_role_id').
+                                                                    // 'member_role_id' here is `m.role_id`.
+
+                                                                    return (
+                                                                        <div key={i} className="char-status-card" style={{ borderLeft: m.is_leader ? '2px solid gold' : '1px solid #333', position: 'relative' }}>
+                                                                            <ClassIcon classId={m.class_id || 0} size={28} />
+                                                                            <div className="char-status-name">
+                                                                                {m.is_leader ? '👑 ' : ''}{m.nickname}
+                                                                            </div>
+                                                                            <div className="char-status-type">
+                                                                                <span>👤</span> {m.is_leader ? 'Лидер' : 'Участник'}
+                                                                            </div>
+
+                                                                            {canManage && !m.is_leader && (
+                                                                                <div style={{ position: 'absolute', top: '4px', right: '4px', display: 'flex', gap: '4px' }}>
+                                                                                    <button
+                                                                                        title="Передать лидерство (Crown)"
+                                                                                        onClick={() => {
+                                                                                            if (confirm(`Передать лидерство игроку ${m.nickname}?`)) {
+                                                                                                import('@/lib/api').then(({ transferPartyLeadership }) => {
+                                                                                                    transferPartyLeadership(party.id, m.role_id).then(res => {
+                                                                                                        if (res.status === 'ok') {
+                                                                                                            setHasChanged(true);
+                                                                                                            if (roleId) fetchProfile(roleId).then(setData);
+                                                                                                        } else {
+                                                                                                            alert(res.message);
+                                                                                                        }
+                                                                                                    });
+                                                                                                });
+                                                                                            }
+                                                                                        }}
+                                                                                        style={{
+                                                                                            background: 'rgba(255, 215, 0, 0.1)', cursor: 'pointer', border: '1px solid rgba(255, 215, 0, 0.3)',
+                                                                                            color: 'gold', width: '20px', height: '20px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px'
+                                                                                        }}
+                                                                                    >
+                                                                                        👑
+                                                                                    </button>
+                                                                                    <button
+                                                                                        title="Исключить (Kick)"
+                                                                                        onClick={() => {
+                                                                                            if (confirm(`Исключить игроку ${m.nickname} из КП?`)) {
+                                                                                                import('@/lib/api').then(({ kickPartyMember }) => {
+                                                                                                    kickPartyMember(m.role_id).then(res => {
+                                                                                                        if (res.status === 'ok') {
+                                                                                                            setHasChanged(true);
+                                                                                                            if (roleId) fetchProfile(roleId).then(setData);
+                                                                                                        } else {
+                                                                                                            alert(res.message);
+                                                                                                        }
+                                                                                                    });
+                                                                                                });
+                                                                                            }
+                                                                                        }}
+                                                                                        style={{
+                                                                                            background: 'rgba(255, 0, 0, 0.1)', cursor: 'pointer', border: '1px solid rgba(255, 0, 0, 0.3)',
+                                                                                            color: '#ff4d4d', width: '20px', height: '20px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', lineHeight: 1
+                                                                                        }}
+                                                                                    >
+                                                                                        ✕
+                                                                                    </button>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
-                                                        )}
+
+                                                            {/* Add Member to THIS Party */}
+                                                            {(party.is_leader || initData?.user?.is_master) && (
+                                                                <div className="links-action-row mt-3">
+                                                                    <input
+                                                                        type="text"
+                                                                        className="links-field"
+                                                                        placeholder="Никнейм нового участника..."
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') {
+                                                                                const target = e.currentTarget;
+                                                                                handlePartyAdd(target.value, party.id).then(ok => {
+                                                                                    if (ok) target.value = '';
+                                                                                });
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                    <button type="button" className="btn-links-add" onClick={(e) => {
+                                                                        // Find input sibling
+                                                                        const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+                                                                        handlePartyAdd(input.value, party.id).then(ok => {
+                                                                            if (ok) input.value = '';
+                                                                        });
+                                                                    }}>ДОБАВИТЬ</button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="empty-state-cp" style={{ marginBottom: '20px' }}>
+                                                        <div className="empty-state-icon">⚔️</div>
+                                                        <div className="empty-state-text">Не состоит в КП</div>
+                                                    </div>
+                                                )}
+
+                                                {(!data?.parties || data.parties.length === 0) && (
+                                                    <div className="mt-4 pt-3 border-top border-secondary opacity-75">
+                                                        <div className="small text-muted mb-2 text-uppercase">СОЗДАТЬ / ВСТУПИТЬ В НОВУЮ КП</div>
+                                                        <div className="links-action-row">
+                                                            <input
+                                                                type="text"
+                                                                className="links-field"
+                                                                placeholder="Никнейм сопартийца для старта..."
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        const target = e.currentTarget;
+                                                                        handlePartyAdd(target.value).then(ok => {
+                                                                            if (ok) target.value = '';
+                                                                        });
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <button type="button" className="btn-links-add" onClick={(e) => {
+                                                                const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+                                                                handlePartyAdd(input.value).then(ok => {
+                                                                    if (ok) input.value = '';
+                                                                });
+                                                            }}>СОЗДАТЬ</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                            </div>
+                                        </div>
+                                    )
+                                }
+                                {
+                                    activeTab === 'queues' && (
+                                        <div className="tab-pane active">
+                                            <div className="queues-tab-container">
+                                                <div className="queues-card">
+                                                    <div className="queues-section-header">
+                                                        <span>📋</span> Активные очереди
                                                     </div>
 
-                                                    <div className="queues-action-row">
-                                                        <select
-                                                            className="queues-select"
-                                                            value={selectedQueueId}
-                                                            onChange={(e) => setSelectedQueueId(parseInt(e.target.value))}
-                                                        >
-                                                            <option value={0}>Выбрать очередь...</option>
-                                                            {initData?.queue_types.map(qt => (
-                                                                <option key={qt.id} value={qt.id}>{qt.name}</option>
+                                                    <div className="queues-card-body">
+                                                        <div className="queues-grid">
+                                                            {data?.queues.map((q, i) => (
+                                                                <div key={i} className="queue-chip">
+                                                                    <span className="queue-chip-icon">
+                                                                        {q.auto_requeue ? '🔄' : '📅'}
+                                                                    </span>
+                                                                    <span className="queue-name">{q.name}</span>
+                                                                    {q.character_name && (
+                                                                        <span className="queue-nick-badge">{q.character_name}</span>
+                                                                    )}
+                                                                    <button
+                                                                        className="btn-queue-remove"
+                                                                        onClick={() => handleLeaveQueue(q.id)}
+                                                                        title="Выйти"
+                                                                    >&times;</button>
+                                                                </div>
                                                             ))}
-                                                        </select>
+                                                            {data?.queues.length === 0 && (
+                                                                <div className="empty-state-text w-100 text-center py-3">
+                                                                    Нет активных очередей
+                                                                </div>
+                                                            )}
+                                                        </div>
 
-                                                        <select
-                                                            className="queues-select queues-char-select"
-                                                            value={queueCharName}
-                                                            onChange={(e) => setQueueCharName(e.target.value)}
-                                                        >
-                                                            <option value="">Персонаж...</option>
-                                                            {data?.nickname && <option value={data.nickname}>{data.nickname} (Main)</option>}
-                                                            {data?.linked_chars.map(c => (
-                                                                <option key={c.nickname} value={c.nickname}>{c.nickname}</option>
-                                                            ))}
-                                                        </select>
+                                                        <div className="queues-action-row">
+                                                            <select
+                                                                className="queues-select"
+                                                                value={selectedQueueId}
+                                                                onChange={(e) => setSelectedQueueId(parseInt(e.target.value))}
+                                                            >
+                                                                <option value={0}>Выбрать очередь...</option>
+                                                                {initData?.queue_types.map(qt => (
+                                                                    <option key={qt.id} value={qt.id}>{qt.name}</option>
+                                                                ))}
+                                                            </select>
 
-                                                        <button
-                                                            type="button"
-                                                            className={`btn-toggle-icon ${isCalendarMode ? 'active' : ''}`}
-                                                            onClick={() => setIsCalendarMode(!isCalendarMode)}
-                                                            title="Календарь"
-                                                        >📅</button>
+                                                            <select
+                                                                className="queues-select queues-char-select"
+                                                                value={queueCharName}
+                                                                onChange={(e) => setQueueCharName(e.target.value)}
+                                                            >
+                                                                <option value="">Персонаж...</option>
+                                                                {data?.nickname && <option value={data.nickname}>{data.nickname} (Main)</option>}
+                                                                {data?.linked_chars.map(c => (
+                                                                    <option key={c.nickname} value={c.nickname}>{c.nickname}</option>
+                                                                ))}
+                                                            </select>
 
-                                                        <button
-                                                            type="button"
-                                                            className={`btn-toggle-icon ${isAutoRequeue ? 'active' : ''}`}
-                                                            onClick={() => setIsAutoRequeue(!isAutoRequeue)}
-                                                            title="Авто-ревайв"
-                                                        >🔄</button>
+                                                            <button
+                                                                type="button"
+                                                                className={`btn-toggle-icon ${isCalendarMode ? 'active' : ''}`}
+                                                                onClick={() => setIsCalendarMode(!isCalendarMode)}
+                                                                title="Календарь"
+                                                            >📅</button>
 
-                                                        <button
-                                                            type="button"
-                                                            className="btn-queues-add"
-                                                            onClick={handleJoinQueue}
-                                                        >+</button>
+                                                            <button
+                                                                type="button"
+                                                                className={`btn-toggle-icon ${isAutoRequeue ? 'active' : ''}`}
+                                                                onClick={() => setIsAutoRequeue(!isAutoRequeue)}
+                                                                title="Авто-ревайв"
+                                                            >🔄</button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="btn-queues-add"
+                                                                onClick={handleJoinQueue}
+                                                            >+</button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
+                                    )
+                                }
+                            </div >
                         )}
-                    </div>
+                    </div >
 
-                    <div className="modal-footer d-flex gap-2">
-                        <button type="button" className="btn-modal-secondary flex-grow-1" onClick={handleClose}>
-                            &times; Отмена
-                        </button>
-                        <button type="button" className="btn-ruby-action flex-grow-1" onClick={handleSave} style={{ fontSize: '0.85rem' }}>
-                            💾 СОХРАНИТЬ
+                    <div className="modal-footer">
+                        <button type="button" className="btn-modal-secondary w-100" onClick={handleClose} style={{ padding: '12px', borderRadius: '8px', fontWeight: 'bold' }}>
+                            ЗАКРЫТЬ
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
+                </div >
+            </div >
+        </div >
     );
 };
 

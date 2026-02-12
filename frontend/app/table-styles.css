@@ -147,8 +147,8 @@
     justify-content: flex-start !important;
     /* Align nicknames to left */
     gap: 10px;
-    padding-left: 16px !important;
-    /* Horizontal padding moved here for full-width highlights */
+    padding-left: 16px;
+    /* Horizontal padding moved here for full-width highlights. !important removed to allow dynamic twin indent */
 }
 
 .kh-participant .player-name {
@@ -317,7 +317,7 @@
 
 /* Side padding for edge-aligned columns */
 .participant-cell {
-    padding-left: 16px !important;
+    padding-left: 16px;
 }
 
 .spider-table .sticky-col.name-col {
@@ -326,7 +326,7 @@
 }
 
 .spider-table .participant-cell {
-    padding-left: 16px !important;
+    padding-left: 16px;
 }
 
 /* Row state highlighting in globals.css/Components */

@@ -124,10 +124,13 @@ class Item(Base):
 class AFKHistory(Base):
     __tablename__ = "afk_history"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    role_id = Column(Integer, nullable=True)
     start_date = Column(DateTime)
     end_date = Column(DateTime)
     is_active_record = Column(Boolean, default=True)  # True if this was a finalized period
+    reason = Column(String, nullable=True)
+
 
 
 class ObserverCache(Base):
@@ -142,6 +145,7 @@ class ConstantParty(Base):
     __tablename__ = "constant_parties"
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)  # Опциональное название
+    color = Column(String, nullable=True) # Цвет неона (HEX/RGB)
     created_at = Column(DateTime, default=get_msk_now)
     members = relationship("PartyMember", back_populates="party", cascade="all, delete-orphan")
 
@@ -239,12 +243,34 @@ def init_db():
         except Exception:
             print("Column 'afk_start' missing. Migrating...")
             try:
-                # SQLite usually allows only one ADD COLUMN per statement, so we do two
                 conn.execute(text("ALTER TABLE users ADD COLUMN afk_start DATETIME"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN afk_end DATETIME"))
                 print("Migration successful: Added afk_start/end")
             except Exception as e:
                 print(f"Migration failed (afk): {e}")
+
+        # 2.1. User Avatar URL
+        try:
+            conn.execute(text("SELECT avatar_url FROM users LIMIT 1"))
+        except Exception:
+            print("Column 'avatar_url' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN avatar_url TEXT"))
+                print("Migration successful: Added avatar_url")
+            except Exception as e:
+                print(f"Migration failed (avatar_url): {e}")
+
+        # 2.2. User Personal Limit
+        try:
+            conn.execute(text("SELECT personal_limit FROM users LIMIT 1"))
+        except Exception:
+            print("Column 'personal_limit' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN personal_limit INTEGER"))
+                print("Migration successful: Added personal_limit")
+            except Exception as e:
+                print(f"Migration failed (personal_limit): {e}")
+
         # -------------------------------------
 
         try:
@@ -268,7 +294,6 @@ def init_db():
             except Exception as e:
                 print(f"Migration failed (is_notified): {e}")
 
-        # 5. RewardHistory Record Type
         try:
             conn.execute(text("SELECT record_type FROM reward_history LIMIT 1"))
         except Exception:
@@ -278,6 +303,17 @@ def init_db():
                 print("Migration successful: Added record_type")
             except Exception as e:
                 print(f"Migration failed (record_type): {e}")
+
+        # 5.1. RewardHistory Issued By
+        try:
+            conn.execute(text("SELECT issued_by FROM reward_history LIMIT 1"))
+        except Exception:
+            print("Column 'issued_by' missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE reward_history ADD COLUMN issued_by VARCHAR"))
+                print("Migration successful: Added issued_by")
+            except Exception as e:
+                print(f"Migration failed (issued_by): {e}")
 
         # 6. Player User Link & Alt Status
         try:
@@ -340,6 +376,7 @@ def init_db():
                     CREATE TABLE afk_history (
                         id INTEGER PRIMARY KEY,
                         user_id INTEGER REFERENCES users(id),
+                        role_id INTEGER,
                         start_date DATETIME,
                         end_date DATETIME,
                         is_active_record BOOLEAN DEFAULT 1
@@ -349,6 +386,29 @@ def init_db():
                 print("Migration successful: Created afk_history table")
             except Exception as e:
                 print(f"Migration failed (afk_history table): {e}")
+
+        # 8.1. AFK History Role ID Migration
+        try:
+            conn.execute(text("SELECT role_id FROM afk_history LIMIT 1"))
+        except Exception:
+            print("Column 'role_id' in afk_history missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE afk_history ADD COLUMN role_id INTEGER"))
+                print("Migration successful: Added afk_history.role_id")
+            except Exception as e:
+                print(f"Migration failed (afk_history.role_id): {e}")
+
+        # 8.2. AFK History Reason Migration
+        try:
+            conn.execute(text("SELECT reason FROM afk_history LIMIT 1"))
+        except Exception:
+            print("Column 'reason' in afk_history missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE afk_history ADD COLUMN reason VARCHAR"))
+                print("Migration successful: Added afk_history.reason")
+            except Exception as e:
+                print(f"Migration failed (afk_history.reason): {e}")
+
 
         # 9. FAQ Topics Table (Ensure existence)
         try:
@@ -455,6 +515,17 @@ def init_db():
                 
             except Exception as e:
                 print(f"Migration failed (faq_messages table): {e}")
+
+        # 13. Constant Party Color
+        try:
+            conn.execute(text("SELECT color FROM constant_parties LIMIT 1"))
+        except Exception:
+            print("Column 'color' in constant_parties missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE constant_parties ADD COLUMN color VARCHAR"))
+                print("Migration successful: Added constant_parties.color")
+            except Exception as e:
+                print(f"Migration failed (constant_parties.color): {e}")
 
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():

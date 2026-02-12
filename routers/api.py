@@ -89,140 +89,19 @@ async def get_player(request: Request):
     try:
         data = await request.json()
         role_id = data.get("role_id")
+
         if not role_id:
-            return {"status": "error", "message": "role_id required"}
+            return {"status": "error", "message": "role_id is required"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # 1. Fetch Player & User Info
-            async with conn.execute(
-                """
-                SELECT p.nickname, p.class_id, p.in_clan, p.user_id, p.is_alt,
-                       u.telegram_id, u.username, u.afk_start, u.afk_end
-                FROM players p
-                LEFT JOIN users u ON p.user_id = u.id
-                WHERE p.role_id = ?
-            """,
-                (role_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
-                if not row:
-                    return {"status": "error", "message": "Player not found"}
+        # Use shared logic from player_manager
+        response_data = await get_player_profile(role_id)
+        
+        if not response_data:
+             return {"status": "error", "message": "Player not found"}
 
-                (p_nick, p_class, p_in_clan, p_user_id, p_is_alt, u_tg_id, u_username, u_afk_start, u_afk_end) = row
-
-            # --- AUTO-HEAL: If user_id is missing, check Bot's 'characters' table ---
-            if not p_user_id and p_nick:
-                async with conn.execute("SELECT user_id FROM characters WHERE nickname = ?", (p_nick,)) as cursor:
-                    char_row = await cursor.fetchone()
-                    if char_row:
-                        found_uid = char_row[0]
-                        if found_uid:
-                            # Found a link in bot! Auto-update 'players'
-                            await conn.execute("UPDATE players SET user_id = ? WHERE role_id = ?", (found_uid, role_id))
-                            await conn.commit()
-                            p_user_id = found_uid
-                            async with conn.execute(
-                                "SELECT telegram_id, username, afk_start, afk_end FROM users WHERE id = ?", (p_user_id,)
-                            ) as cursor:
-                                u_row = await cursor.fetchone()
-                                if u_row:
-                                    u_tg_id, u_username, u_afk_start, u_afk_end = u_row
-
-            response_data = {
-                "role_id": role_id,
-                "nickname": p_nick,
-                "class_id": p_class,
-                "in_clan": bool(p_in_clan),
-                "is_alt": bool(p_is_alt),
-                "user": None,
-                "other_chars": [],
-                "queues": [],
-                "afk_history": [],
-                "all_queues": [],  # Context for dropdown
-            }
-
-            # Fetch all available queues
-            async with conn.execute("SELECT id, name FROM queue_types WHERE is_active = 1 ORDER BY name") as cursor:
-                all_qs = await cursor.fetchall()
-                response_data["all_queues"] = [{"id": q[0], "name": q[1]} for q in all_qs]
-
-            if p_user_id:
-                # User Data
-                response_data["user"] = {
-                    "id": p_user_id,
-                    "telegram_id": u_tg_id,
-                    "username": u_username,
-                    "afk_start": str(u_afk_start) if u_afk_start else None,
-                    "afk_end": str(u_afk_end) if u_afk_end else None,
-                    "is_afk": bool(u_afk_start),
-                }
-
-                # 2. Fetch Other Characters
-                async with conn.execute(
-                    "SELECT nickname, is_main FROM characters WHERE user_id = ?", (p_user_id,)
-                ) as cursor:
-                    bot_chars = await cursor.fetchall()
-
-                bot_nicks = [c[0] for c in bot_chars]
-                if p_nick not in bot_nicks:
-                    bot_nicks.append(p_nick)
-
-                if bot_nicks:
-                    placeholders = ",".join(["?"] * len(bot_nicks))
-                    async with conn.execute(
-                        f"""
-                        SELECT role_id, nickname, class_id, is_alt
-                        FROM players 
-                        WHERE nickname IN ({placeholders}) AND role_id != ?
-                    """,
-                        (*bot_nicks, role_id),
-                    ) as cursor:
-                        chars = await cursor.fetchall()
-                        for c_rid, c_nick, c_cid, c_is_alt in chars:
-                            response_data["other_chars"].append(
-                                {
-                                    "role_id": c_rid,
-                                    "nickname": c_nick,
-                                    "class_id": c_cid,
-                                    "is_alt": bool(c_is_alt),
-                                    "class_icon": CLASSES.get(c_cid, ["", "", ""])[1] if c_cid in CLASSES else "❓",
-                                }
-                            )
-
-                # 3. Active Queues
-                async with conn.execute(
-                    """
-                    SELECT e.id, q.name, e.character_name, e.auto_requeue
-                    FROM queue_entries e
-                    JOIN queue_types q ON e.queue_type_id = q.id
-                    WHERE e.user_id = ?
-                """,
-                    (p_user_id,),
-                ) as cursor:
-                    queues = await cursor.fetchall()
-                    for q_eid, q_name, q_char_name, q_auto in queues:
-                        response_data["queues"].append(
-                            {
-                                "entry_id": q_eid,
-                                "queue_name": q_name,
-                                "signed_char": q_char_name,
-                                "is_auto": bool(q_auto),
-                            }
-                        )
-
-                # 4. AFK History
-                async with conn.execute(
-                    """
-                    SELECT id, start_date, end_date
-                    FROM afk_history
-                    WHERE user_id = ?
-                    ORDER BY start_date DESC LIMIT 5
-                """,
-                    (p_user_id,),
-                ) as cursor:
-                    history = await cursor.fetchall()
-                    for h_id, h_start, h_end in history:
-                        response_data["afk_history"].append({"id": h_id, "start": str(h_start), "end": str(h_end)})
+        # Add "all_queues" for the dropdown (context)
+        # We can keep this local or move to manager too, but keeping here is fine for now
+        # (Refactoring complete: Logic moved to player_manager)
 
         return {"status": "ok", "player": response_data}
 
@@ -239,20 +118,24 @@ async def afk_add(request: Request):
     try:
         data = await request.json()
         user_id = data.get("user_id")
+        role_id = data.get("role_id")
         start = data.get("start")
         end = data.get("end")
-        if not user_id or not start or not end:
-            return {"status": "error", "message": "Missing fields"}
+        reason = data.get("reason", "").strip() or None
+
+        if (not user_id and not role_id) or not start or not end:
+            return {"status": "error", "message": "Missing fields (user_id OR role_id required)"}
 
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
             await conn.execute(
-                "INSERT INTO afk_history (user_id, start_date, end_date, is_active_record) VALUES (?, ?, ?, 0)",
-                (user_id, start, end),
+                "INSERT INTO afk_history (user_id, role_id, start_date, end_date, reason, is_active_record) VALUES (?, ?, ?, ?, ?, 0)",
+                (user_id, role_id, start, end, reason),
             )
             await conn.commit()
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 @router.post("/afk/delete")
@@ -378,6 +261,50 @@ async def party_get(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@router.post("/party/add_member")
+async def party_add_member(request: Request):
+    """Add a player to an existing party by nickname."""
+    try:
+        data = await request.json()
+        party_id = data.get("party_id")
+        member_nickname = data.get("nickname")
+        logging.info(f"API party_add_member: party_id={party_id}, nickname={member_nickname}")
+
+        if not party_id or not member_nickname:
+            return {"status": "error", "message": "Missing fields"}
+
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+            # Find new member by nickname
+            async with conn.execute("SELECT role_id FROM players WHERE nickname = ?", (member_nickname,)) as cursor:
+                member_row = await cursor.fetchone()
+
+            if not member_row:
+                return {"status": "error", "message": f"Игрок '{member_nickname}' не найден"}
+
+            member_role_id = member_row[0]
+
+            # Check if member already in THIS party (optional, but good to prevent duplicates)
+            async with conn.execute(
+                "SELECT 1 FROM party_members WHERE party_id = ? AND player_role_id = ?", (party_id, member_role_id)
+            ) as cursor:
+                if await cursor.fetchone():
+                    return {"status": "error", "message": "Игрок уже состоит в этой КП"}
+            
+            # Removed restriction: "Игрок уже состоит в другой КП" - now allowed.
+
+            # Add to party
+            await conn.execute(
+                "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 0)",
+                (party_id, member_role_id),
+            )
+            await conn.commit()
+
+        return {"status": "ok", "message": f"Игрок {member_nickname} добавлен в КП"}
+    except Exception as e:
+        logging.error(f"Error in party_add_member: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
 @router.post("/party/add")
 async def party_add(request: Request):
     """Add a player to party. Creates party if needed."""
@@ -385,9 +312,7 @@ async def party_add(request: Request):
         data = await request.json()
         leader_role_id = data.get("leader_role_id")  # Current player (who triggers add)
         member_nickname = data.get("nickname")  # Nickname to add
-
-        if not leader_role_id or not member_nickname:
-            return {"status": "error", "message": "Missing fields"}
+        logging.info(f"API party_add: leader_role_id={leader_role_id}, nickname={member_nickname}")
 
         if not leader_role_id or not member_nickname:
             return {"status": "error", "message": "Missing fields"}
@@ -396,6 +321,7 @@ async def party_add(request: Request):
     except Exception as e:
         logging.error(f"Error in party_add: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 
 
 @router.post("/party/remove")
@@ -428,13 +354,61 @@ async def party_rename(request: Request):
         if not party_id:
             return {"status": "error", "message": "party_id required"}
 
-        if not party_id:
-            return {"status": "error", "message": "party_id required"}
-
         return await party_manager.rename_party(party_id, new_name)
     except Exception as e:
         logging.error(f"Error in party_rename: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
+
+@router.post("/party/color")
+async def party_color(request: Request):
+    """Update party color."""
+    try:
+        data = await request.json()
+        party_id = data.get("party_id")
+        color = data.get("color", "").strip() or None
+
+        if not party_id:
+            return {"status": "error", "message": "party_id required"}
+
+        return await party_manager.update_party_color(party_id, color)
+    except Exception as e:
+        logging.error(f"Error in party_color: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/party/kick")
+async def party_kick(request: Request):
+    """Remove a player from party (Kick)."""
+    try:
+        data = await request.json()
+        member_role_id = data.get("member_role_id")
+        
+        if not member_role_id:
+            return {"status": "error", "message": "member_role_id required"}
+
+        return await party_manager.remove_from_party(member_role_id)
+    except Exception as e:
+        logging.error(f"Error in party_kick: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/party/transfer_leadership")
+async def party_transfer_leadership(request: Request):
+    """Transfer party leadership."""
+    try:
+        data = await request.json()
+        party_id = data.get("party_id")
+        new_leader_role_id = data.get("new_leader_role_id")
+
+        if not party_id or not new_leader_role_id:
+            return {"status": "error", "message": "Missing fields"}
+
+        return await party_manager.transfer_leadership(party_id, new_leader_role_id)
+    except Exception as e:
+        logging.error(f"Error in party_transfer_leadership: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
 
 
 @router.post("/update_player")

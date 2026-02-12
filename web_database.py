@@ -225,6 +225,7 @@ async def get_data_from_db(
 
     async with aiosqlite.connect(DB_NAME) as conn:
         # Base SQL
+        # Added joins for User, PartyMember, ConstantParty
         sql = """
             SELECT 
                 p.role_id, 
@@ -232,12 +233,19 @@ async def get_data_from_db(
                 p.class_id,
                 e.timestamp, 
                 e.value, 
-                e.event_type
+                e.event_type,
+                COALESCE(p.user_id, c.user_id),
+                p.is_alt,
+                cp.id,
+                cp.color
             FROM players p
+            LEFT JOIN characters c ON p.nickname = c.nickname
             LEFT JOIN events e ON p.role_id = e.role_id 
                 AND e.event_type IN (1, 2)
                 AND substr(e.event_date, 1, 10) >= ? 
                 AND substr(e.event_date, 1, 10) <= ?
+            LEFT JOIN party_members pm ON p.role_id = pm.player_role_id
+            LEFT JOIN constant_parties cp ON pm.party_id = cp.id
             WHERE p.in_clan = 1
         """
         params = [start_date, end_date]
@@ -253,9 +261,17 @@ async def get_data_from_db(
 
     # Grouping
     players_events = {}
-    for rid, name, cid, ts, val, etype in raw_rows:
+    for rid, name, cid, ts, val, etype, uid, is_alt, cp_id, cp_color in raw_rows:
         if rid not in players_events:
-            players_events[rid] = {"name": name, "class_id": cid, "events": []}
+            players_events[rid] = {
+                "name": name, 
+                "class_id": cid, 
+                "user_id": uid,
+                "is_alt": bool(is_alt),
+                "cp_id": cp_id,
+                "cp_color": cp_color,
+                "events": []
+            }
         players_events[rid]["events"].append((ts, val, etype))
 
     result = []
@@ -265,6 +281,10 @@ async def get_data_from_db(
         stats["name"] = data["name"]
         stats["role_id"] = rid
         stats["class_id"] = data["class_id"]
+        stats["user_id"] = data["user_id"]
+        stats["is_alt"] = data["is_alt"]
+        stats["cp_id"] = data["cp_id"]
+        stats["cp_color"] = data["cp_color"]
 
         # Calculate stats for each interval
         if intervals:
