@@ -710,7 +710,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                                                     '#007fff', '#00ff7f', '#7fff00', '#ff7f00', '#ff5500', '#5500ff',
                                                                                     '#00ffaa', '#aa00ff'
                                                                                 ].map(c => {
-                                                                                    const norm = (val: string) => (val || '').toLowerCase().trim().replace(/^(?!#)/, '#');
+                                                                                    const norm = (val: any) => (val || '').toLowerCase().trim().replace(/^(?!#)/, '#');
                                                                                     const isSelected = norm(party.color) === norm(c);
                                                                                     return (
                                                                                         <div
