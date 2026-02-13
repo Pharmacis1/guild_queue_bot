@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchProfile, updateProfile, ProfileResponse, fetchInitData, InitData, addEvent, addAfkHistory, deleteAfkHistory } from '@/lib/api';
+import { fetchProfile, updateProfile, ProfileResponse, fetchInitData, InitData, addEvent, addAfkHistory, deleteAfkHistory, deleteEvent, updatePartyName, updatePartyColor, transferPartyLeadership, kickPartyMember } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 
 interface PlayerModalProps {
@@ -694,11 +694,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                                                 defaultValue={party.name || ''}
                                                                                 onBlur={(e) => {
                                                                                     if (party.id && e.target.value !== party.name) {
-                                                                                        import('@/lib/api').then(({ updatePartyName }) => {
-                                                                                            updatePartyName(party.id, e.target.value).then(() => {
-                                                                                                setHasChanged(true);
-                                                                                                if (roleId) fetchProfile(roleId).then(setData);
-                                                                                            });
+                                                                                        updatePartyName(party.id, e.target.value).then(() => {
+                                                                                            setHasChanged(true);
+                                                                                            if (roleId) fetchProfile(roleId).then(setData);
                                                                                         });
                                                                                     }
                                                                                 }}
@@ -742,11 +740,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                                                             key={c}
                                                                                             title={`Выбрать цвет ${c}`}
                                                                                             onClick={() => {
-                                                                                                import('@/lib/api').then(({ updatePartyColor }) => {
-                                                                                                    updatePartyColor(party.id, c).then(() => {
-                                                                                                        setHasChanged(true);
-                                                                                                        if (roleId) fetchProfile(roleId).then(setData);
-                                                                                                    });
+                                                                                                updatePartyColor(party.id, c).then(() => {
+                                                                                                    setHasChanged(true);
+                                                                                                    if (roleId) fetchProfile(roleId).then(setData);
                                                                                                 });
                                                                                             }}
                                                                                             style={{
@@ -775,11 +771,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                                                 })}
                                                                                 <div
                                                                                     onClick={() => {
-                                                                                        import('@/lib/api').then(({ updatePartyColor }) => {
-                                                                                            updatePartyColor(party.id, "").then(() => {
-                                                                                                setHasChanged(true);
-                                                                                                if (roleId) fetchProfile(roleId).then(setData);
-                                                                                            });
+                                                                                        updatePartyColor(party.id, "").then(() => {
+                                                                                            setHasChanged(true);
+                                                                                            if (roleId) fetchProfile(roleId).then(setData);
                                                                                         });
                                                                                     }}
                                                                                     style={{
