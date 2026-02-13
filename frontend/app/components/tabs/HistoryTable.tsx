@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { fetchHistoryTable, HistoryRow, UserData } from '@/lib/api';
+import { fetchHistoryTable, HistoryRow, UserData, deleteEvent } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 
@@ -502,6 +502,38 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                                             {row.item_name && <span style={{ opacity: 0.85, marginLeft: '6px', fontWeight: 600 }}>[{formatItemName(row.item_name)}]</span>}
                                         </span>
                                     </div>
+                                    {currentUser?.is_master && (
+                                        <button
+                                            className="btn-delete-event"
+                                            title="Удалить запись"
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!confirm("Удалить это событие?")) return;
+                                                try {
+                                                    await deleteEvent(row.role_id, row.timestamp);
+                                                    // Remove from local state
+                                                    setAllRows(prev => prev.filter(r => r.timestamp !== row.timestamp || r.role_id !== row.role_id));
+                                                } catch (err) {
+                                                    alert("Ошибка удаления");
+                                                }
+                                            }}
+                                            style={{
+                                                marginLeft: '12px',
+                                                background: 'transparent',
+                                                border: 'none',
+                                                color: '#777',
+                                                cursor: 'pointer',
+                                                fontSize: '1.2rem',
+                                                padding: '0 4px',
+                                                transition: 'color 0.2s',
+                                                lineHeight: 1
+                                            }}
+                                            onMouseOver={(e) => e.currentTarget.style.color = '#ff4d4d'}
+                                            onMouseOut={(e) => e.currentTarget.style.color = '#777'}
+                                        >
+                                            ×
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         );

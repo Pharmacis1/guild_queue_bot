@@ -176,6 +176,7 @@ export interface ProfileResponse {
     linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];
     parties: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] }[];
     party: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
+    events: { timestamp: number; date: string; type: number; value: number; description: string | null }[];
 }
 
 export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => {
@@ -200,6 +201,11 @@ export const updatePartyColor = async (partyId: number, color: string): Promise<
 
 export const addEvent = async (data: { role_id: number, date: string, value: number, description?: string }): Promise<any> => {
     const response = await api.post('/add_event', data);
+    return response.data;
+};
+
+export const deleteEvent = async (roleId: number, timestamp: number): Promise<any> => {
+    const response = await api.post('/delete_event', { role_id: roleId, timestamp });
     return response.data;
 };
 

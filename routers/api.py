@@ -705,3 +705,31 @@ async def add_event(request: Request):
     except Exception as e:
         logging.error(f"Error in add_event: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
+
+@router.post("/delete_event")
+async def delete_event(request: Request):
+    """
+    API endpoint to delete an event (Admin only ideally, but we check logic in frontend/middleware usually)
+    """
+    try:
+        data = await request.json()
+        role_id = data.get("role_id")
+        timestamp = data.get("timestamp")
+
+        if not role_id or not timestamp:
+            return {"status": "error", "message": "Missing role_id or timestamp"}
+        
+        logging.info(f"Deleting event: role_id={role_id}, ts={timestamp}")
+
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+            await conn.execute(
+                "DELETE FROM events WHERE role_id = ? AND timestamp = ?",
+                (role_id, timestamp)
+            )
+            await conn.commit()
+            
+        return {"status": "ok", "message": "Event deleted"}
+    except Exception as e:
+        logging.error(f"Error in delete_event: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}

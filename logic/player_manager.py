@@ -261,6 +261,26 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
                     "reason": hr["reason"]
                 })
 
+        # 2.1 Fetch Events History (Last 50)
+        e_sql = """
+            SELECT timestamp, event_date, event_type, value, raw_desc 
+            FROM events 
+            WHERE role_id = ? 
+            ORDER BY timestamp DESC 
+            LIMIT 50
+        """
+        data["events"] = []
+        async with conn.execute(e_sql, (role_id,)) as cursor:
+            e_rows = await cursor.fetchall()
+            for er in e_rows:
+                data["events"].append({
+                    "timestamp": er["timestamp"],
+                    "date": er["event_date"],
+                    "type": er["event_type"],
+                    "value": er["value"],
+                    "description": er["raw_desc"]
+                })
+
         # 3. Active Queues
         if user_id:
             q_sql = """

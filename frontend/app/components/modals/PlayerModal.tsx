@@ -281,6 +281,24 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
         }
     };
 
+    const handleDeleteEvent = async (timestamp: number) => {
+        if (!confirm("Удалить это действие? Это нельзя отменить.")) return;
+        if (!roleId) return;
+
+        try {
+            const res = await deleteEvent(roleId, timestamp);
+            if (res.status === 'ok') {
+                // Refresh
+                fetchProfile(roleId).then(setData);
+                alert("Удалено!");
+            } else {
+                alert("Ошибка: " + res.message);
+            }
+        } catch (e: any) {
+            alert("Ошибка сети: " + e.message);
+        }
+    };
+
     const handleJoinQueue = async () => {
 
         if (!selectedQueueId || !queueCharName) {
@@ -1008,6 +1026,9 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                 }
                             </div >
                         )}
+
+
+
                     </div >
 
                     <div className="modal-footer">
