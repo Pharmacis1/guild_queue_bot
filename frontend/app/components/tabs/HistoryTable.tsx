@@ -431,6 +431,7 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                                         joinDaysAgo={row.join_days_ago}
                                         isAfk={row.is_afk}
                                         afkDates={row.afk_dates}
+                                        afkReason={row.afk_reason}
                                     >
                                         <span
                                             className="player-name"
@@ -445,8 +446,7 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                                                 }
                                             }}
                                         >
-                                            {row.name || 'Unknown'}
-                                        </span>
+                                            {row.name || 'Unknown'}</span>
                                     </PlayerTooltip>
                                     {onObserverClick && row.role_id && currentUser?.is_master && (
                                         <button

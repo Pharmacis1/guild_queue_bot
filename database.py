@@ -30,6 +30,7 @@ class User(Base):
     personal_limit = Column(Integer, nullable=True)
     afk_start = Column(DateTime, nullable=True)
     afk_end = Column(DateTime, nullable=True)
+    afk_reason = Column(String, nullable=True)
     characters = relationship("Character", back_populates="user", cascade="all, delete-orphan")
 
 
@@ -248,6 +249,17 @@ def init_db():
                 print("Migration successful: Added afk_start/end")
             except Exception as e:
                 print(f"Migration failed (afk): {e}")
+
+        # 2.0. AFK Reason in Users
+        try:
+            conn.execute(text("SELECT afk_reason FROM users LIMIT 1"))
+        except Exception:
+            print("Column 'afk_reason' in users missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN afk_reason VARCHAR"))
+                print("Migration successful: Added users.afk_reason")
+            except Exception as e:
+                print(f"Migration failed (users.afk_reason): {e}")
 
         # 2.1. User Avatar URL
         try:

@@ -996,6 +996,7 @@ async def afk_clear(callback: types.CallbackQuery):
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     user.afk_start = None
     user.afk_end = None
+    user.afk_reason = None
     session.commit()
     await callback.answer("Режим AFK отключен.")
     await afk_menu(callback, None)  # Passing None as state is safe here or we can just ignore it if we don't use it
@@ -1159,6 +1160,7 @@ async def finish_afk_setup(callback_or_message, state: FSMContext, start_dt, end
     user = ensure_user(user_id, username)
     user.afk_start = start_dt
     user.afk_end = end_dt
+    user.afk_reason = reason
 
     # History
     session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt, reason=reason))

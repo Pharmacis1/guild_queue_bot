@@ -58,6 +58,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                 in_clan: inClan,
                 afk_start: afkStart || null,
                 afk_end: afkEnd || null,
+                afk_reason: afkReason || null,
                 ...overrides
             });
             if (res.user_id && data && !data.user_id) {
@@ -92,6 +93,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
             setTelegramId(profile.telegram_id ? profile.telegram_id.toString() : '');
             setAfkStart(profile.afk_start ? profile.afk_start.split(' ')[0] : '');
             setAfkEnd(profile.afk_end ? profile.afk_end.split(' ')[0] : '');
+            setAfkReason(profile.afk_reason || '');
 
             setLoading(false);
             document.body.classList.add('modal-open');
@@ -141,6 +143,27 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
         }
     };
 
+    const handleClearAfk = async () => {
+        if (!roleId) return;
+        if (!confirm("Очистить текущий статус АФК?")) return;
+        try {
+            await updateProfile(roleId, {
+                afk_start: null,
+                afk_end: null,
+                afk_reason: null
+            });
+            setAfkStart('');
+            setAfkEnd('');
+            setAfkReason('');
+            alert("Статус АФК очищен!");
+            const profile = await fetchProfile(roleId);
+            setData(profile);
+            if (onSave) onSave();
+        } catch (e: any) {
+            alert("Ошибка при очистке: " + e.message);
+        }
+    };
+
     const handleAddAfk = async () => {
         if (!roleId || !afkStart || !afkEnd) {
             alert("Выберите период (С и По)");
@@ -150,7 +173,8 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
             // 1. Update current status in 'players' table
             await updateProfile(roleId, {
                 afk_start: afkStart,
-                afk_end: afkEnd
+                afk_end: afkEnd,
+                afk_reason: afkReason
             });
             // 2. Add to history
             // Use user_id if linked, otherwise use role_id
@@ -500,6 +524,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                             type="date"
                                                             value={afkStart}
                                                             onChange={e => setAfkStart(e.target.value)}
+                                                            onBlur={() => syncProfile()}
                                                             style={{ colorScheme: 'dark', width: '100%', padding: '10px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid #444', color: '#fff', fontSize: '0.9rem' }}
                                                         />
                                                     </div>
@@ -509,6 +534,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                             type="date"
                                                             value={afkEnd}
                                                             onChange={e => setAfkEnd(e.target.value)}
+                                                            onBlur={() => syncProfile()}
                                                             style={{ colorScheme: 'dark', width: '100%', padding: '10px 12px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid #444', color: '#fff', fontSize: '0.9rem' }}
                                                         />
                                                     </div>
@@ -521,11 +547,29 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                         placeholder="Причина (необязательно)"
                                                         value={afkReason}
                                                         onChange={(e) => setAfkReason(e.target.value)}
+                                                        onBlur={() => syncProfile()}
                                                         style={{ padding: '10px 12px', width: '100%', boxSizing: 'border-box' }}
                                                     />
                                                 </div>
 
-                                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                                                    {(afkStart || afkEnd || afkReason) && (
+                                                        <button
+                                                            type="button"
+                                                            title="Снять АФК"
+                                                            onClick={handleClearAfk}
+                                                            style={{
+                                                                width: 'auto',
+                                                                padding: '10px 20px',
+                                                                borderRadius: '6px',
+                                                                fontWeight: 600,
+                                                                background: 'rgba(255, 255, 255, 0.05)',
+                                                                border: '1px solid #444',
+                                                                color: '#aaa',
+                                                                fontSize: '0.85rem'
+                                                            }}
+                                                        >СНЯТЬ ПЕРИОД</button>
+                                                    )}
                                                     <button
                                                         type="button"
                                                         title="Сохранить отпуск"

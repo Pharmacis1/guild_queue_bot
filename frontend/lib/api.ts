@@ -54,6 +54,7 @@ export interface KHTableRow {
     is_newcomer: boolean;
     is_afk: boolean;
     afk_dates?: string;
+    afk_reason?: string;
     join_date: string;
     join_days_ago: number;
     valor_tier: string;
@@ -102,6 +103,7 @@ export interface MoneyTableRow {
     join_date: string;
     join_days_ago: number;
     afk_dates?: string;
+    afk_reason?: string;
     // New fields for Grouping & CP
     user_id: number | null;
     is_alt: boolean;
@@ -152,6 +154,7 @@ export interface HistoryRow {
     join_days_ago: number;
     is_afk: boolean;
     afk_dates?: string;
+    afk_reason?: string;
 }
 
 export const fetchHistoryTable = async (params?: Record<string, any>): Promise<HistoryRow[]> => {
@@ -171,6 +174,7 @@ export interface ProfileResponse {
     username: string | null;
     afk_start: string | null;
     afk_end: string | null;
+    afk_reason: string | null;
     afk_history: { id: number; start: string; end: string; reason?: string }[];
     queues: { id: number; name: string; auto_requeue: boolean; character_name?: string }[];
     linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];

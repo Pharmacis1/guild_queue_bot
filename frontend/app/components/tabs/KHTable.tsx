@@ -609,6 +609,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                             joinDaysAgo={row.join_days_ago}
                                             isAfk={row.is_afk}
                                             afkDates={row.afk_dates}
+                                            afkReason={row.afk_reason}
                                             mainNickname={row.main_nickname}
                                             parties={row.parties}
                                         >

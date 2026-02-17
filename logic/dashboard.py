@@ -51,11 +51,11 @@ async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
     """
     async with aiosqlite.connect(DB_NAME) as conn:
         # 1. Current AFK (from users table)
-        cursor = await conn.execute("SELECT id, afk_start, afk_end FROM users WHERE afk_start IS NOT NULL")
+        cursor = await conn.execute("SELECT id, afk_start, afk_end, afk_reason FROM users WHERE afk_start IS NOT NULL")
         afk_rows = await cursor.fetchall()
 
         # 2. History AFK (includes user_id and role_id)
-        cursor = await conn.execute("SELECT user_id, role_id, start_date, end_date FROM afk_history")
+        cursor = await conn.execute("SELECT user_id, role_id, start_date, end_date, reason FROM afk_history")
         afk_history_rows = await cursor.fetchall()
 
         # 3. Character linkage: role_id -> user_id (for promoting role-only AFK to user)
@@ -79,37 +79,37 @@ async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
             else: return datetime.strptime(s_val, "%Y-%m-%d")
         except: return None
 
-    def add_period(key, s_dt, e_dt):
+    def add_period(key, s_dt, e_dt, reason=None):
         if key is None: return
         if key not in afk_map: afk_map[key] = []
-        afk_map[key].append((s_dt, e_dt))
+        afk_map[key].append((s_dt, e_dt, reason))
 
     # Users table entries (keyed by user_id)
-    for uid, start_ts, end_ts in afk_rows:
+    for uid, start_ts, end_ts, reason in afk_rows:
         s_dt = parse_date(start_ts)
         e_dt = parse_date(end_ts) or s_dt
         if s_dt and e_dt:
-            add_period(uid, s_dt, e_dt)
+            add_period(uid, s_dt, e_dt, reason)
 
     # History entries
-    for uid, rid, start_ts, end_ts in afk_history_rows:
+    for uid, rid, start_ts, end_ts, reason in afk_history_rows:
         s_dt = parse_date(start_ts)
         e_dt = parse_date(end_ts) or s_dt
         if s_dt and e_dt:
             if uid:
-                add_period(uid, s_dt, e_dt)
+                add_period(uid, s_dt, e_dt, reason)
             elif rid:
                 # Role-only entry: also promote to user_id if character is linked
                 linked_uid = role_to_user.get(rid)
                 if linked_uid:
-                    add_period(linked_uid, s_dt, e_dt)
+                    add_period(linked_uid, s_dt, e_dt, reason)
                 else:
-                    add_period(-rid, s_dt, e_dt)
+                    add_period(-rid, s_dt, e_dt, reason)
 
     return afk_map
 
-def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: Dict[int, List], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Tuple[bool, Optional[str]]:
-    if not role_id: return False, None
+def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: Dict[int, List], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    if not role_id: return False, None, None
     uid = role_user_map.get(role_id)
     # Check by user_id first, then fall back to -role_id for unlinked players
     if uid and uid in afk_map:
@@ -117,30 +117,30 @@ def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: D
     elif -role_id in afk_map:
         uid = -role_id
     else:
-        return False, None
+        return False, None, None
     
     periods = afk_map[uid]
-    if not periods: return False, None
+    if not periods: return False, None, None
 
     # Filter periods that overlap with [start_dt, end_dt]
     overlapping_periods = []
     if start_dt and end_dt:
         # User requested specific period
-        for s, e in periods:
+        for s, e, r in periods:
             if max(s, start_dt) <= min(e, end_dt):
-                overlapping_periods.append((s, e))
+                overlapping_periods.append((s, e, r))
     else:
         # No range provided? Fallback to "currently AFK" check or just show most recent
         # Given the requirements, we likely always have start/end for table data.
         overlapping_periods = periods
 
     if not overlapping_periods:
-        return False, None
+        return False, None, None
 
     # Return most recent among overlapping
     sorted_periods = sorted(overlapping_periods, key=lambda x: x[1], reverse=True)
-    s, e = sorted_periods[0]
-    return True, f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}"
+    s, e, r = sorted_periods[0]
+    return True, f"{s.strftime('%d.%m')} - {e.strftime('%d.%m')}", r
 
 async def get_party_map() -> Dict[int, List[Dict[str, str]]]:
     """Returns {role_id: [{'name': str, 'color': str}, ...]}"""
@@ -287,7 +287,7 @@ async def get_kh_table_data(
             except: pass
 
         # AFK
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, d1, d2)
+        is_afk, afk_text, afk_reason = get_afk_display_info(role_id, role_user_map, afk_map, d1, d2)
 
         # Tiers
         v_tier = get_valor_tier(r["total_valor"], active_valors, t_v, days_diff)
@@ -322,6 +322,7 @@ async def get_kh_table_data(
             "is_newcomer": is_nc,
             "is_afk": is_afk,
             "afk_dates": afk_text,
+            "afk_reason": afk_reason,
             "join_date": jd_str,
             "join_days_ago": jd_diff,
             "valor_tier": v_tier,
@@ -386,7 +387,7 @@ async def get_money_table_data(
             m_s_dt, m_e_dt = None, None
             
         is_nc = is_newcomer(role_id, join_dates, m_s)
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, m_s_dt, m_e_dt)
+        is_afk, afk_text, afk_reason = get_afk_display_info(role_id, role_user_map, afk_map, m_s_dt, m_e_dt)
 
         # Newcomer Filter
         if newcomers_mode == "only" and not is_nc: continue
@@ -397,6 +398,7 @@ async def get_money_table_data(
         row["is_newcomer"] = is_nc
         row["is_afk"] = is_afk
         row["afk_dates"] = afk_text
+        row["afk_reason"] = afk_reason
         row["main_nickname"] = main_nicks.get(role_id)
         row["parties"] = party_map.get(role_id, [])
         
@@ -419,8 +421,13 @@ async def get_money_table_data(
                 try: jd_dt = datetime.strptime(row["join_date"], "%Y-%m-%d")
                 except: pass
 
+            # Get AFK periods for either UID (linked) or -ROLE_ID (unlinked)
             uid = role_user_map.get(role_id)
-            u_afk_periods = afk_map.get(uid, []) if uid else []
+            u_afk_periods = []
+            if uid:
+                u_afk_periods.extend(afk_map.get(uid, []))
+            # Also check if there are AFK entries tied specifically to this role_id (unlinked)
+            u_afk_periods.extend(afk_map.get(-role_id, []))
 
             for istat in row["interval_stats"]:
                 i_s = istat.get("start")
@@ -437,14 +444,15 @@ async def get_money_table_data(
                     # 2. Newcomer Stay (first 7 days)
                     if jd_dt:
                         nc_end = jd_dt + timedelta(days=6)
-                        overlap_start = max(i_s, jd_dt)
-                        overlap_end = min(i_e, timedelta(days=1, seconds=-1) + nc_end)
+                        overlap_start = max(i_s.date(), jd_dt.date())
+                        overlap_end = min(i_e.date(), nc_end.date())
                         if overlap_start <= overlap_end:
                             istat["is_newcomer_stay"] = True
 
                     # 3. AFK Stay
-                    for a_s, a_e in u_afk_periods:
-                        if max(i_s, a_s) <= min(i_e, a_e):
+                    for a_s, a_e, _ in u_afk_periods:
+                        # Use .date() to avoid midnight mismatch
+                        if max(i_s.date(), a_s.date()) <= min(i_e.date(), a_e.date()):
                             istat["is_afk_stay"] = True
                             break
 
@@ -552,7 +560,7 @@ async def get_history_data(
         except:
             s_dt, e_dt = None, None
             
-        is_afk, afk_text = get_afk_display_info(role_id, role_user_map, afk_map, s_dt, e_dt)
+        is_afk, afk_text, afk_reason = get_afk_display_info(role_id, role_user_map, afk_map, s_dt, e_dt)
 
         result.append({
             "date": date_evt,
@@ -568,7 +576,8 @@ async def get_history_data(
             "join_date": jd_str,
             "join_days_ago": jd_diff,
             "is_afk": is_afk,
-            "afk_dates": afk_text
+            "afk_dates": afk_text,
+            "afk_reason": afk_reason
         })
         
     return result

@@ -846,6 +846,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                     joinDaysAgo={row.join_days_ago}
                                                     isAfk={row.is_afk}
                                                     afkDates={row.afk_dates}
+                                                    afkReason={row.afk_reason}
                                                     mainNickname={row.main_nickname}
                                                     parties={row.parties}
                                                 >
@@ -940,9 +941,9 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                         border = '1px solid rgba(64, 224, 208, 0.3)';
                                                         color = '#fff';
                                                     } else if (stat.is_afk_stay) {
-                                                        bg = 'rgba(128, 128, 128, 0.2)';
+                                                        bg = 'rgba(100, 100, 100, 0.4)';
                                                         boxShadow = 'none';
-                                                        border = '1px solid rgba(128, 128, 128, 0.3)';
+                                                        border = '1px solid rgba(120, 120, 120, 0.5)';
                                                     }
 
                                                     if (stat.is_pre_join) {

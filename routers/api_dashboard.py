@@ -52,6 +52,7 @@ class KHTableRow(BaseModel):
     is_newcomer: bool
     is_afk: bool
     afk_dates: Optional[str]
+    afk_reason: Optional[str] = None
     join_date: str
     join_days_ago: int
     valor_tier: str
@@ -83,6 +84,9 @@ class HistoryRow(BaseModel):
     is_mine: bool
     item_name: Optional[str]
     is_mine: bool
+    is_afk: bool
+    afk_dates: Optional[str]
+    afk_reason: Optional[str] = None
     timestamp: float
 
 class ProfileAfkHistory(BaseModel):
@@ -125,6 +129,7 @@ class ProfileResponse(BaseModel):
     username: Optional[str]
     afk_start: Optional[str]
     afk_end: Optional[str]
+    afk_reason: Optional[str] = None
     afk_history: List[ProfileAfkHistory]
     queues: List[ProfileQueue]
     linked_chars: List[ProfileLinkedChar]

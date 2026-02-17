@@ -53,6 +53,7 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
     telegram_id_input = update_data.get("telegram_id")
     afk_start_str = update_data.get("afk_start")
     afk_end_str = update_data.get("afk_end")
+    afk_reason = update_data.get("afk_reason")
 
     logging.info(f"Logic update_player: {role_id} nick={nickname} tg={telegram_id_input} DB={db_path}")
 
@@ -199,7 +200,8 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
                 end_val = parse_date_safe(afk_end_str)
 
                 await conn.execute(
-                    "UPDATE users SET afk_start = ?, afk_end = ? WHERE id = ?", (start_val, end_val, new_user_id)
+                    "UPDATE users SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE id = ?", 
+                    (start_val, end_val, afk_reason if afk_reason is not None else None, new_user_id)
                 )
 
         await conn.commit()
@@ -216,7 +218,7 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
         # 1. Basic Player & User Info
         sql = """
             SELECT p.role_id, p.nickname, p.class_id, p.in_clan, p.is_alt, 
-                   u.id as user_id, u.telegram_id, u.username, u.afk_start, u.afk_end
+                   u.id as user_id, u.telegram_id, u.username, u.afk_start, u.afk_end, u.afk_reason
             FROM players p
             LEFT JOIN users u ON p.user_id = u.id
             WHERE p.role_id = ?
@@ -256,8 +258,8 @@ async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
             for hr in h_rows:
                 data["afk_history"].append({
                     "id": hr["id"],
-                    "start": str(hr["start_date"]), 
-                    "end": str(hr["end_date"]),
+                    "start": str(hr["start_date"]).replace(" ", "T"), 
+                    "end": str(hr["end_date"]).replace(" ", "T"),
                     "reason": hr["reason"]
                 })
 
