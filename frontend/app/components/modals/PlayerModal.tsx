@@ -90,7 +90,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
             setClassId(profile.class_id);
             setInClan(profile.in_clan);
             setIsMain(!profile.is_alt);
-            setTelegramId(profile.telegram_id ? profile.telegram_id.toString() : '');
+            setTelegramId(profile.username ? `@${profile.username}` : (profile.telegram_id ? profile.telegram_id.toString() : ''));
             setAfkStart(profile.afk_start ? profile.afk_start.split(' ')[0] : '');
             setAfkEnd(profile.afk_end ? profile.afk_end.split(' ')[0] : '');
             setAfkReason(profile.afk_reason || '');
