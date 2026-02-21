@@ -1,6 +1,7 @@
 import pytest
 
-from database import QueueEntry, QueueType, User
+from database import Player, QueueEntry, QueueType, User
+from logic.queue_ops import get_admin_queue_count, get_admin_queue_entries, join_queue, leave_queue
 from logic.reward_ops import issue_reward, warn_user
 
 
@@ -97,3 +98,36 @@ def test_warn_user(sync_test_session):
 
     # Entry should REMAIN (Warn doesn't remove)
     assert session.query(QueueEntry).filter_by(id=entry.id).first() is not None
+
+
+def test_get_admin_queue_logic(sync_test_session):
+    session = sync_test_session
+    master, user, q = setup_admin_data(session)
+
+    # 1. Add 3 entries
+    # - P1: Not in Player table (should be visible)
+    # - P2: in Player table AND in_clan=1 (should be visible)
+    # - P3: in Player table AND in_clan=0 (should be HIDDEN)
+    
+    e1 = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P1")
+    e2 = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P2")
+    e3 = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P3")
+    session.add_all([e1, e2, e3])
+    
+    p2 = Player(nickname="P2", in_clan=1)
+    p3 = Player(nickname="P3", in_clan=0)
+    session.add_all([p2, p3])
+    
+    session.commit()
+
+    # 2. Test Count
+    count = get_admin_queue_count(session, q.id)
+    assert count == 2  # P1 and P2, but not P3
+
+    # 3. Test Entries
+    entries = get_admin_queue_entries(session, q.id)
+    assert len(entries) == 2
+    nicks = [e.character_name for e in entries]
+    assert "P1" in nicks
+    assert "P2" in nicks
+    assert "P3" not in nicks

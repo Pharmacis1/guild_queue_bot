@@ -1,8 +1,9 @@
 from typing import Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import Character, QueueEntry, Settings, User
+from database import Character, Player, QueueEntry, Settings, User
 
 
 def join_queue(session: Session, user_id: int, queue_id: int, char_id: int, is_auto: bool) -> Tuple[bool, str]:
@@ -74,3 +75,30 @@ def leave_queue(session: Session, user_id: int, queue_id: int) -> Tuple[bool, st
         return True, "Вы вышли.", entry
     else:
         return False, "Уже вышли.", None
+
+
+def get_admin_queue_entries(session: Session, queue_id: int):
+    """
+    Returns filtered queue entries for admin reward distribution.
+    Filters out characters that are explicitly NOT in guild (in_clan=0).
+    """
+    return (
+        session.query(QueueEntry)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
+        .filter(QueueEntry.queue_type_id == queue_id)
+        .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
+        .all()
+    )
+
+
+def get_admin_queue_count(session: Session, queue_id: int) -> int:
+    """
+    Returns count of filtered queue entries for admin reward distribution.
+    """
+    return (
+        session.query(QueueEntry)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
+        .filter(QueueEntry.queue_type_id == queue_id)
+        .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
+        .count()
+    )

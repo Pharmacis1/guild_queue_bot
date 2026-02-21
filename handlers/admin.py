@@ -4,6 +4,7 @@ import math
 import os
 import sys
 from datetime import datetime, timedelta
+from sqlalchemy import func
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
@@ -48,6 +49,7 @@ from keyboards import (
 
 # Импорты из других файлов проекта
 from loader import MSK, bot, scheduler
+from logic.queue_ops import get_admin_queue_count, get_admin_queue_entries
 from logic.reward_ops import issue_reward, warn_user
 from scripts.backup_db import perform_backup
 from scripts.restore_db import restore as restore_db_func
@@ -493,7 +495,7 @@ async def m_dist_start(callback: types.CallbackQuery):
         )
 
     for q in queues:
-        count = session.query(QueueEntry).filter_by(queue_type_id=q.id).count()
+        count = get_admin_queue_count(session, q.id)
         kb.append([types.InlineKeyboardButton(text=f"{q.name} ({count})", callback_data=f"dist_{q.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text(
@@ -511,13 +513,7 @@ async def render_dist_list(event, qid):
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
     q = session.get(QueueType, qid)
-    entries = (
-        session.query(QueueEntry)
-        .outerjoin(Player, QueueEntry.character_name == Player.nickname)
-        .filter(QueueEntry.queue_type_id == qid)
-        .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
-        .all()
-    )
+    entries = get_admin_queue_entries(session, qid)
 
     if not entries:
         return await message.edit_text(
@@ -1873,8 +1869,8 @@ async def finalize_approval(event, target_user, nick, reg_type):
     # Notify User with Main Menu
     try:
         # Generate the main menu text with the approval message as header
-        menu_text = get_menu_text(target_user, custom_title=msg)
-        main_menu_kb = get_main_menu(target_user)
+        menu_text, restricted = get_menu_text(target_user, custom_title=msg)
+        main_menu_kb = get_main_menu(target_user, restricted)
 
         await bot.send_message(target_user.telegram_id, menu_text, parse_mode="HTML", reply_markup=main_menu_kb)
     except Exception:

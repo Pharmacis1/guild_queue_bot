@@ -13,6 +13,19 @@ def get_start_of_week():
     return int(start_of_week.timestamp())
 
 
+def is_character_in_guild(nickname: str) -> bool:
+    """
+    Проверяет, состоит ли персонаж в гильдии.
+    - Если персонажа нет в таблице Player - считается 'в ги' (мог быть добавлен через мастера).
+    - Если Player.in_clan == 1 - 'в ги'.
+    - В остальных случаях - 'не в ги'.
+    """
+    player = session.query(Player).filter(func.lower(Player.nickname) == func.lower(nickname)).first()
+    if not player:
+        return True  # Нет в базе - считаем легальным (добавлен мастером)
+    return player.in_clan == 1
+
+
 def get_user_weekly_valor_map(user):
     """Возвращает словарь {nickname: valor} для персонажей пользователя за текущую неделю."""
     # 1. Собираем ники и мапим их структуру для быстрого доступа
@@ -53,11 +66,17 @@ def get_user_weekly_valor_map(user):
 
 
 def get_queue_position(entry):
-    """Возвращает позицию персонажа в очереди (1-based)."""
+    """Возвращает позицию персонажа в очереди (1-based), исключая тех, кто не в ги."""
     # Считаем количество записей в ТОЙ ЖЕ очереди, у которых id МЕНЬШЕ текущего
+    # И при этом персонаж состоит в гильдии (или отсутствует в Player)
     position = (
         session.query(QueueEntry)
-        .filter(QueueEntry.queue_type_id == entry.queue_type_id, QueueEntry.id < entry.id)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
+        .filter(
+            QueueEntry.queue_type_id == entry.queue_type_id,
+            QueueEntry.id < entry.id,
+            (Player.in_clan == 1) | (Player.in_clan.is_(None))
+        )
         .count()
     )
     return position + 1
@@ -92,10 +111,16 @@ def get_menu_text(user, custom_title=None):
     valor_map = get_user_weekly_valor_map(user)
 
     chars_display_list = []
+    all_out_of_guild = True
     for char in user.characters:
+        in_guild = is_character_in_guild(char.nickname)
+        if in_guild:
+            all_out_of_guild = False
+        
         val = valor_map.get(char.nickname, 0)
-        # Формат: Ник (10 добл.)
-        chars_display_list.append(f"{char.nickname} ({val} добл.)")
+        suffix = " (не в ги)" if not in_guild else ""
+        # Формат: Ник (не в ги) (10 добл.)
+        chars_display_list.append(f"{char.nickname}{suffix} ({val} добл.)")
 
     chars_str = ", ".join(chars_display_list)
 
@@ -126,4 +151,4 @@ def get_menu_text(user, custom_title=None):
         f"📊 <b>Лимит записей в очереди:</b> {current_count}/{limit} (доступно: {available_slots})\n\n"
         f"{afk_info}"
         f"👇 <b>Выбери действие:</b>"
-    )
+    ), all_out_of_guild

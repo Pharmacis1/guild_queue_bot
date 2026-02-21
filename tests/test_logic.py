@@ -4,18 +4,26 @@ from logic.helpers import is_newcomer
 
 
 @pytest.mark.parametrize(
-    "join_date, current_date, expected",
+    "days_offset, expected",
     [
-        ("2023-01-01", "2023-01-02", True),  # Joined yesterday (assuming logic is relative to ref)
-        # Wait, the logic is: (ref_monday - join_dt).days < 7
-        # If ref is 2023-01-02 (Monday), ref_monday is 2023-01-02.
-        # Join 2023-01-01 (Sunday). (02 - 01) = 1 day. < 7? Yes.
-        # If Join 2022-12-20. (02 - Dec 20) = 13 days. > 7. False.
-        ("2022-12-20", "2023-01-02", False),
+        (1, True),   # Joined 1 day ago -> Newcomer
+        (5, True),   # Joined 5 days ago -> Newcomer
+        (13, True),  # Joined 13 days ago -> Newcomer
+        (15, False), # Joined 15 days ago -> NOT Newcomer
+        (30, False), # Joined 30 days ago -> NOT Newcomer
     ],
 )
-def test_newcomer_logic_shared(join_date, current_date, expected):
+def test_newcomer_logic_shared(days_offset, expected):
+    from datetime import datetime, timedelta
+    
+    # Calculate join date based on real "now"
+    join_dt = datetime.now() - timedelta(days=days_offset)
+    join_date_str = join_dt.strftime("%Y-%m-%d")
+    
     # Mock map
     role_id = 1
-    m = {1: join_date}
-    assert is_newcomer(role_id, m, current_date) == expected
+    m = {1: join_date_str}
+    
+    # The current_date parameter in is_newcomer is ignored now, 
+    # but we pass None or something just to match signature if needed.
+    assert is_newcomer(role_id, m) == expected

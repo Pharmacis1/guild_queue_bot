@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
+from sqlalchemy import func
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
@@ -90,7 +91,7 @@ async def cmd_start(message: types.Message):
         )
         return await message.answer(text, parse_mode="HTML", reply_markup=get_unauthorized_menu())
 
-    text = get_menu_text(user)
+    text, restricted = get_menu_text(user)
     # Send persistent keyboard separately or attach? usually attach to answer.
     # We send the inline menu message, AND a separate message (or same) with ReplyKeyboard?
     # ReplyKeyboard cannot be combined with Inline in same message?
@@ -98,7 +99,7 @@ async def cmd_start(message: types.Message):
     # Let's send a "Welcome" with ReplyMarkup, and then the menu with Inline.
 
     await message.answer("👋", reply_markup=get_persistent_menu())
-    await message.answer(text, reply_markup=get_main_menu(user), parse_mode="HTML")
+    await message.answer(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
 
 
 @router.message(F.text == "🏠 Главное меню")
@@ -142,11 +143,11 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     if user.is_banned:
         return await callback.message.edit_text("⛔ Вы забанены.", parse_mode="HTML")
 
-    text = get_menu_text(user)
+    text, restricted = get_menu_text(user)
     try:
-        await callback.message.edit_text(text, reply_markup=get_main_menu(user), parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
     except Exception:
-        await callback.message.answer(text, reply_markup=get_main_menu(user), parse_mode="HTML")
+        await callback.message.answer(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
 
 
 # --- УПРАВЛЕНИЕ ПЕРСОНАЖАМИ ---
@@ -165,7 +166,7 @@ async def chars_menu(callback: types.CallbackQuery):
     ]
 
     # Генерируем текст с кастомным заголовком
-    text = get_menu_text(user, custom_title="⚙️ <b>Управление персонажами:</b>")
+    text, _ = get_menu_text(user, custom_title="⚙️ <b>Управление персонажами:</b>")
 
     await callback.message.edit_text(
         text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML"
@@ -268,10 +269,11 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
             o.user_id = user.id
         session.commit()
 
+    text, restricted = get_menu_text(user)
     await message.answer(
         f"✅ Основа сохранена: <b>{nick}</b>\n\nДобро пожаловать в клан! 🕷",
         parse_mode="HTML",
-        reply_markup=get_main_menu(user),
+        reply_markup=get_main_menu(user, restricted),
     )
 
     # Auto-Invite: DISABLED
@@ -367,7 +369,8 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
         o.user_id = user.id
 
     session.commit()
-    await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user))
+    text, restricted = get_menu_text(user)
+    await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user, restricted))
     await state.clear()
 
 
@@ -395,9 +398,10 @@ async def process_verification_code(message: types.Message, state: FSMContext):
     elif action == "alt_input":
         await finish_alt_input(message, state, nick_override=nick)
     else:
+        text, restricted = get_menu_text(ensure_user(message.from_user.id, message.from_user.username))
         await message.answer(
             "Ошибка состояния. Начни заново.",
-            reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username)),
+            reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username), restricted),
         )
         await state.clear()
 
@@ -405,10 +409,12 @@ async def process_verification_code(message: types.Message, state: FSMContext):
 async def send_approval_request(message: types.Message, state: FSMContext, nick: str, action: str):
     # Find masters
     masters = session.query(User).filter_by(is_master=True).all()
+    user = ensure_user(message.from_user.id, message.from_user.username)
+    text_menu, restricted = get_menu_text(user)
     if not masters:
         await message.answer(
             "⚠️ Нет Мастеров в сети. Попробуй позже.",
-            reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username)),
+            reply_markup=get_main_menu(user, restricted),
         )
         await state.clear()
         return
@@ -611,14 +617,22 @@ async def join_menu(callback: types.CallbackQuery):
     kb = []
 
     for q in queues:
-        count = session.query(QueueEntry).filter_by(queue_type_id=q.id).count()
+        count = (
+            session.query(QueueEntry)
+            .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
+            .filter(
+                QueueEntry.queue_type_id == q.id,
+                (Player.in_clan == 1) | (Player.in_clan.is_(None))
+            )
+            .count()
+        )
         status = "🔒 ЗАКРЫТА" if q.is_locked else f"({count})"
         kb.append([types.InlineKeyboardButton(text=f"{q.name} {status}", callback_data=f"view_q_{q.id}")])
 
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
 
     # Генерируем текст с кастомным заголовком
-    text = get_menu_text(user, custom_title="✍️ <b>Запись в очередь:</b>")
+    text, _ = get_menu_text(user, custom_title="✍️ <b>Запись в очередь:</b>")
 
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)

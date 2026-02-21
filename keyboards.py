@@ -3,17 +3,22 @@ from aiogram import types
 # --- INLINE KEYBOARDS ---
 
 
-def get_main_menu(user):
-    kb = [
-        [types.InlineKeyboardButton(text="👥 Мои персонажи", callback_data="menu_chars")],
-        [types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")],
-        [types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")],
-        [types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")],
-        [types.InlineKeyboardButton(text="🛌 Отсутствие(AFK)", callback_data="menu_afk")],
-        [types.InlineKeyboardButton(text="🏃 Управление записями в очереди", callback_data="my_active_queues")],
-    ]
+def get_main_menu(user, is_restricted=False):
+    kb = []
+    
+    # 👥 Мои персонажи is always available as per requirement 1
+    kb.append([types.InlineKeyboardButton(text="👥 Мои персонажи", callback_data="menu_chars")])
+    
+    if not is_restricted:
+        kb.append([types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")])
+        kb.append([types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")])
+        kb.append([types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")])
+        kb.append([types.InlineKeyboardButton(text="🛌 Отсутствие(AFK)", callback_data="menu_afk")])
+        kb.append([types.InlineKeyboardButton(text="🏃 Управление записями в очереди", callback_data="my_active_queues")])
+    
     if user.is_master:
         kb.append([types.InlineKeyboardButton(text="👑 Панель Мастера", callback_data="menu_master")])
+        
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
 

@@ -53,9 +53,18 @@ async def test_link_user_and_fail_invalid_tg(test_db_session):
     db_path = test_db_session
     await seed_player(db_path, 102, "LinkMe")
 
-    # 1. Try linking non-existent user
-    with pytest.raises(ValueError, match="User with TG ID 999999 not found"):
-        await update_player_logic(102, {"telegram_id": 999999}, db_path=db_path)
+    # 1. Provide an unknown TG ID - code should now create a STUB user
+    res = await update_player_logic(102, {"telegram_id": 999999}, db_path=db_path)
+    assert res["status"] == "ok"
+    
+    async with aiosqlite.connect(db_path) as conn:
+        async with conn.execute("SELECT id FROM users WHERE telegram_id = 999999") as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            uid_stub = row[0]
+            
+        async with conn.execute("SELECT user_id FROM players WHERE role_id=102") as cursor:
+            assert (await cursor.fetchone())[0] == uid_stub
 
     # 2. Seed User
     uid = await seed_user(db_path, 12345, "testuser")
