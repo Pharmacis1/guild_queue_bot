@@ -90,9 +90,12 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
 
     const handleShortcut = (type: string) => {
         setPeriod(type);
-        const today = new Date();
-        let start = new Date();
-        let end = new Date();
+        const now = new Date();
+        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+        const mskNow = new Date(utc + 3 * 3600000); // UTC+3
+        const today = new Date(mskNow.getFullYear(), mskNow.getMonth(), mskNow.getDate());
+        let start = new Date(today);
+        let end = new Date(today);
 
         if (type === 'TODAY') {
             // start = today, end = today

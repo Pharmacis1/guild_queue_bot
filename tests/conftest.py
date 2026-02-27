@@ -4,6 +4,18 @@ import sys
 
 import pytest
 
+import sys
+from unittest.mock import MagicMock
+
+# --- Mock google.genai globally for pytest collection ---
+try:
+    import google.genai
+except ImportError:
+    # If the environment is fundamentally broken for pytest namespace packages,
+    # mock it out entirely to allow test collection of all other modules.
+    sys.modules['google.genai'] = MagicMock()
+    sys.modules['google.genai.types'] = MagicMock()
+
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

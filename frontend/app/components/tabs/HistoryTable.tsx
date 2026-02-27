@@ -103,7 +103,9 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
     useEffect(() => {
         setLoading(true);
         const now = new Date();
-        const startDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+        const mskNow = new Date(utc + 3 * 3600000); // UTC+3
+        const startDay = new Date(mskNow.getFullYear(), mskNow.getMonth(), mskNow.getDate());
         let endDay = new Date(startDay);
 
         const params: any = {};
