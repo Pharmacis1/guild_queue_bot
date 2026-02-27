@@ -22,7 +22,7 @@ except ImportError:
     logging.warning("Could not import run_item_scraper from scripts.item_scraper")
 
 from logic import log_importer, party_manager, queue_manager
-from logic.player_manager import update_player_logic
+from logic.player_manager import update_player_logic, get_player_profile
 
 router = APIRouter(prefix="/api")
 
@@ -534,11 +534,17 @@ async def update_event_date(request: Request):
         # Events doesn't have a unique ID. Composite key: role_id, timestamp
         # But user sends original string or timestamp?
         # Let's use old_timestamp (int) + role_id to identify.
-        old_ts = int(data.get("old_timestamp"))
+        # Wait to int cast until we know it's not None
+        old_ts_raw = data.get("old_timestamp")
         new_date_str = data.get("new_date_str")  # "YYYY-MM-DD HH:MM:SS"
 
-        if not role_id or not old_ts or not new_date_str:
+        if not role_id or not old_ts_raw or not new_date_str:
             return {"status": "error", "message": "Missing params"}
+
+        try:
+            old_ts = int(old_ts_raw)
+        except ValueError:
+            return {"status": "error", "message": "Invalid old_timestamp"}
 
         # Calculate new timestamp from string (assuming input is MSK)
         # Parse logic:

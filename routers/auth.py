@@ -149,7 +149,7 @@ async def login_widget(data: WidgetLoginRequest, request: Request):
         # Let's trust that the frontend sends exactly what the widget gave.
         # The validation function expects a dict.
 
-        data_dict = data.dict(exclude_none=True)
+        data_dict = data.model_dump(exclude_none=True)
         # Note: 'id' might be int, validation needs to handle it or convert to string for string construction?
         # The validation string construction `f"{key}={value}"` handles int->str conversion correctly.
 

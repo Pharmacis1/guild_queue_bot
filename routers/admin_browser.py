@@ -259,6 +259,8 @@ class RemoteBrowserSession:
                 return {"status": "ok", "message": f"Scrolled by ({x}, {y})"}
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Interaction failed: {e}")
             raise HTTPException(status_code=500, detail=f"Interaction failed: {e}")
