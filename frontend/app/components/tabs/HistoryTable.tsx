@@ -110,12 +110,25 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
 
         if (dateRange === 'today') {
             params.start = formatDate(startDay);
+            params.end = formatDate(endDay);
         } else if (dateRange === 'week') {
-            startDay.setDate(startDay.getDate() - 7);
+            const day = startDay.getDay();
+            const diff = startDay.getDate() - day + (day === 0 ? -6 : 1);
+            startDay.setDate(diff);
+
+            endDay = new Date(startDay);
+            endDay.setDate(endDay.getDate() + 6);
+
             params.start = formatDate(startDay);
+            params.end = formatDate(endDay);
         } else if (dateRange === 'prev') {
-            endDay.setDate(endDay.getDate() - 7);
-            startDay.setDate(startDay.getDate() - 14);
+            const day = startDay.getDay();
+            const diff = startDay.getDate() - day + (day === 0 ? -6 : 1) - 7;
+            startDay.setDate(diff);
+
+            endDay = new Date(startDay);
+            endDay.setDate(endDay.getDate() + 6);
+
             params.start = formatDate(startDay);
             params.end = formatDate(endDay);
         } else if (dateRange === 'custom' && customFrom && customTo) {

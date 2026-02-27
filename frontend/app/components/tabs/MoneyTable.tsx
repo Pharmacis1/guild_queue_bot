@@ -133,19 +133,27 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
         let end = new Date();
 
         if (type === 'TODAY') {
-            // start = today
+            // start = today, end = today
         } else if (type === 'WEEK') {
             const day = today.getDay();
             const diff = today.getDate() - day + (day === 0 ? -6 : 1);
             start.setDate(diff);
+            end = new Date(start);
+            end.setDate(end.getDate() + 6);
         } else if (type === 'PREV') {
             const day = today.getDay();
             const diff = today.getDate() - day + (day === 0 ? -6 : 1) - 7;
             start.setDate(diff);
-            end.setDate(diff + 6);
+            end = new Date(start);
+            end.setDate(end.getDate() + 6);
         }
 
-        const fmt = (d: Date) => d.toISOString().split('T')[0];
+        const fmt = (d: Date) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dStr = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dStr}`;
+        };
         const sStr = fmt(start);
         const eStr = fmt(end);
 
