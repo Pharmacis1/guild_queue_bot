@@ -48,6 +48,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
     const [selectedClasses, setSelectedClasses] = useState<number[]>([]); // Empty = all classes
     const [showClassDropdown, setShowClassDropdown] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ field: string, order: 'asc' | 'desc' }>({ field: 's7', order: 'desc' });
+    const [selectedCpColor, setSelectedCpColor] = useState<string | null>(null);
     const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
     const [initialExpansionDone, setInitialExpansionDone] = useState(false);
 
@@ -141,8 +142,9 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
 
         const matchesMyChars = myCharsOnly ? r.is_mine : true;
         const matchesClass = selectedClasses.length === 0 || selectedClasses.includes(r.class_id);
+        const matchesCp = selectedCpColor === null || r.cp_color === selectedCpColor;
 
-        return matchesSearch && matchesType && matchesAfk && matchesMyChars && matchesClass;
+        return matchesSearch && matchesType && matchesAfk && matchesMyChars && matchesClass && matchesCp;
     });
 
     const toggleSort = (field: string) => {
@@ -237,7 +239,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                 borderTop: '1px solid rgba(255, 255, 255, 0.15)',
                 boxShadow: '0 15px 40px rgba(0, 0, 0, 0.6)',
                 borderRadius: '12px',
-                padding: '12px 20px',
+                padding: '8px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -247,7 +249,30 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                 flexWrap: 'wrap'
             }}>
                 {/* Left Group: Class filter, Toggle, Presets, Newcomers */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Clear CP Filter Button */}
+                    {selectedCpColor && (
+                        <button
+                            className="btn btn-sm fade-in-smooth"
+                            style={{
+                                background: `rgba(20, 20, 20, 0.8)`,
+                                border: `1px solid ${selectedCpColor}`,
+                                color: '#fff',
+                                height: '32px',
+                                padding: '0 8px',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}
+                            title="Сбросить фильтр КП"
+                            onClick={() => setSelectedCpColor(null)}
+                        >
+                            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: selectedCpColor, boxShadow: `0 0 5px ${selectedCpColor}` }} />
+                            <span style={{ fontSize: '1.2rem', lineHeight: 0.5, paddingBottom: '2px' }}>×</span>
+                        </button>
+                    )}
+
                     {/* Class Filter Dropdown */}
                     <div style={{ position: 'relative' }}>
                         <button
@@ -428,13 +453,13 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     background: afkFilter === s ? 'var(--accent-ruby)' : 'transparent',
                                     color: afkFilter === s ? '#fff' : '#666',
                                     border: 'none',
-                                    padding: '4px 10px',
+                                    padding: '4px 8px',
                                     borderRadius: '4px',
                                     fontSize: '0.7rem',
                                     fontWeight: 700,
                                     textTransform: 'uppercase',
                                     cursor: 'pointer',
-                                    minWidth: '40px'
+                                    minWidth: '36px'
                                 }}
                             >
                                 {s}
@@ -444,7 +469,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                 </div>
 
                 {/* Right Group: Date Inputs & Apply */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', background: '#111', borderRadius: '6px', padding: '0 8px', border: '1px solid #333' }}>
                         <span style={{ fontSize: '0.7rem', color: '#666', marginRight: '6px', textTransform: 'uppercase' }}>FROM</span>
                         <input
@@ -601,15 +626,25 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     }}>
                                         {/* CP Neon Strip */}
                                         {row.cp_color && (
-                                            <div style={{
-                                                position: 'absolute',
-                                                left: 0,
-                                                top: 0,
-                                                bottom: 0,
-                                                width: '4px',
-                                                background: row.cp_color,
-                                                boxShadow: `0 0 10px ${row.cp_color}`
-                                            }} />
+                                            <div
+                                                title={selectedCpColor === row.cp_color ? "Сбросить фильтр КП" : "Фильтр по этой КП"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedCpColor(prev => prev === row.cp_color ? null : row.cp_color);
+                                                }}
+                                                style={{
+                                                    position: 'absolute',
+                                                    left: 0,
+                                                    top: 0,
+                                                    bottom: 0,
+                                                    width: '4px',
+                                                    background: row.cp_color,
+                                                    boxShadow: selectedCpColor === row.cp_color ? `0 0 15px 2px ${row.cp_color}` : `0 0 10px ${row.cp_color}`,
+                                                    cursor: 'pointer',
+                                                    zIndex: 2,
+                                                    transition: 'all 0.2s',
+                                                    opacity: selectedCpColor && selectedCpColor !== row.cp_color ? 0.3 : 1
+                                                }} />
                                         )}
 
 

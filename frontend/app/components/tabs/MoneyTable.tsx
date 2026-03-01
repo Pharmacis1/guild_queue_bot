@@ -51,6 +51,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
     const [selectedClasses, setSelectedClasses] = useState<number[]>([]); // Empty = all classes
     const [showClassDropdown, setShowClassDropdown] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ field: string, order: 'asc' | 'desc' }>({ field: 'total_valor', order: 'desc' });
+    const [selectedCpColor, setSelectedCpColor] = useState<string | null>(null);
 
     const topScrollRef = useRef<HTMLDivElement>(null);
     const tableWrapperRef = useRef<HTMLDivElement>(null);
@@ -197,8 +198,9 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
 
         const matchesMyChars = myCharsOnly ? r.is_mine : true;
         const matchesClass = selectedClasses.length === 0 || selectedClasses.includes(r.class_id);
+        const matchesCp = selectedCpColor === null || r.cp_color === selectedCpColor;
 
-        return matchesSearch && matchesType && matchesAfk && matchesMyChars && matchesClass;
+        return matchesSearch && matchesType && matchesAfk && matchesMyChars && matchesClass && matchesCp;
     });
 
     const toggleSort = (field: string) => {
@@ -325,7 +327,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                 borderTop: '1px solid rgba(255, 255, 255, 0.15)',
                 boxShadow: '0 15px 40px rgba(0, 0, 0, 0.6)',
                 borderRadius: '12px',
-                padding: '12px 20px',
+                padding: '8px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -335,7 +337,30 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                 flexWrap: 'wrap' // Allow wrapping if screen is small
             }}>
                 {/* Left Group */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Clear CP Filter Button */}
+                    {selectedCpColor && (
+                        <button
+                            className="btn btn-sm fade-in-smooth"
+                            style={{
+                                background: `rgba(20, 20, 20, 0.8)`,
+                                border: `1px solid ${selectedCpColor}`,
+                                color: '#fff',
+                                height: '32px',
+                                padding: '0 8px',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}
+                            title="Сбросить фильтр КП"
+                            onClick={() => setSelectedCpColor(null)}
+                        >
+                            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: selectedCpColor, boxShadow: `0 0 5px ${selectedCpColor}` }} />
+                            <span style={{ fontSize: '1.2rem', lineHeight: 0.5, paddingBottom: '2px' }}>×</span>
+                        </button>
+                    )}
+
                     {/* Class Filter */}
                     <div style={{ position: 'relative' }}>
                         <button
@@ -555,13 +580,13 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     background: afkFilter === s ? 'var(--accent-ruby)' : 'transparent',
                                     color: afkFilter === s ? '#fff' : '#666',
                                     border: 'none',
-                                    padding: '4px 10px',
+                                    padding: '4px 8px',
                                     borderRadius: '4px',
                                     fontSize: '0.7rem',
                                     fontWeight: 700,
                                     textTransform: 'uppercase',
                                     cursor: 'pointer',
-                                    minWidth: '40px'
+                                    minWidth: '36px'
                                 }}
                             >
                                 {s}
@@ -571,7 +596,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                 </div>
 
                 {/* Right Group: Date Inputs & Apply */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', background: '#111', borderRadius: '6px', padding: '0 8px', border: '1px solid #333' }}>
                         <span style={{ fontSize: '0.7rem', color: '#666', marginRight: '6px', textTransform: 'uppercase' }}>FROM</span>
                         <input
@@ -801,13 +826,9 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     const isChild = !!(row as any)._is_child;
                                     const participantAllocatedPadding = isChild ? '64px' : '16px';
 
-                                    // CP Neon Strip
-                                    // If cp_color exists, add a left border or box-shadow
+                                    // CP Neon Strip setup
                                     const cpColor = row.cp_color;
                                     const customStickyStyle = { ...stickyStyle };
-                                    if (cpColor) {
-                                        customStickyStyle.boxShadow = `inset 4px 0 0 0 ${cpColor}`;
-                                    }
 
                                     // Indentation for children
 
@@ -850,6 +871,28 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                 borderRight: 'none',
                                                 backdropFilter: 'blur(10px)'
                                             }}>
+                                                {/* CP Neon Strip rendered as separate block */}
+                                                {cpColor && (
+                                                    <div
+                                                        title={selectedCpColor === cpColor ? "Сбросить фильтр КП" : "Фильтр по этой КП"}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedCpColor(prev => prev === cpColor ? null : cpColor);
+                                                        }}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            left: 0,
+                                                            top: 0,
+                                                            bottom: 0,
+                                                            width: '4px',
+                                                            background: cpColor,
+                                                            boxShadow: selectedCpColor === cpColor ? `0 0 15px 2px ${cpColor}` : `0 0 10px ${cpColor}`,
+                                                            cursor: 'pointer',
+                                                            zIndex: 12,
+                                                            transition: 'all 0.2s',
+                                                            opacity: selectedCpColor && selectedCpColor !== cpColor ? 0.3 : 1
+                                                        }} />
+                                                )}
 
                                                 <ClassIcon classId={row.class_id} size={isChild ? 20 : 24} />
                                                 <PlayerTooltip

@@ -14,7 +14,17 @@ credentials.json
 *.log
 
 # Сессии
-# Сессии
 pwobs_auth.json
 client_secret.json
 token.json
+
+# Другое
+Desktop/
+*.exe
+*.png
+*.jpg
+*.jpeg
+*.lnk
+*.zip
+*.rar
+*.7z
