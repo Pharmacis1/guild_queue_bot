@@ -84,6 +84,18 @@ async def on_startup():
     perform_backup("startup_auto")
     print("Backup system initialized.")
 
+    # 3.2 Schedule DB Update Reminders for Masters
+    from logic.reminders import send_db_upload_reminder
+
+    # Daily times: 12:00 (check 2 hrs window back to 10:00), 21:30 (check 2 hrs window back to 19:30)
+    scheduler.add_job(send_db_upload_reminder, "cron", hour=12, minute=0, args=[bot, 2.0], id="db_reminder_1200", replace_existing=True)
+    scheduler.add_job(send_db_upload_reminder, "cron", hour=21, minute=30, args=[bot, 2.0], id="db_reminder_2130", replace_existing=True)
+    
+    # Wednesday additional reminders: 18:30 (check 2 hrs window to 16:30), 20:00 (check 2 hrs window to 18:00)
+    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=18, minute=30, args=[bot, 2.0], id="db_reminder_wed_1830", replace_existing=True)
+    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=20, minute=0, args=[bot, 2.0], id="db_reminder_wed_2000", replace_existing=True)
+    print("DB Reminder system initialized.")
+
     # 4. Start Scheduler
     scheduler.start()
     print(f"Bot started. Jobs restored: {count}")

@@ -161,6 +161,67 @@ async def open_system_menu(callback: types.CallbackQuery):
         "💾 **Система и Бэкапы**", reply_markup=get_master_system_menu(), parse_mode="Markdown"
     )
 
+@router.callback_query(F.data == "instruction_upload_db")
+async def instruction_upload_db(callback: types.CallbackQuery):
+    text = (
+        "📖 <b>Инструкция по обновлению сайта</b>\n\n"
+        "1. Скачайте и запустите <code>FactionBoard4-29.exe</code> (прикреплен ниже).\n"
+        "2. При первом запуске программа может запросить путь к папке FactionHistoryData.\n"
+        "Нужно вставить ссылку вида: <code>&lt;папка с игрой&gt;\\Perfect World\\element\\userdata\\FactionHistoryData</code>\n"
+        "3. В игре откройте <b>Историю гильдии</b>.\n"
+        "4. Проскрольте историю гильдии до конца или до момента, когда на сайте было последнее обновление.\n\n"
+        "<i>В момент, когда вы скролите историю, в вашей папке с игрой создаётся и записывается файл с этой историей, который программа отправит на сайт. В файл может записаться только ограниченное количество событий, поэтому, чтобы никакие данные не потерялись, историю гильдии рекомендуется открывать и скроллить <b>4 раза в среду</b> (танцы и адепты генерируют большое количество записей) и <b>2 раза в другой день</b>.</i>\n\n"
+        "5. Закройте историю гильдии. Через 3 минуты информация на сайте обновится."
+    )
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="instruction_back_from_upload")],
+        [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="start_menu")]
+    ])
+    
+    # Check if FactionBoard4-29.exe is in the project root
+    import os
+    exe_path = os.path.join(os.getcwd(), "FactionBoard4-29.exe")
+    if os.path.exists(exe_path):
+        from aiogram.types import FSInputFile
+        from loader import bot
+        
+        # Show loading message
+        await callback.message.edit_text("⏳ <i>Загружаю инструкцию и файл программы, пожалуйста подождите...</i>", parse_mode="HTML")
+        
+        doc = FSInputFile(exe_path)
+        await bot.send_document(
+            chat_id=callback.message.chat.id, 
+            document=doc, 
+            caption=text, 
+            parse_mode="HTML", 
+            reply_markup=kb,
+            request_timeout=300
+        )
+        await callback.message.delete()
+    else:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "instruction_back_from_upload")
+async def instruction_back_from_upload(callback: types.CallbackQuery):
+    # Depending on context, it could just be a generic back, or delete the doc message
+    # If it was an edit_text, we could just send the "start_menu", but we deleted it inside `answer_document`.
+    # It's cleaner to handle deletion and resending menu
+    await callback.message.delete()
+    text = (
+            "🔔 <b>Напоминание!</b>\n\n"
+            "Пожалуйста, запустите <code>FactionBoard4-29.exe</code> и проскрольте историю гильдии в игре, "
+            "чтобы не потерять события.\n\n"
+            "<i>Примерное рекомендуемое время для скролинга истории гильдии:\n"
+            "Ежедневно: в 12:00 (до вечернего пика) и в 21:30 (после).\n"
+            "По средам (дополнительно): в 18:30 и 20:00(чтобы не потерялись танцы и адепты).</i>"
+        )
+
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📖 Инструкция по обновлению сайта", callback_data="instruction_upload_db")],
+            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="start_menu")]
+    ])
+    await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 # --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ---
 @router.callback_query(F.data.startswith("m_users_list"))
