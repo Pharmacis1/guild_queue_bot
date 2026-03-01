@@ -2,7 +2,7 @@ import datetime
 
 from sqlalchemy import func
 
-from database import Event, Player, QueueEntry, get_effective_limit_logic, get_msk_now, get_user_active_queues, session
+from database import Event, Player, QueueEntry, PartyMember, get_effective_limit_logic, get_msk_now, get_user_active_queues, session
 
 
 def get_start_of_week():
@@ -119,10 +119,29 @@ def get_menu_text(user, custom_title=None):
         
         val = valor_map.get(char.nickname, 0)
         suffix = " (не в ги)" if not in_guild else ""
-        # Формат: Ник (не в ги) (10 добл.)
-        chars_display_list.append(f"{char.nickname}{suffix} ({val} добл.)")
+        
+        char_line = f"• <b>{char.nickname}</b>{suffix} ({val} добл.)"
+        
+        # Получаем информацию о КП
+        player = session.query(Player).filter(func.lower(Player.nickname) == func.lower(char.nickname)).first()
+        if player and player.role_id:
+            pm = session.query(PartyMember).filter_by(player_role_id=player.role_id).first()
+            if pm:
+                party = pm.party
+                if party.name:
+                    char_line += f"\n  КП: «{party.name}»"
+                else:
+                    leader_pm = session.query(PartyMember).filter_by(party_id=party.id, is_leader=True).first()
+                    if leader_pm:
+                        leader_player = session.query(Player).filter_by(role_id=leader_pm.player_role_id).first()
+                        leader_nick = leader_player.nickname if leader_player else "Неизвестно"
+                        char_line += f"\n  КП: {leader_nick}"
+                    else:
+                        char_line += f"\n  КП: Неизвестно"
 
-    chars_str = ", ".join(chars_display_list)
+        chars_display_list.append(char_line)
+
+    chars_str = "\n".join(chars_display_list)
 
     if active_queues:
         q_list_lines = []

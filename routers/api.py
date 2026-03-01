@@ -556,6 +556,11 @@ async def update_event_date(request: Request):
         except Exception as date_e:
             return {"status": "error", "message": f"Invalid date format: {date_e}"}
 
+        # Check against current time
+        current_msk = datetime.now(msk_tz)
+        if new_ts > int(current_msk.timestamp()):
+            return {"status": "error", "message": "Новая дата не может быть из будущего"}
+
         logging.info(f"Updating event: {role_id} from {old_ts} to {new_ts} ({new_date_str})")
 
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
@@ -685,6 +690,11 @@ async def add_event(request: Request):
             timestamp = int(dt_msk.timestamp())
         except Exception as date_e:
             return {"status": "error", "message": f"Invalid date format: {date_e}"}
+
+        # Check against current time
+        current_msk = datetime.now(msk_tz)
+        if timestamp > int(current_msk.timestamp()):
+            return {"status": "error", "message": "Событие не может быть из будущего"}
 
         logging.info(f"Manual Event Add: {role_id}, val={val_int}, ts={timestamp} ({event_date_str})")
 

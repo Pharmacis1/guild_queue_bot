@@ -1,3 +1,5 @@
+import datetime
+import pytz
 import logging
 from typing import Any, Dict, Set, Tuple
 
@@ -36,6 +38,10 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
         # 2. Write to DB
         async with aiosqlite.connect(web_database.DB_NAME) as conn:
             cursor = await conn.cursor()
+            
+            # Current MSK time
+            current_msk = datetime.datetime.now(pytz.timezone("Europe/Moscow"))
+            current_ts = int(current_msk.timestamp())
 
             # Pre-fetch known nicknames for description replacement
             # We collect all IDs mentioned in descriptions or acting
@@ -63,6 +69,11 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
 
             for row in data:
                 rid = row["role_id"]
+
+                # Check if event is from the future (in MSK)
+                if row["timestamp"] > current_ts:
+                    logging.warning(f"Skipping future event for role_id {rid} at {row['date']}")
+                    continue
 
                 # [FIX] Filter invalid IDs (like ID 1)
                 if rid < 16:
