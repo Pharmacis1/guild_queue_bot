@@ -87,13 +87,13 @@ async def on_startup():
     # 3.2 Schedule DB Update Reminders for Masters
     from logic.reminders import send_db_upload_reminder
 
-    # Daily times: 14:00 (check 10 hrs window back to 04:00), 23:30 (check 9.5 hrs window back to 14:00)
+    # Daily times: 14:00 (check 10 hrs window back to 04:00), 23:30 (check 2 hrs window back to 21:30)
     scheduler.add_job(send_db_upload_reminder, "cron", hour=14, minute=0, args=[bot, 10.0], id="db_reminder_1400", replace_existing=True)
-    scheduler.add_job(send_db_upload_reminder, "cron", hour=23, minute=30, args=[bot, 9.5], id="db_reminder_2330", replace_existing=True)
+    scheduler.add_job(send_db_upload_reminder, "cron", hour=23, minute=30, args=[bot, 2.0], id="db_reminder_2330", replace_existing=True)
     
-    # Wednesday additional reminders: 18:30 (check 2 hrs window to 16:30), 20:00 (check 2 hrs window to 18:00)
-    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=18, minute=30, args=[bot, 2.0], id="db_reminder_wed_1830", replace_existing=True)
-    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=20, minute=0, args=[bot, 2.0], id="db_reminder_wed_2000", replace_existing=True)
+    # Wednesday additional reminders: 19:00 (check 0.5 hrs window to 18:30), 20:30 (check 0.5 hrs window to 20:00)
+    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=19, minute=0, args=[bot, 0.5], id="db_reminder_wed_1900", replace_existing=True)
+    scheduler.add_job(send_db_upload_reminder, "cron", day_of_week='wed', hour=20, minute=30, args=[bot, 0.5], id="db_reminder_wed_2030", replace_existing=True)
     print("DB Reminder system initialized.")
 
     # 4. Start Scheduler
