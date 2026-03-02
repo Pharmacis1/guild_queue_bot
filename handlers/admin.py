@@ -176,7 +176,7 @@ async def instruction_upload_db(callback: types.CallbackQuery):
     
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="instruction_back_from_upload")],
-        [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="start_menu")]
+        [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
     ])
     
     # Check if FactionBoard4-29.exe is in the project root
@@ -219,7 +219,7 @@ async def instruction_back_from_upload(callback: types.CallbackQuery):
 
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="📖 Инструкция по обновлению сайта", callback_data="instruction_upload_db")],
-            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="start_menu")]
+            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
     ])
     await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
 

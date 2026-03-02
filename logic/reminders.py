@@ -7,8 +7,8 @@ async def send_db_upload_reminder(bot, time_window_hours: float):
     try:
         # Check freshness
         # Look for the latest event
-        # Try to use timestamp if available, fallback to event_date string parsing if not
-        latest_event = session.query(Event).order_by(Event.id.desc()).first()
+        # Use timestamp! id doesn't guarantee chronology if old logs are uploaded late
+        latest_event = session.query(Event).filter(Event.timestamp.isnot(None)).order_by(Event.timestamp.desc()).first()
 
         now_msk = get_msk_now()
         is_fresh = False
@@ -54,7 +54,7 @@ async def send_db_upload_reminder(bot, time_window_hours: float):
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📖 Инструкция по обновлению сайта", callback_data="instruction_upload_db")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="start_menu")]
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
         ])
 
         sent_count = 0
