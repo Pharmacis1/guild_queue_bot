@@ -50,7 +50,10 @@ const GenericTooltip: React.FC<GenericTooltipProps> = ({ title, content, childre
                         padding: '10px 14px',
                         zIndex: 100000,
                         width: 'max-content',
+                        maxWidth: '320px',
                         minWidth: '160px',
+                        whiteSpace: 'normal',
+                        wordWrap: 'break-word',
                         boxShadow: '0 8px 25px rgba(0,0,0,0.8)',
                         pointerEvents: 'none',
                         animation: 'tooltipFadeIn 0.15s ease-out'
