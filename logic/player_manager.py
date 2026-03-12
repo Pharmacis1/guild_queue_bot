@@ -187,22 +187,19 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
         # 6. REFLECT AFK DATES
         logging.info(f"Update Logic: new_user_id={new_user_id}, afk_str={afk_start_str}")
         if new_user_id:
-            # Only update if explicit values provided (not None)
-            if afk_start_str is not None:  # Can be empty string "" to clear
-                start_val = parse_date_safe(afk_start_str)
+            # Only update if the key is explicitly present in the data payload (handles None/null correctly to clear AFK)
+            if "afk_start" in update_data:
+                start_val = parse_date_safe(update_data.get("afk_start"))
                 logging.info(f"Parsed Start: {start_val}")  # Uses global logger if defined or logging
                 # Note: `afk_end` is coupled in the UI usually.
-                # If afk_end_str is None (not passed), we might leave it?
-                # But existing code updated both if even one was present?
-                # unique case: usually they come together.
-                # Existing code: `if afk_start_str is not None:` -> updates both.
-
-                end_val = parse_date_safe(afk_end_str)
+                end_val = parse_date_safe(update_data.get("afk_end"))
+                new_reason = update_data.get("afk_reason")
 
                 await conn.execute(
                     "UPDATE users SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE id = ?", 
-                    (start_val, end_val, afk_reason if afk_reason is not None else None, new_user_id)
+                    (start_val, end_val, new_reason if new_reason is not None else None, new_user_id)
                 )
+
 
         await conn.commit()
         return {"status": "ok", "message": "Saved & Synced"}
