@@ -70,8 +70,8 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
             for row in data:
                 rid = row["role_id"]
 
-                # Check if event is from the future (in MSK)
-                if row["timestamp"] > current_ts:
+                # Check if event is from the future (in MSK, with 24h leeway for timezone/clock desync)
+                if row["timestamp"] > current_ts + 86400:
                     logging.warning(f"Skipping future event for role_id {rid} at {row['date']}")
                     continue
 
