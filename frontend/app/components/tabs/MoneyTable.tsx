@@ -5,6 +5,7 @@ import { fetchMoneyTable, MoneyTableRow, UserData } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
+import MassEventModal from '../modals/MassEventModal';
 
 // Class ID -> Russian Name mapping (from consts.py)
 const CLASS_NAMES: Record<number, string> = {
@@ -52,6 +53,10 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
     const [showClassDropdown, setShowClassDropdown] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ field: string, order: 'asc' | 'desc' }>({ field: 'total_valor', order: 'desc' });
     const [selectedCpColor, setSelectedCpColor] = useState<string | null>(null);
+
+    // Mass Event State
+    const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+    const [isMassEventModalOpen, setIsMassEventModalOpen] = useState(false);
 
     const topScrollRef = useRef<HTMLDivElement>(null);
     const tableWrapperRef = useRef<HTMLDivElement>(null);
@@ -336,8 +341,43 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                 zIndex: 100,
                 flexWrap: 'wrap' // Allow wrapping if screen is small
             }}>
+                {/* Modals */}
+                <MassEventModal 
+                    isOpen={isMassEventModalOpen} 
+                    onClose={() => setIsMassEventModalOpen(false)}
+                    onSuccess={() => {
+                        setIsMassEventModalOpen(false);
+                        setSelectedRoleIds([]);
+                        fetchData({ start: dateRange.start, end: dateRange.end }); // Refresh data
+                    }}
+                    selectedRoleIds={selectedRoleIds}
+                />
+
                 {/* Left Group */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Bulk Action Button */}
+                    {selectedRoleIds.length > 0 && currentUser?.is_master && (
+                        <button
+                            className="btn btn-sm fade-in-smooth"
+                            style={{
+                                background: 'rgba(255, 69, 0, 0.2)',
+                                border: '1px solid rgba(255, 69, 0, 0.5)',
+                                color: '#fff',
+                                height: '32px',
+                                padding: '0 12px',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontWeight: 'bold'
+                            }}
+                            onClick={() => setIsMassEventModalOpen(true)}
+                        >
+                            <span style={{ fontSize: '1.2rem' }}>⚡</span>
+                            Масс. Событие ({selectedRoleIds.length})
+                        </button>
+                    )}
+
                     {/* Clear CP Filter Button */}
                     {selectedCpColor && (
                         <button
@@ -830,13 +870,26 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     const cpColor = row.cp_color;
                                     const customStickyStyle = { ...stickyStyle };
 
-                                    // Indentation for children
-
+                                    const isSelected = selectedRoleIds.includes(row.role_id);
+                                    const finalRowBg = isSelected ? 'rgba(255, 69, 0, 0.2)' : rowBg;
+                                    if (isSelected) {
+                                        customStickyStyle.background = 'rgba(255, 69, 0, 0.2)';
+                                    }
 
                                     return (
                                         <div
                                             key={row.role_id}
-                                            className={`kh-row fade-in-smooth kh-row-interactive ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''}`}
+                                            className={`kh-row fade-in-smooth kh-row-interactive ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''} ${isSelected ? 'selected-row' : ''}`}
+                                            onClick={(e) => {
+                                                if (currentUser?.is_master && (e.ctrlKey || e.metaKey)) {
+                                                    e.preventDefault();
+                                                    setSelectedRoleIds(prev => 
+                                                        prev.includes(row.role_id) 
+                                                            ? prev.filter(id => id !== row.role_id) 
+                                                            : [...prev, row.role_id]
+                                                    );
+                                                }
+                                            }}
                                             style={{
                                                 display: 'grid',
                                                 gridTemplateColumns: intervals.length > 10
@@ -848,10 +901,11 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                 maxWidth: 'none',
                                                 margin: '0 auto',
                                                 boxSizing: 'border-box',
-                                                background: rowBg, // Soft gradient for the rest of the row
+                                                background: finalRowBg, // Soft gradient for the rest of the row
                                                 borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
                                                 alignItems: 'stretch',
-                                                cursor: 'default', // Changed from pointer
+                                                cursor: currentUser?.is_master ? 'pointer' : 'default',
+                                                userSelect: 'none',
                                                 fontSize: isChild ? '0.9em' : '1em',
                                                 opacity: isChild ? 0.9 : 1
                                             }}
@@ -914,8 +968,10 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                         }}
                                                         onClick={(e) => {
                                                             if (currentUser?.is_master && onRowClick) {
-                                                                e.stopPropagation();
-                                                                onRowClick(row.role_id);
+                                                                if (!(e.ctrlKey || e.metaKey)) {
+                                                                    e.stopPropagation();
+                                                                    onRowClick(row.role_id);
+                                                                }
                                                             }
                                                         }}
                                                     >{row.name}</span>
