@@ -208,6 +208,11 @@ export const addEvent = async (data: { role_id: number, date: string, value: num
     return response.data;
 };
 
+export const addEventBulk = async (data: { role_ids: number[], date: string, value: number, description?: string }): Promise<any> => {
+    const response = await api.post('/add_event_bulk', data);
+    return response.data;
+};
+
 export const deleteEvent = async (roleId: number, timestamp: number): Promise<any> => {
     const response = await api.post('/delete_event', { role_id: roleId, timestamp });
     return response.data;

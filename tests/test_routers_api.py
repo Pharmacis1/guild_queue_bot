@@ -53,6 +53,12 @@ class MockConnection:
         self.execute_queries.append((query, args))
         return MockCursor(self.fetchall_data, self.fetchone_data)
         
+    async def executemany(self, query, args_list):
+        for args in args_list:
+            self.execute_queries.append((query, args))
+        # Doesn't usually need to return a cursor for executemany, but we match aiosqlite expectations
+        pass
+
     async def commit(self):
         pass
 
@@ -303,6 +309,27 @@ def test_add_event():
             "role_id": 1, "date": "2023-10-10T10:10:10", "value": 50
         })
         assert response.json()["status"] == "ok"
+
+def test_add_event_bulk_success():
+    with patch("aiosqlite.connect", return_value=MockConnection()):
+        response = client.post("/api/add_event_bulk", json={
+            "role_ids": [1, 2, 3], "date": "2023-10-10T10:10:10", "value": 50
+        })
+        assert response.json()["status"] == "ok"
+
+def test_add_event_bulk_missing_data():
+    with patch("aiosqlite.connect", return_value=MockConnection()):
+        # Missing role_ids
+        response1 = client.post("/api/add_event_bulk", json={
+            "date": "2023-10-10T10:10:10", "value": 50
+        })
+        assert response1.json()["status"] == "error"
+        
+        # Missing value
+        response2 = client.post("/api/add_event_bulk", json={
+            "role_ids": [1], "date": "2023-10-10T10:10:10"
+        })
+        assert response2.json()["status"] == "error"
 
 def test_delete_event():
     with patch("aiosqlite.connect", return_value=MockConnection()):

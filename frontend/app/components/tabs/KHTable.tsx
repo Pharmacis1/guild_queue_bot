@@ -5,6 +5,7 @@ import { fetchKHTable, KHTableRow, UserData } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
+import MassEventModal from '../modals/MassEventModal';
 
 // Class ID -> Russian Name mapping (from consts.py)
 const CLASS_NAMES: Record<number, string> = {
@@ -51,6 +52,10 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
     const [selectedCpColor, setSelectedCpColor] = useState<string | null>(null);
     const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
     const [initialExpansionDone, setInitialExpansionDone] = useState(false);
+
+    // Mass Event State
+    const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+    const [isMassEventModalOpen, setIsMassEventModalOpen] = useState(false);
 
     const toggleUserExpansion = (userId: number) => {
         setExpandedUsers(prev => {
@@ -248,8 +253,43 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                 zIndex: 100,
                 flexWrap: 'wrap'
             }}>
+                {/* Modals */}
+                <MassEventModal
+                    isOpen={isMassEventModalOpen}
+                    onClose={() => setIsMassEventModalOpen(false)}
+                    onSuccess={() => {
+                        setIsMassEventModalOpen(false);
+                        setSelectedRoleIds([]);
+                        fetchData({ start: dateRange.start, end: dateRange.end }); // Refresh data
+                    }}
+                    selectedRoleIds={selectedRoleIds}
+                />
+
                 {/* Left Group: Class filter, Toggle, Presets, Newcomers */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Bulk Action Button */}
+                    {selectedRoleIds.length > 0 && currentUser?.is_master && (
+                        <button
+                            className="btn btn-sm fade-in-smooth"
+                            style={{
+                                background: 'rgba(255, 69, 0, 0.2)',
+                                border: '1px solid rgba(255, 69, 0, 0.5)',
+                                color: '#fff',
+                                height: '32px',
+                                padding: '0 12px',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontWeight: 'bold'
+                            }}
+                            onClick={() => setIsMassEventModalOpen(true)}
+                        >
+                            <span style={{ fontSize: '1.2rem' }}>⚡</span>
+                            Масс. Событие ({selectedRoleIds.length})
+                        </button>
+                    )}
+
                     {/* Clear CP Filter Button */}
                     {selectedCpColor && (
                         <button
@@ -532,12 +572,16 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                 }}>
                     <div
                         className="kh-col"
-                        onClick={() => toggleSort('name')}
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: sortConfig.field === 'name' ? '#fff' : '#aaa', paddingLeft: '16px' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '16px' }}
                     >
-                        <ClassIcon classId={0} size={18} />
-                        <span>УЧАСТНИК</span>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--accent-ruby)' }}>{getSortIcon('name')}</span>
+                        <div
+                            onClick={() => toggleSort('name')}
+                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: sortConfig.field === 'name' ? '#fff' : '#aaa' }}
+                        >
+                            <ClassIcon classId={0} size={18} />
+                            <span>УЧАСТНИК</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--accent-ruby)' }}>{getSortIcon('name')}</span>
+                        </div>
                     </div>
 
                     {/* Stages 1-9 (Roman for 1-7, then A, D) */}
@@ -586,20 +630,33 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                             const isGroupAnchor = row.user_id && !row.is_alt && hasTwins;
                             const isChild = !!(row as any)._is_child;
                             const participantAllocatedPadding = isChild ? '64px' : '16px';
+                            const isSelected = selectedRoleIds.includes(row.role_id);
+                            const finalRowBg = isSelected ? 'rgba(255, 69, 0, 0.2)' : 'transparent';
 
                             return (
                                 <div
                                     key={row.role_id}
-                                    className={`kh-row fade-in-smooth ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''}`}
+                                    className={`kh-row fade-in-smooth ${row.is_mine ? 'my-row' : ''} ${row.is_afk ? 'afk-row' : ''} ${row.is_newcomer ? 'newcomer-row' : ''} ${isSelected ? 'selected-row' : ''}`}
                                     onMouseOver={(e) => {
-                                        if (row.is_newcomer) e.currentTarget.style.background = 'rgba(64, 224, 208, 0.05)';
+                                        if (isSelected) e.currentTarget.style.background = 'rgba(255, 69, 0, 0.25)';
+                                        else if (row.is_newcomer) e.currentTarget.style.background = 'rgba(64, 224, 208, 0.05)';
                                         else if (row.is_afk) e.currentTarget.style.background = 'rgba(192, 192, 192, 0.1)';
                                         else if (!row.is_mine) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
                                     }}
                                     onMouseOut={(e) => {
-                                        e.currentTarget.style.background = 'transparent';
+                                        e.currentTarget.style.background = finalRowBg;
                                     }}
-                                    // onClick={() => onRowClick?.(row.role_id)} // Removed
+                                    onClick={(e) => {
+                                        if (currentUser?.is_master && (e.ctrlKey || e.metaKey)) {
+                                            e.preventDefault();
+                                            setSelectedRoleIds(prev =>
+                                                prev.includes(row.role_id)
+                                                    ? prev.filter(id => id !== row.role_id)
+                                                    : [...prev, row.role_id]
+                                            );
+                                        }
+                                        // Normal click behavior is handled in the PlayerTooltip / name span
+                                    }}
                                     style={{
                                         display: 'grid',
                                         gridTemplateColumns: 'minmax(200px, 2.5fr) repeat(9, 1fr)',
@@ -608,9 +665,10 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                         borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
                                         alignItems: 'stretch',
                                         transition: 'background 0.2s',
-                                        background: 'transparent',
+                                        background: finalRowBg,
                                         minHeight: '44px',
-                                        cursor: 'default'
+                                        cursor: currentUser?.is_master ? 'pointer' : 'default', // Make whole row pointer if master to indicate clickable
+                                        userSelect: 'none' // Prevent text selection when shift/ctrl clicking
                                     }}
                                 >
                                     <div className="kh-col kh-participant" style={{
@@ -668,8 +726,11 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                                 }}
                                                 onClick={(e) => {
                                                     if (currentUser?.is_master && onRowClick) {
-                                                        e.stopPropagation();
-                                                        onRowClick(row.role_id);
+                                                        // Only trigger normal click if NOT ctrl/meta clicking
+                                                        if (!(e.ctrlKey || e.metaKey)) {
+                                                            e.stopPropagation();
+                                                            onRowClick(row.role_id);
+                                                        }
                                                     }
                                                 }}
                                             >

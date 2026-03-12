@@ -723,6 +723,81 @@ async def add_event(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@router.post("/add_event_bulk")
+async def add_event_bulk(request: Request):
+    """
+    API endpoint to manually add an event (Valor) to multiple players at once.
+    """
+    try:
+        msk_tz = pytz.timezone("Europe/Moscow")
+
+        data = await request.json()
+        role_ids = data.get("role_ids")
+        if not isinstance(role_ids, list) or not role_ids:
+            return {"status": "error", "message": "role_ids must be a non-empty list"}
+
+        event_date_str = data.get("date")  # "YYYY-MM-DD HH:MM:SS" (MSK)
+        value = data.get("value")
+        description = data.get("description", "")
+
+        if not event_date_str or value is None:
+            return {"status": "error", "message": "Missing date or value"}
+
+        try:
+            val_int = int(value)
+        except Exception:
+            return {"status": "error", "message": "Value must be an integer"}
+
+        # Parse Date
+        try:
+            # Clean input if T exists (HTML5 datetime-local)
+            if "T" in event_date_str:
+                event_date_str = event_date_str.replace("T", " ")
+
+            # Ensure seconds exist
+            if len(event_date_str) == 16:  # 2023-01-01 12:00
+                event_date_str += ":00"
+
+            dt_naive = datetime.strptime(event_date_str, "%Y-%m-%d %H:%M:%S")
+            dt_msk = msk_tz.localize(dt_naive)
+            timestamp = int(dt_msk.timestamp())
+        except Exception as date_e:
+            return {"status": "error", "message": f"Invalid date format: {date_e}"}
+
+        # Check against current time
+        current_msk = datetime.now(msk_tz)
+        if timestamp > int(current_msk.timestamp()):
+            return {"status": "error", "message": "Событие не может быть из будущего"}
+
+        logging.info(f"Bulk Event Add: {len(role_ids)} players, val={val_int}, ts={timestamp} ({event_date_str})")
+
+        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+            # Prepare data
+            insert_data = [
+                (role_id, timestamp, event_date_str, 1, val_int, description)
+                for role_id in role_ids
+            ]
+
+            # We don't strictly assert every player ID exists here to speed up bulk insert, 
+            # foreign keys (if strict) or just raw insertion is fine for logging events 
+            # (especially since UI selects from existing profiles).
+            await conn.executemany(
+                """
+                INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                insert_data,
+            )
+
+            await conn.commit()
+
+        return {"status": "ok", "message": f"Event added successfully to {len(role_ids)} players"}
+
+    except Exception as e:
+        logging.error(f"Error in add_event_bulk: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
 @router.post("/delete_event")
 async def delete_event(request: Request):
     """
