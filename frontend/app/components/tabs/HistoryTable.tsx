@@ -87,7 +87,9 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
 
     const [dateRange, setDateRange] = useState('week'); // 'today', 'week', 'prev', 'custom'
     const [customFrom, setCustomFrom] = useState('');
+    const [customFromTime, setCustomFromTime] = useState('');
     const [customTo, setCustomTo] = useState('');
+    const [customToTime, setCustomToTime] = useState('');
 
     const [eventType, setEventType] = useState('ROSTER'); // [FIX] Default to ROSTER
     const [showEventDropdown, setShowEventDropdown] = useState(false);
@@ -134,8 +136,8 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
             params.start = formatDate(startDay);
             params.end = formatDate(endDay);
         } else if (dateRange === 'custom' && customFrom && customTo) {
-            params.start = customFrom;
-            params.end = customTo;
+            params.start = customFromTime ? `${customFrom} ${customFromTime}` : customFrom;
+            params.end = customToTime ? `${customTo} ${customToTime}` : customTo;
         }
 
         // Add event types mapping for API
@@ -149,7 +151,7 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
             .then(setAllRows)
             .catch((err) => console.error("Failed to fetch History:", err))
             .finally(() => setLoading(false));
-    }, [dateRange, customFrom, customTo, eventType]);
+    }, [dateRange, customFrom, customFromTime, customTo, customToTime, eventType]);
 
     // Helper to parse date string "YYYY-MM-DD HH:MM:SS"
     const parseDate = (dateStr: string) => {
@@ -373,8 +375,8 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
 
                 </div>
 
-                {/* Right Group: Custom Date */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Right Group: Custom Date & Time */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     <div style={{ display: 'flex', alignItems: 'center', background: '#111', borderRadius: '6px', padding: '0 8px', border: '1px solid #333' }}>
                         <span style={{ fontSize: '0.7rem', color: '#666', marginRight: '6px', textTransform: 'uppercase' }}>FROM</span>
                         <input
@@ -382,6 +384,12 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                             value={customFrom}
                             onChange={(e) => { setCustomFrom(e.target.value); setDateRange('custom'); }}
                             style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.8rem', padding: '4px 0', outline: 'none' }}
+                        />
+                        <input
+                            type="time"
+                            value={customFromTime}
+                            onChange={(e) => { setCustomFromTime(e.target.value); setDateRange('custom'); }}
+                            style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '0.8rem', padding: '4px 0', marginLeft: '6px', outline: 'none', width: '70px' }}
                         />
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', background: '#111', borderRadius: '6px', padding: '0 8px', border: '1px solid #333' }}>
@@ -391,6 +399,12 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                             value={customTo}
                             onChange={(e) => { setCustomTo(e.target.value); setDateRange('custom'); }}
                             style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.8rem', padding: '4px 0', outline: 'none' }}
+                        />
+                        <input
+                            type="time"
+                            value={customToTime}
+                            onChange={(e) => { setCustomToTime(e.target.value); setDateRange('custom'); }}
+                            style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '0.8rem', padding: '4px 0', marginLeft: '6px', outline: 'none', width: '70px' }}
                         />
                     </div>
                 </div>

@@ -484,10 +484,16 @@ async def get_history_data(
     params = []
     
     if start:
-        sql += " AND substr(e.event_date, 1, 10) >= ?"
+        if len(start) > 10:
+            sql += " AND substr(e.event_date, 1, 16) >= ?"
+        else:
+            sql += " AND substr(e.event_date, 1, 10) >= ?"
         params.append(start)
     if end:
-        sql += " AND substr(e.event_date, 1, 10) <= ?"
+        if len(end) > 10:
+            sql += " AND substr(e.event_date, 1, 16) <= ?"
+        else:
+            sql += " AND substr(e.event_date, 1, 10) <= ?"
         params.append(end)
         
     if class_list:
