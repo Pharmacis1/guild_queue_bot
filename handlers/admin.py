@@ -1287,7 +1287,7 @@ async def m_afk_admin_start(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(target_uid=uid, page=page)
     await callback.message.edit_text(
         f"📅 <b>AFK для {user.username}: Дата НАЧАЛА</b>\n\n"
-        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code>.",
+        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code> или <code>ДД.ММ.ГГГГ</code>.",
         parse_mode="HTML",
         reply_markup=get_afk_start_kb(),
     )
@@ -1311,7 +1311,7 @@ async def m_afk_admin_date_click(callback: types.CallbackQuery, state: FSMContex
 async def m_afk_admin_date_manual(message: types.Message, state: FSMContext):
     dt = parse_date_input(message.text)
     if not dt:
-        return await message.answer("⚠️ Неверный формат (ДД.ММ)", reply_markup=get_afk_start_kb())
+        return await message.answer("⚠️ Неверный формат (ДД.ММ или ДД.ММ.ГГГГ)", reply_markup=get_afk_start_kb())
     await state.update_data(start_date=dt)
     await m_afk_admin_ask_end(message, state)
 

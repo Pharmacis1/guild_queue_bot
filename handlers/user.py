@@ -1020,7 +1020,7 @@ async def afk_clear(callback: types.CallbackQuery):
 async def afk_set_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "📅 <b>Дата НАЧАЛА отсутствия:</b>\n\n"
-        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code> (например, 25.01).",
+        "Выберите вариант или напишите дату вручную в формате <code>ДД.ММ</code> или <code>ДД.ММ.ГГГГ</code> (например, 25.01).",
         parse_mode="HTML",
         reply_markup=get_afk_start_kb(),
     )
@@ -1031,23 +1031,23 @@ async def afk_set_start(callback: types.CallbackQuery, state: FSMContext):
 def parse_date_input(text):
     text = text.strip()
     now = get_msk_now()
-
-    # Try DD.MM
     try:
-        d_str = text + f".{now.year}"
-        dt = datetime.strptime(d_str, "%d.%m.%Y")
-
-        # If date is in the past (e.g. user typed 01.01 but it's now 26.01), maybe they meant next year?
-        # Or maybe they just made a mistake. Let's assume current year.
+        parts = text.split('.')
+        if len(parts) == 3:
+            if len(parts[2]) == 2:
+                dt = datetime.strptime(text, "%d.%m.%y")
+            else:
+                dt = datetime.strptime(text, "%d.%m.%Y")
+            return dt
+        elif len(parts) == 2:
+            d_str = text + f".{now.year}"
+            dt = datetime.strptime(d_str, "%d.%m.%Y")
+            if dt.month < now.month:
+                dt = dt.replace(year=now.year + 1)
+            return dt
     except Exception:
-        dt = None
-        # But if it's December and they type 01.01, they mean next year.
-        if dt.month < now.month:
-            dt = dt.replace(year=now.year + 1)
-
-        return dt
-    except Exception:
-        return None
+        pass
+    return None
 
 
 @router.callback_query(AFKState.waiting_for_start, F.data.startswith("afk_date_"))
@@ -1069,7 +1069,7 @@ async def afk_start_manual(message: types.Message, state: FSMContext):
     dt = parse_date_input(message.text)
     if not dt:
         return await message.answer(
-            "⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code> (например 25.01)",
+            "⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code> или <code>ДД.ММ.ГГГГ</code> (например 25.01).",
             parse_mode="HTML",
             reply_markup=get_afk_start_kb(),
         )
@@ -1090,7 +1090,7 @@ async def ask_afk_end(message: types.Message, state: FSMContext):
 
     await func(
         "🏁 <b>Дата ОКОНЧАНИЯ отсутствия:</b>\n\n"
-        "Выберите длительность или напишите дату окончания вручную (<code>ДД.ММ</code>).",
+        "Выберите длительность или напишите дату окончания вручную (<code>ДД.ММ</code> или <code>ДД.ММ.ГГГГ</code>).",
         parse_mode="HTML",
         reply_markup=get_afk_end_kb(),
     )
@@ -1146,7 +1146,7 @@ async def afk_end_manual(message: types.Message, state: FSMContext):
     end_dt = parse_date_input(message.text)
     if not end_dt:
         return await message.answer(
-            "⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code>", parse_mode="HTML", reply_markup=get_afk_end_kb()
+            "⚠️ Неверный формат даты. Используйте <code>ДД.ММ</code> или <code>ДД.ММ.ГГГГ</code>", parse_mode="HTML", reply_markup=get_afk_end_kb()
         )
 
     if end_dt < start_dt:

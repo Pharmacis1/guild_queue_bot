@@ -934,3 +934,31 @@ async def test_process_alt_input_entry_is_unknown_with_code(sync_test_session, m
             assert mock_message.answer.called
             assert "Возможно," in mock_message.answer.call_args[0][0]
             assert mock_state.set_state.called
+
+def test_parse_date_input():
+    from handlers.user import parse_date_input
+    
+    # Test DD.MM
+    dt1 = parse_date_input("16.03")
+    assert dt1 is not None
+    assert dt1.day == 16
+    assert dt1.month == 3
+    
+    # Test DD.MM.YY
+    dt2 = parse_date_input("15.01.25")
+    assert dt2 is not None
+    assert dt2.day == 15
+    assert dt2.month == 1
+    assert dt2.year == 2025
+    
+    # Test DD.MM.YYYY
+    dt3 = parse_date_input("20.12.2024")
+    assert dt3 is not None
+    assert dt3.day == 20
+    assert dt3.month == 12
+    assert dt3.year == 2024
+    
+    # Test invalid cases
+    assert parse_date_input("invalid.date") is None
+    assert parse_date_input("99.99") is None
+
