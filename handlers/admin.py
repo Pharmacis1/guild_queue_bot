@@ -541,6 +541,7 @@ async def m_add_admin_save(message: types.Message, state: FSMContext):
 # --- РАЗДАЧА НАГРАД ---
 @router.callback_query(F.data == "m_distribute")
 async def m_dist_start(callback: types.CallbackQuery):
+    session.expire_all()
     queues = session.query(QueueType).filter_by(is_active=True).all()
     kb = []
 
@@ -571,6 +572,7 @@ async def m_show_dist_list(callback: types.CallbackQuery):
 
 
 async def render_dist_list(event, qid):
+    session.expire_all()
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
     q = session.get(QueueType, qid)

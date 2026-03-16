@@ -238,6 +238,14 @@ export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
                         >
                             История
                         </button>
+                        {user?.is_master && (
+                            <button
+                                className={`header-tab ${activeTab === 'master' ? 'active' : ''}`}
+                                onClick={() => onTabChange('master')}
+                            >
+                                Панель мастера
+                            </button>
+                        )}
                     </div>
                 </div>
             </nav>

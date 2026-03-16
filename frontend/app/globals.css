@@ -619,6 +619,15 @@ table.dataTable tbody td:last-child {
     background: var(--accent-ruby);
 }
 
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
 /* --- Footer --- */
 .footer-spider {
     position: relative;

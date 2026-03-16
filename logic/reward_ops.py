@@ -1,5 +1,6 @@
 from typing import Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import QueueEntry, RewardHistory, User
@@ -42,7 +43,15 @@ def issue_reward(session: Session, entry_id: int, master_username: str) -> Tuple
 
     # Auto-Requeue Logic
     if entry.auto_requeue:
-        new_entry = QueueEntry(user_id=entry.user_id, queue_type_id=qid, character_name=char_nick, auto_requeue=True)
+        # Calculate next position
+        max_pos = session.query(func.max(QueueEntry.position)).filter_by(queue_type_id=qid).scalar() or 0
+        new_entry = QueueEntry(
+            user_id=entry.user_id, 
+            queue_type_id=qid, 
+            character_name=char_nick, 
+            auto_requeue=True,
+            position=max_pos + 1
+        )
         session.add(new_entry)
         msg_suffix = "(Перезаписан)"
     else:
@@ -76,6 +85,7 @@ def warn_user(session: Session, entry_id: int, master_username: str) -> Tuple[bo
         record_type="warning",
     )
     session.add(history)
+    session.delete(entry)
     session.commit()
 
     if user:

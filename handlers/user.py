@@ -597,6 +597,7 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "menu_join")
 async def join_menu(callback: types.CallbackQuery):
+    session.expire_all()
     # Получаем пользователя для генерации текста
     user = ensure_user(callback.from_user.id, callback.from_user.username)
 
@@ -641,6 +642,7 @@ async def join_menu(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("view_q_"))
 async def view_queue(callback: types.CallbackQuery):
+    session.expire_all()
     qid = int(callback.data.split("_")[2])
     q = session.get(QueueType, qid)
     user = ensure_user(callback.from_user.id, callback.from_user.username)
@@ -649,6 +651,7 @@ async def view_queue(callback: types.CallbackQuery):
         .outerjoin(Player, QueueEntry.character_name == Player.nickname)
         .filter(QueueEntry.queue_type_id == qid)
         .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
+        .order_by(QueueEntry.position.asc(), QueueEntry.id.asc())
         .all()
     )
 

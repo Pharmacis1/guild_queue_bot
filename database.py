@@ -65,6 +65,7 @@ class QueueEntry(Base):
     queue_type_id = Column(Integer, ForeignKey("queue_types.id"))
     character_name = Column(String)
     auto_requeue = Column(Boolean, default=False)
+    position = Column(Integer, default=0)
     user = relationship("User")
     queue = relationship("QueueType")
 
@@ -294,6 +295,16 @@ def init_db():
                 print("Migration successful: Added auto_requeue")
             except Exception as e:
                 print(f"Migration failed (auto_requeue): {e}")
+
+        try:
+            conn.execute(text("SELECT position FROM queue_entries LIMIT 1"))
+        except Exception:
+            print("Column 'position' missing in queue_entries. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE queue_entries ADD COLUMN position INTEGER DEFAULT 0"))
+                print("Migration successful: Added position")
+            except Exception as e:
+                print(f"Migration failed (position): {e}")
 
         # 4. RewardHistory Is Notified
         try:

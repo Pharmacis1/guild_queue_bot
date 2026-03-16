@@ -1,4 +1,4 @@
-# Try to import dependencies
+import asyncio
 import logging
 import os
 import shutil
@@ -23,6 +23,9 @@ except ImportError:
 
 from logic import log_importer, party_manager, queue_manager
 from logic.player_manager import update_player_logic, get_player_profile
+from logic import reward_ops
+from sqlalchemy import func
+from database import session, QueueType, RewardHistory, User
 
 router = APIRouter(prefix="/api")
 
@@ -111,6 +114,370 @@ async def get_player(request: Request):
 
 
 # --- Management Endpoints ---
+
+# --- Master Panel Endpoints ---
+
+@router.get("/master/queues")
+async def master_get_queues():
+    """Get list of active queues for Master Panel."""
+    try:
+        queues = session.query(QueueType).filter_by(is_active=True).all()
+        result = []
+        for q in queues:
+            # Need queue details including count. The admin.py handles logic.queue_ops.get_admin_queue_count.
+            # We import here to avoid circular or too early imports, or reuse if already available.
+            from logic.queue_ops import get_admin_queue_count
+            count = get_admin_queue_count(session, q.id)
+            result.append({"id": q.id, "name": q.name, "count": count})
+            
+        pending_count = session.query(RewardHistory).filter_by(is_notified=False).count()
+        return {"status": "ok", "queues": result, "pending_notifications": pending_count}
+    except Exception as e:
+        logging.error(f"Error in master_get_queues: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/queue_entries")
+async def master_get_queue_entries(request: Request):
+    """Get list of entries for a specific queue ID."""
+    try:
+        data = await request.json()
+        queue_id = data.get("queue_id")
+        if not queue_id:
+            return {"status": "error", "message": "queue_id is required"}
+            
+        from logic.queue_ops import get_admin_queue_entries
+        from handlers.admin import get_weekly_valor_map
+        from database import get_msk_now
+        
+        entries = get_admin_queue_entries(session, queue_id)
+        
+        nicks = [e.character_name for e in entries]
+        valor_map = get_weekly_valor_map(nicks)
+        
+        # Get class IDs for these nicks
+        from database import Player
+        # SQLite's LOWER() doesn't work for Cyrillic. 
+        # We fetch exact matches and then build map in Python for normalized lookup.
+        players = session.query(Player).filter(Player.nickname.in_(nicks)).all()
+        player_map = {p.nickname.lower(): p.class_id for p in players}
+        
+        now = get_msk_now()
+        
+        result_entries = []
+        for e in entries:
+            val = valor_map.get(e.character_name, -1)
+            class_id = player_map.get(e.character_name.lower(), -1)
+            
+            is_afk = False
+            u = e.user
+            if u and u.afk_start and u.afk_end:
+                if u.afk_start <= now <= u.afk_end.replace(hour=23, minute=59, second=59):
+                    is_afk = True
+                    
+            result_entries.append({
+                "id": e.id,
+                "character_name": e.character_name,
+                "valor": val,
+                "is_afk": is_afk,
+                "auto_requeue": e.auto_requeue,
+                "class_id": class_id
+            })
+            
+        return {"status": "ok", "entries": result_entries}
+    except Exception as e:
+        logging.error(f"Error in master_get_queue_entries: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/issue_reward")
+async def master_issue_reward(request: Request):
+    """Issue reward to an entry ID."""
+    try:
+        data = await request.json()
+        entry_id = data.get("entry_id")
+        master_id = data.get("master_id") # We need master role id or user id
+        
+        if not entry_id or not master_id:
+            return {"status": "error", "message": "Missing entry_id or master_id"}
+            
+        # Get master user info from role ID
+        master = session.query(User).filter_by(id=master_id).first()
+        if not master or not master.is_master:
+            # Let's fallback to checking if the ID given might be a role ID
+            async with aiosqlite.connect(web_database.DB_NAME) as conn:
+                async with conn.execute("SELECT user_id FROM players WHERE role_id = ?", (master_id,)) as cursor:
+                    m_row = await cursor.fetchone()
+                    if m_row and m_row[0]:
+                        master = session.query(User).filter_by(id=m_row[0]).first()
+            if not master or not master.is_master:
+                return {"status": "error", "message": "Unauthorized or not found."}
+                
+        # To call issue_reward, we need original QueueEntry details before it's deleted
+        from database import QueueEntry
+        # Re-fetch entry to securely capture q_name, main_nick, char_nick
+        entry = session.get(QueueEntry, entry_id)
+        if not entry:
+            return {"status": "error", "message": "Уже выдано/удалено."}
+            
+        q_name = entry.queue.name
+        char_nick = entry.character_name
+        
+        main_nick = char_nick
+        user = entry.user
+        if user:
+            from database import Character
+            main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+            if main_char:
+                main_nick = main_char.nickname
+                
+        success, msg, hist = reward_ops.issue_reward(session, entry_id, master.username)
+        
+        if success:
+            from utils import log_reward_to_sheet
+            asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
+            return {"status": "ok", "message": msg}
+        else:
+            return {"status": "error", "message": msg}
+    except Exception as e:
+        logging.error(f"Error in master_issue_reward: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/warn_user")
+async def master_warn_user(request: Request):
+    """Issue warning for an entry ID."""
+    try:
+        data = await request.json()
+        entry_id = data.get("entry_id")
+        master_id = data.get("master_id")
+        
+        if not entry_id or not master_id:
+            return {"status": "error", "message": "Missing entry_id or master_id"}
+            
+        master = session.query(User).filter_by(id=master_id).first()
+        if not master or not master.is_master:
+            # Fallback handling
+            async with aiosqlite.connect(web_database.DB_NAME) as conn:
+                async with conn.execute("SELECT user_id FROM players WHERE role_id = ?", (master_id,)) as cursor:
+                    m_row = await cursor.fetchone()
+                    if m_row and m_row[0]:
+                        master = session.query(User).filter_by(id=m_row[0]).first()
+            if not master or not master.is_master:
+                return {"status": "error", "message": "Unauthorized or not found."}
+                
+        success, msg, hist = reward_ops.warn_user(session, entry_id, master.username)
+        return {"status": "ok" if success else "error", "message": msg}
+    except Exception as e:
+        logging.error(f"Error in master_warn_user: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/send_notifications")
+async def master_send_notifications(request: Request):
+    """Send batched reward notifications via telegram."""
+    try:
+        from loader import bot
+        from aiogram import types
+        from keyboards import get_back_btn
+        from database import RewardHistory, User, session
+        
+        pending = session.query(RewardHistory).filter_by(is_notified=False).all()
+        if not pending:
+            return {"status": "error", "message": "Нет уведомлений для отправки."}
+            
+        user_map = {}
+        for item in pending:
+            if item.user_id not in user_map:
+                user_map[item.user_id] = []
+            user_map[item.user_id].append(item)
+            
+        count_users = 0
+        for uid, items in user_map.items():
+            user = session.get(User, uid)
+            if not user:
+                for i in items:
+                    i.is_notified = True
+                continue
+                
+            rewards = [i for i in items if i.record_type != "warning"]
+            warnings = [i for i in items if i.record_type == "warning"]
+            
+            msg_text = ""
+            if rewards:
+                msg_text += "🎉 <b>Вам выданы награды!</b>\n\n"
+                for item in rewards:
+                    msg_text += f"🔹 <b>{item.queue_name}</b> ({item.character_name})\n"
+                    item.is_notified = True
+                msg_text += "\n⚠️ <i>Заберите награды из Клан листа в ближайшее время, пока не пропали.</i>\n\n"
+                
+            if warnings:
+                if rewards:
+                    msg_text += "───────────────\n\n"
+                msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
+                for item in warnings:
+                    msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
+                    item.is_notified = True
+                    
+            msg_text += "👇 <b>Выберите действие:</b>"
+            kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[
+                        types.InlineKeyboardButton(text="📋 Перейти к очередям", callback_data="menu_join"),
+                        types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"),
+            ]])
+            
+            try:
+                await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
+                count_users += 1
+            except Exception:
+                pass
+                
+        session.commit()
+        return {"status": "ok", "message": f"Уведомления отправлены ({count_users} игр.)"}
+    except Exception as e:
+        logging.error(f"Error sending notifications: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/reorder_queue")
+async def master_reorder_queue(request: Request):
+    """Update order of entries in a queue."""
+    try:
+        data = await request.json()
+        entry_ids = data.get("entry_ids", [])
+        if not entry_ids:
+             return {"status": "error", "message": "No entries provided"}
+        
+        from database import QueueEntry
+        for idx, eid in enumerate(entry_ids):
+            entry = session.get(QueueEntry, eid)
+            if entry:
+                entry.position = idx
+        session.commit()
+        return {"status": "ok", "message": "Порядок обновлен"}
+    except Exception as e:
+        logging.error(f"Error in reorder_queue: {e}")
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/remove_from_queue")
+async def master_remove_from_queue(request: Request):
+    """Remove a specific entry ID from queue."""
+    try:
+        data = await request.json()
+        entry_id = data.get("entry_id")
+        if not entry_id:
+            return {"status": "error", "message": "entry_id is required"}
+            
+        from database import QueueEntry
+        entry = session.get(QueueEntry, entry_id)
+        if entry:
+            session.delete(entry)
+            session.commit()
+            return {"status": "ok", "message": "Игрок удален из очереди"}
+        return {"status": "error", "message": "Запись не найдена"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/search_players")
+async def master_search_players(request: Request):
+    """Search for players by nickname and optional class_id."""
+    try:
+        data = await request.json()
+        query = data.get("query", "").strip().lower()
+        class_id = data.get("class_id")
+        
+        from database import Player
+        db_query = session.query(Player)
+        
+        if class_id is not None and class_id != -1:
+            db_query = db_query.filter(Player.class_id == class_id)
+            
+        # SQLite ILIKE is not case-insensitive for Cyrillic/Unicode characters.
+        # We fetch all (or filtered by class) and filter in Python.
+        players = db_query.all()
+        
+        result = []
+        for p in players:
+            nick = p.nickname if p.nickname else ""
+            if not query or query in nick.lower():
+                result.append({
+                    "nickname": nick,
+                    "class_id": p.class_id,
+                    "has_telegram": p.user_id is not None
+                })
+        
+        result.sort(key=lambda x: x["nickname"])
+        return {"status": "ok", "players": result[:50]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/add_to_queue")
+async def master_add_to_queue(request: Request):
+    """Manually add a player to a queue."""
+    try:
+        data = await request.json()
+        queue_id = data.get("queue_id")
+        char_name = data.get("character_name")
+        auto_requeue = data.get("auto_requeue", False)
+        
+        if not queue_id or not char_name:
+            return {"status": "error", "message": "queue_id and character_name are required"}
+            
+        from database import Player, User, Character, QueueEntry, QueueType
+        # Find player by nick
+        # 1. Try exact case-sensitive match (best for special/Cyrillic chars)
+        player = session.query(Player).filter(Player.nickname == char_name).first()
+        
+        if not player:
+            # 2. Try case-insensitive fallback (SQLite lower handles ASCII only, but we check Python side)
+            # Find all potential matches and check in Python
+            all_players = session.query(Player).all()
+            target_low = char_name.lower()
+            for p in all_players:
+                if p.nickname and p.nickname.lower() == target_low:
+                    player = p
+                    break
+        
+        user_id = None
+        if player:
+            user_id = player.user_id
+        else:
+            # Check characters table too (Exact match first)
+            char = session.query(Character).filter(Character.nickname == char_name).first()
+            if not char:
+                # Case-insensitive fallback for Character
+                all_chars = session.query(Character).all()
+                for c in all_chars:
+                    if c.nickname and c.nickname.lower() == char_name.lower():
+                        char = c
+                        break
+            
+            if char:
+                user_id = char.user_id
+            else:
+                return {"status": "error", "message": f"Игрок '{char_name}' не найден в базе гильдии."}
+        
+        # Check if already in queue (either specific nick or same user)
+        if user_id:
+            existing = session.query(QueueEntry).filter_by(queue_type_id=queue_id, user_id=user_id).first()
+            if existing:
+                return {"status": "error", "message": f"Основа или твин этого игрока ({existing.character_name}) уже в очереди."}
+        else:
+            # No user_id (not in TG), just check exact nickname
+            existing = session.query(QueueEntry).filter_by(queue_type_id=queue_id, character_name=char_name).first()
+            if existing:
+                return {"status": "error", "message": "Данный никнейм уже в этой очереди."}
+
+        # Get max position
+        max_pos = session.query(func.max(QueueEntry.position)).filter_by(queue_type_id=queue_id).scalar() or 0
+        
+        new_entry = QueueEntry(
+            user_id=user_id,
+            queue_type_id=queue_id,
+            character_name=char_name,
+            position=max_pos + 1,
+            auto_requeue=auto_requeue
+        )
+        session.add(new_entry)
+        session.commit()
+        return {"status": "ok", "message": f"Игрок {char_name} добавлен"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @router.post("/afk/add")

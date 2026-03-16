@@ -8,6 +8,7 @@ import MoneyTable from './components/tabs/MoneyTable';
 import HistoryTable from './components/tabs/HistoryTable';
 import PlayerModal from './components/modals/PlayerModal';
 import ObserverModal from './components/modals/ObserverModal';
+import MasterPanel from './components/tabs/MasterPanel';
 
 export default function Home() {
     const [initData, setInitData] = useState<InitData | null>(null);
@@ -56,6 +57,12 @@ export default function Home() {
                         onObserverClick={(roleId, name) => setObserverTarget({ roleId, name })}
                         classes={initData?.classes}
                         currentUser={initData?.user}
+                    />
+                )}
+
+                {activeTab === 'master' && initData?.user?.is_master && (
+                    <MasterPanel 
+                        currentUser={initData?.user} 
                     />
                 )}
             </div>
