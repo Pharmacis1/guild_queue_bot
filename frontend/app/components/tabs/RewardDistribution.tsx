@@ -675,12 +675,37 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                     flex: '0 0 auto',
                                     whiteSpace: 'nowrap'
                                 }}>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={autoRequeue}
-                                        onChange={(e) => setAutoRequeue(e.target.checked)}
-                                        style={{ cursor: 'pointer', accentColor: '#8B0000' }}
-                                    />
+                                    <div 
+                                        onClick={() => setAutoRequeue(!autoRequeue)}
+                                        style={{
+                                            width: '16px',
+                                            height: '16px',
+                                            backgroundColor: autoRequeue ? '#8B0000' : '#111',
+                                            border: autoRequeue ? '1px solid #ff4d6d' : '1px solid #444',
+                                            borderRadius: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            position: 'relative'
+                                        }}
+                                    >
+                                        {autoRequeue && <span style={{ color: '#fff', fontSize: '10px' }}>✓</span>}
+                                        <input 
+                                            type="checkbox" 
+                                            checked={autoRequeue}
+                                            onChange={(e) => setAutoRequeue(e.target.checked)}
+                                            style={{ 
+                                                position: 'absolute',
+                                                opacity: 0,
+                                                width: '100%',
+                                                height: '100%',
+                                                cursor: 'pointer',
+                                                margin: 0
+                                            }}
+                                        />
+                                    </div>
                                     <span style={{ fontSize: '0.85rem', color: '#aaa' }}>Авто</span>
                                 </label>
 
