@@ -85,7 +85,6 @@ def warn_user(session: Session, entry_id: int, master_username: str) -> Tuple[bo
         record_type="warning",
     )
     session.add(history)
-    session.delete(entry)
     session.commit()
 
     if user:
