@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { UserData } from '@/lib/api';
+import LimitsManager from './management/LimitsManager';
+import ConditionsManager from './management/ConditionsManager';
+import LockManager from './management/LockManager';
+import HistoryManager from './management/HistoryManager';
 
 interface RewardDistributionProps {
     currentUser?: UserData | null;
@@ -10,7 +14,11 @@ interface QueueInfo {
     id: number;
     name: string;
     count: number;
+    is_locked: boolean;
+    description: string;
 }
+
+type MgmtView = 'queue' | 'limits' | 'conditions' | 'lock' | 'history';
 
 export default function RewardDistribution({ currentUser, onBack }: RewardDistributionProps) {
     const [queues, setQueues] = useState<QueueInfo[]>([]);
@@ -25,6 +33,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
     const [searchClassId, setSearchClassId] = useState<number>(-1);
     const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
     const [isSearching, setIsSearching] = useState<boolean>(false);
+    const [view, setView] = useState<MgmtView>('queue');
     const [autoRequeue, setAutoRequeue] = useState<boolean>(false);
     const [copiedId, setCopiedId] = useState<number | null>(null);
 
@@ -305,7 +314,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                     </button>
                 </div>
 
-                <div className="no-scrollbar" style={{ padding: '20px 0', flex: 1 }}>
+                <div className="no-scrollbar" style={{ padding: '20px 0' }}>
                     <h3 style={{ 
                         color: '#fff', 
                         fontSize: '1rem', 
@@ -331,7 +340,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                 return (
                                     <div 
                                         key={q.id}
-                                        onClick={() => fetchEntries(q)}
+                                        onClick={() => { fetchEntries(q); setView('queue'); }}
                                         style={{
                                             display: 'flex',
                                             alignItems: 'center',
@@ -432,11 +441,79 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                         </button>
                     </div>
                 )}
+
+                <div className="no-scrollbar" style={{ padding: '20px 0', borderTop: '1px solid #222' }}>
+                    <h3 style={{ 
+                        color: '#fff', 
+                        fontSize: '1rem', 
+                        fontFamily: "'Cinzel', serif", 
+                        letterSpacing: '1px', 
+                        marginLeft: '20px', 
+                        marginBottom: '20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                    }}>
+                        <div style={{ width: '3px', height: '20px', backgroundColor: '#8B0000' }}></div>
+                        УПРАВЛЕНИЕ
+                    </h3>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', padding: '0 10px' }}>
+                        {[
+                            { id: 'limits', name: 'Лимиты', icon: '⚙️' },
+                            { id: 'conditions', name: 'Условия', icon: '📝' },
+                            { id: 'lock', name: 'Блокировка', icon: '🔒' },
+                            { id: 'history', name: 'История', icon: '📜' }
+                        ].map(item => {
+                            const isSelected = view === item.id;
+                            return (
+                                <div 
+                                    key={item.id}
+                                    onClick={() => { setView(item.id as MgmtView); setSelectedQueue(null); }}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        padding: '12px 15px',
+                                        cursor: 'pointer',
+                                        backgroundColor: isSelected ? 'rgba(139, 0, 0, 0.1)' : 'transparent',
+                                        border: isSelected ? '1px solid #8B0000' : '1px solid transparent',
+                                        borderRadius: '6px',
+                                        transition: 'all 0.2s',
+                                        color: isSelected ? '#ff4d6d' : '#888'
+                                    }}
+                                    onMouseOver={(e) => {
+                                        if (!isSelected) {
+                                            e.currentTarget.style.backgroundColor = '#151515';
+                                            e.currentTarget.style.color = '#fff';
+                                        }
+                                    }}
+                                    onMouseOut={(e) => {
+                                        if (!isSelected) {
+                                            e.currentTarget.style.backgroundColor = 'transparent';
+                                            e.currentTarget.style.color = '#888';
+                                        }
+                                    }}
+                                >
+                                    <span style={{ fontSize: '1.2rem' }}>{item.icon}</span>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: isSelected ? '600' : '400' }}>{item.name}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
             </div>
 
             {/* Main Content Area */}
-            <div className="no-scrollbar" style={{ flex: 1, padding: '30px', display: 'flex', flexDirection: 'column', backgroundColor: '#0f0f11' }}>
-                {!selectedQueue ? (
+            <div className="no-scrollbar" style={{ flex: 1, padding: '30px', display: 'flex', flexDirection: 'column', backgroundColor: '#0f0f11', minHeight: '800px' }}>
+                {view !== 'queue' ? (
+                    <div style={{ maxWidth: '1000px', width: '100%', margin: '0 auto' }}>
+                        {view === 'limits' && <LimitsManager />}
+                        {view === 'conditions' && <ConditionsManager />}
+                        {view === 'lock' && <LockManager />}
+                        {view === 'history' && <HistoryManager />}
+                    </div>
+                ) : !selectedQueue ? (
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', flexDirection: 'column', gap: '15px' }}>
                         <div style={{ fontSize: '4rem', opacity: 0.2 }}>🎁</div>
                         <p style={{ fontFamily: "'Cinzel', serif", fontSize: '1.2rem', letterSpacing: '1px' }}>Выберите ресурс в списке слева</p>

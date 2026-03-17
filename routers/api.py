@@ -128,7 +128,7 @@ async def master_get_queues():
             # We import here to avoid circular or too early imports, or reuse if already available.
             from logic.queue_ops import get_admin_queue_count
             count = get_admin_queue_count(session, q.id)
-            result.append({"id": q.id, "name": q.name, "count": count})
+            result.append({"id": q.id, "name": q.name, "count": count, "is_locked": q.is_locked, "description": q.description})
             
         pending_count = session.query(RewardHistory).filter_by(is_notified=False).count()
         return {"status": "ok", "queues": result, "pending_notifications": pending_count}
@@ -398,7 +398,9 @@ async def master_search_players(request: Request):
                 result.append({
                     "nickname": nick,
                     "class_id": p.class_id,
-                    "has_telegram": p.user_id is not None
+                    "has_telegram": p.user_id is not None,
+                    "user_id": p.user_id,
+                    "role_id": p.role_id
                 })
         
         result.sort(key=lambda x: x["nickname"])
@@ -476,6 +478,222 @@ async def master_add_to_queue(request: Request):
         session.add(new_entry)
         session.commit()
         return {"status": "ok", "message": f"Игрок {char_name} добавлен"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/settings")
+async def master_get_settings():
+    """Get global master settings."""
+    try:
+        from database import get_setting
+        default_limit = get_setting("default_limit", "1")
+        return {"status": "ok", "settings": {"default_limit": default_limit}}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/settings")
+async def master_update_settings(request: Request):
+    """Update global master settings."""
+    try:
+        data = await request.json()
+        default_limit = data.get("default_limit")
+        if default_limit is not None:
+            from database import set_setting
+            set_setting("default_limit", str(default_limit))
+            return {"status": "ok", "message": "Настройки обновлены"}
+        return {"status": "error", "message": "No settings to update"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/user_limit")
+async def master_update_user_limit(request: Request):
+    """Set personal limit for a user (via user_id or role_id)."""
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        role_id = data.get("role_id")
+        limit = data.get("limit")  # Can be None to clear
+
+        if user_id is None and role_id is None:
+            return {"status": "error", "message": "user_id or role_id is required"}
+
+        from database import Player, User, Character
+
+        user = None
+        if user_id is not None:
+            user = session.get(User, user_id)
+        
+        if not user and role_id is not None:
+            # Check if this player is already linked to a user
+            player = session.get(Player, role_id)
+            if player and player.user_id:
+                user = session.get(User, player.user_id)
+            elif player:
+                # Create a shadow user or just link if they register later?
+                # For now, let's create a User record if it doesn't exist to store the limit
+                user = User(username=player.nickname, is_master=False)
+                session.add(user)
+                session.flush() # Get id
+                player.user_id = user.id
+                
+        if not user:
+            return {"status": "error", "message": "Пользователь не найден"}
+
+        user.personal_limit = limit
+        session.commit()
+        return {"status": "ok", "message": "Лимит обновлен"}
+    except Exception as e:
+        session.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/user_limits")
+async def master_get_user_limits():
+    """Get list of users who have a personal limit set."""
+    try:
+        from database import User, Player, Character
+        users = session.query(User).filter(User.personal_limit.isnot(None)).all()
+        result = []
+        for u in users:
+            # Try to find a nickname from players table preferentially
+            player = session.query(Player).filter_by(user_id=u.id).first()
+            char_name = player.nickname if player else u.username
+            
+            # Fallback to characters table
+            if not player:
+                main_char = session.query(Character).filter_by(user_id=u.id, is_main=True).first()
+                if main_char:
+                    char_name = main_char.nickname
+                elif u.characters:
+                    char_name = u.characters[0].nickname
+                
+            result.append({
+                "id": u.id,
+                "username": u.username,
+                "display_name": char_name,
+                "personal_limit": u.personal_limit
+            })
+        return {"status": "ok", "users": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/queue_description")
+async def master_update_queue_description(request: Request):
+    """Update queue description (conditions)."""
+    try:
+        data = await request.json()
+        queue_id = data.get("queue_id")
+        description = data.get("description")
+
+        if not queue_id:
+            return {"status": "error", "message": "queue_id is required"}
+
+        queue = session.get(QueueType, queue_id)
+        if not queue:
+            return {"status": "error", "message": "Очередь не найдена"}
+
+        queue.description = description
+        session.commit()
+        return {"status": "ok", "message": "Описание обновлено"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/queue_lock")
+async def master_toggle_queue_lock(request: Request):
+    """Toggle queue lock status."""
+    try:
+        data = await request.json()
+        queue_id = data.get("queue_id")
+        is_locked = data.get("is_locked")
+
+        if not queue_id:
+            return {"status": "error", "message": "queue_id is required"}
+
+        queue = session.get(QueueType, queue_id)
+        if not queue:
+            return {"status": "error", "message": "Очередь не найдена"}
+
+        queue.is_locked = bool(is_locked)
+        session.commit()
+        return {"status": "ok", "message": "Статус блокировки изменен"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/reward_history")
+async def master_get_reward_history(
+    queue_name: str = None, 
+    character_name: str = None, 
+    issued_by: str = None, 
+    limit: int = 100, 
+    offset: int = 0
+):
+    """Get reward history with filters."""
+    try:
+        db_query = session.query(RewardHistory)
+        if queue_name:
+            db_query = db_query.filter(RewardHistory.queue_name.ilike(f"%{queue_name}%"))
+        if character_name:
+            db_query = db_query.filter(RewardHistory.character_name.ilike(f"%{character_name}%"))
+        if issued_by:
+            db_query = db_query.filter(RewardHistory.issued_by.ilike(f"%{issued_by}%"))
+            
+        total = db_query.count()
+        records = db_query.order_by(RewardHistory.timestamp.desc()).limit(limit).offset(offset).all()
+        
+        result = []
+        for r in records:
+            result.append({
+                "id": r.id,
+                "user_id": r.user_id,
+                "character_name": r.character_name,
+                "queue_name": r.queue_name,
+                "issued_by": r.issued_by,
+                "is_notified": r.is_notified,
+                "record_type": r.record_type,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None
+            })
+            
+        return {"status": "ok", "history": result, "total": total}
+    except Exception as e:
+        logging.error(f"Error in master_get_reward_history: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/history_suggestions")
+async def master_history_suggestions():
+    """Get unique values from History for autocomplete."""
+    try:
+        queues = [r[0] for r in session.query(RewardHistory.queue_name).distinct().all() if r[0]]
+        characters = [r[0] for r in session.query(RewardHistory.character_name).distinct().all() if r[0]]
+        masters = [r[0] for r in session.query(RewardHistory.issued_by).distinct().all() if r[0]]
+        
+        return {
+            "status": "ok",
+            "queues": sorted(queues),
+            "characters": sorted(characters),
+            "masters": sorted(masters)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.delete("/master/reward_history/{record_id}")
+async def master_delete_reward_history(record_id: int):
+    """Delete a specific reward history record."""
+    try:
+        record = session.get(RewardHistory, record_id)
+        if not record:
+            return {"status": "error", "message": "Запись не найдена"}
+            
+        session.delete(record)
+        session.commit()
+        return {"status": "ok", "message": "Запись удалена"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
