@@ -61,6 +61,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
 
     const fetchEntries = async (queue: QueueInfo) => {
         setLoading(true);
+        setEntries([]); // Clear immediate feedback
         setSelectedQueue(queue);
         try {
             const res = await fetch('/api/master/queue_entries', {

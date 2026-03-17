@@ -63,7 +63,7 @@ class QueueEntry(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     queue_type_id = Column(Integer, ForeignKey("queue_types.id"))
-    character_name = Column(String)
+    character_name = Column(String, index=True)
     auto_requeue = Column(Boolean, default=False)
     position = Column(Integer, default=0)
     user = relationship("User")
@@ -95,7 +95,7 @@ class ScheduledAnnouncement(Base):
 class Player(Base):
     __tablename__ = "players"
     role_id = Column(Integer, primary_key=True)
-    nickname = Column(String, default=None)
+    nickname = Column(String, default=None, index=True)
     first_seen = Column(DateTime, default=get_msk_now)
     in_clan = Column(Integer, default=1)
     class_id = Column(Integer, default=-1)
@@ -108,10 +108,10 @@ class Player(Base):
 class Event(Base):
     __tablename__ = "events"
     id = Column(Integer, primary_key=True)
-    role_id = Column(Integer)
+    role_id = Column(Integer, index=True)
     timestamp = Column(Integer)
-    event_date = Column(String)
-    event_type = Column(Integer)
+    event_date = Column(String, index=True)
+    event_type = Column(Integer, index=True)
     value = Column(Integer)
     raw_desc = Column(String)
 
@@ -549,6 +549,17 @@ def init_db():
                 print("Migration successful: Added constant_parties.color")
             except Exception as e:
                 print(f"Migration failed (constant_parties.color): {e}")
+
+        # 14. Performance Indexes
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_player_nickname ON players (nickname)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_queue_entries_character_name ON queue_entries (character_name)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_role_id ON events (role_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_event_type ON events (event_type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_event_date ON events (event_date)"))
+            print("Migration successful: Created performance indexes")
+        except Exception as e:
+            print(f"Migration failed (performance indexes): {e}")
 
     for q_name in DEFAULT_QUEUES:
         if not session.query(QueueType).filter_by(name=q_name).first():
