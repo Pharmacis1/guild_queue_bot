@@ -55,7 +55,7 @@ export default function LockManager() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h2 style={{ color: '#fff', fontFamily: "'Cinzel', serif", margin: 0 }}>🔒 Блокировка очередей</h2>
+            <h2 style={{ color: '#ccc', fontFamily: "'Cinzel', serif", margin: 0 }}>🔒 Блокировка очередей</h2>
             <p style={{ color: '#888', fontSize: '0.9rem' }}>Заблокированные очереди закрыты для записи новых игроков.</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
@@ -73,7 +73,7 @@ export default function LockManager() {
                         transition: 'all 0.2s'
                     }}>
                         <div>
-                            <div style={{ color: '#fff', fontWeight: 'bold' }}>{q.name}</div>
+                            <div style={{ color: '#eee', fontWeight: 'bold' }}>{q.name}</div>
                             <div style={{ fontSize: '0.8rem', color: q.is_locked ? '#ff4d4d' : '#48bb78', marginTop: '4px' }}>
                                 {q.is_locked ? 'Заблокировано' : 'Доступно'}
                             </div>

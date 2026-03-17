@@ -163,6 +163,89 @@ def test_reward_history_mgmt(test_session):
     assert res.json()["history"][0]["id"] == 11
 
 
+def test_master_search_players_v2(test_session):
+    client = get_client()
+    # Search for an existing player (DevPlayer is created in conftest.py or setup)
+    # If not sure about exact name, let's create one for safety
+    from database import Player
+    if not test_session.query(Player).filter_by(nickname="SearchHero").first():
+        test_session.add(Player(role_id=1111, nickname="SearchHero", class_id=1))
+        test_session.commit()
+
+    res = client.post("/api/master/search_players", json={"query": "SearchHero"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    player = next(p for p in data["players"] if p["nickname"] == "SearchHero")
+    assert "role_id" in player
+    assert "has_telegram" in player
+    assert "user_id" in player
+
+def test_user_limit_shadow_creation(test_session):
+    client = get_client()
+    from database import Player, User
+    
+    # Create a player that doesn't have a user
+    new_player = Player(role_id=999, nickname="ShadowHero", class_id=3)
+    test_session.add(new_player)
+    test_session.commit()
+    
+    # Set limit via role_id
+    res = client.post("/api/master/user_limit", json={"role_id": 999, "limit": 7})
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    
+    # Verify User was created and linked
+    test_session.expire_all()
+    p = test_session.get(Player, 999)
+    assert p.user_id is not None
+    user = test_session.get(User, p.user_id)
+    assert user.personal_limit == 7
+    assert user.username == "ShadowHero"
+
+def test_history_suggestions(test_session):
+    client = get_client()
+    from database import RewardHistory
+    import datetime
+    
+    # Add some history
+    h1 = RewardHistory(user_id=1, character_name="HeroA", queue_name="QueueA", issued_by="MasterA", record_type="reward", timestamp=datetime.datetime.now())
+    h2 = RewardHistory(user_id=2, character_name="HeroB", queue_name="QueueB", issued_by="MasterB", record_type="warning", timestamp=datetime.datetime.now())
+    test_session.add_all([h1, h2])
+    test_session.commit()
+    
+    res = client.get("/api/master/history_suggestions")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "QueueA" in data["queues"]
+    assert "HeroA" in data["characters"]
+    assert "MasterA" in data["masters"]
+
+def test_listing_overrides_refined(test_session):
+    client = get_client()
+    from database import User, Player
+    
+    # User 2 has limit 10 (from first test if run in sequence, but let's ensure)
+    u = test_session.get(User, 2)
+    u.personal_limit = 20
+    # Ensure player has nickname
+    p = test_session.query(Player).filter_by(user_id=2).first()
+    if not p:
+        p = Player(role_id=222, nickname="NickName2", user_id=2, class_id=2)
+        test_session.add(p)
+    else:
+        p.nickname = "NickName2"
+    test_session.commit()
+    
+    res = client.get("/api/master/user_limits")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    user_data = next(u for u in data["users"] if u["id"] == 2)
+    assert user_data["display_name"] == "NickName2"
+    assert user_data["personal_limit"] == 20
+
 def test_get_user_limits(test_session):
     client = get_client()
     

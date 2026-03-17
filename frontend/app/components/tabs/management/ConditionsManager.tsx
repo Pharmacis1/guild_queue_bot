@@ -68,7 +68,7 @@ export default function ConditionsManager() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h2 style={{ color: '#fff', fontFamily: "'Cinzel', serif", margin: 0 }}>📝 Условия получения наград</h2>
+            <h2 style={{ color: '#ccc', fontFamily: "'Cinzel', serif", margin: 0 }}>📝 Условия получения наград</h2>
             <p style={{ color: '#888', fontSize: '0.9rem' }}>Эти условия отображаются игрокам при записи в очередь в боте.</p>
 
             <div style={{ 

@@ -316,7 +316,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
 
                 <div className="no-scrollbar" style={{ padding: '20px 0' }}>
                     <h3 style={{ 
-                        color: '#fff', 
+                        color: '#ccc', 
                         fontSize: '1rem', 
                         fontFamily: "'Cinzel', serif", 
                         letterSpacing: '1px', 
@@ -444,7 +444,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
 
                 <div className="no-scrollbar" style={{ padding: '20px 0', borderTop: '1px solid #222' }}>
                     <h3 style={{ 
-                        color: '#fff', 
+                        color: '#ccc', 
                         fontSize: '1rem', 
                         fontFamily: "'Cinzel', serif", 
                         letterSpacing: '1px', 
@@ -524,7 +524,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                                 <div>
                                     <h2 style={{ 
-                                        color: '#fff', 
+                                        color: '#eee', 
                                         margin: '0 0 10px 0',
                                         fontSize: '1.5rem',
                                         display: 'flex',
@@ -577,7 +577,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                             width: '100%',
                                             background: '#0a0a0a',
                                             border: '1px solid #333',
-                                            color: '#fff',
+                                            color: '#ddd',
                                             padding: '10px 14px',
                                             borderRadius: '6px',
                                             fontSize: '0.9rem',
@@ -617,7 +617,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                                 >
                                                     <img src={`/icons/${p.class_id}.png`} alt="" style={{ width: '22px', height: '22px', borderRadius: '3px' }} onError={(e) => e.currentTarget.src='/icons/0.png'} />
-                                                    <span style={{ color: '#fff', fontSize: '0.9rem', fontWeight: 500 }}>{p.nickname}</span>
+                                                    <span style={{ color: '#ccc', fontSize: '0.9rem', fontWeight: 500 }}>{p.nickname}</span>
                                                     {!p.has_telegram && <span style={{ fontSize: '0.65rem', color: '#666', marginLeft: 'auto' }}>offline</span>}
                                                 </div>
                                             ))}
@@ -690,7 +690,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                     style={{
                                         background: 'linear-gradient(135deg, #8B0000 0%, #4B0000 100%)',
                                         border: '1px solid #ff4d6d33',
-                                        color: '#fff',
+                                        color: '#eee',
                                         padding: '10px 24px',
                                         borderRadius: '6px',
                                         cursor: 'pointer',
@@ -839,7 +839,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                                 </div>
 
                                                 {/* Valor */}
-                                                <div style={{ textAlign: 'center', color: '#fff', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                                <div style={{ textAlign: 'center', color: '#ddd', fontSize: '0.9rem', fontWeight: 'bold' }}>
                                                     {e.valor !== -1 ? e.valor : '0'}
                                                 </div>
 
@@ -861,7 +861,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                                             background: 'linear-gradient(135deg, #8B0000 0%, #4B0000 100%)',
                                                             backdropFilter: 'blur(4px)',
                                                             border: '1px solid rgba(255, 255, 255, 0.1)',
-                                                            color: '#fff',
+                                                            color: '#eee',
                                                             padding: '5px 12px',
                                                             borderRadius: '4px',
                                                             cursor: actionLoading !== null ? 'wait' : 'pointer',

@@ -135,7 +135,7 @@ export default function HistoryManager() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h2 style={{ color: '#fff', fontFamily: "'Cinzel', serif", margin: 0 }}>📜 История выдачи</h2>
+            <h2 style={{ color: '#ccc', fontFamily: "'Cinzel', serif", margin: 0 }}>📜 История выдачи</h2>
             
             <div style={{ 
                 display: 'grid', 
@@ -154,7 +154,7 @@ export default function HistoryManager() {
                         onChange={e => setFilters({...filters, queue_name: e.target.value})}
                         onFocus={() => setActiveSuggestionField('queue_name')}
                         onBlur={() => setTimeout(() => setActiveSuggestionField(null), 200)}
-                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
+                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#ddd', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
                     />
                     {renderSuggestions('queue_name', suggestions.queues)}
                 </div>
@@ -166,7 +166,7 @@ export default function HistoryManager() {
                         onChange={e => setFilters({...filters, character_name: e.target.value})}
                         onFocus={() => setActiveSuggestionField('character_name')}
                         onBlur={() => setTimeout(() => setActiveSuggestionField(null), 200)}
-                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
+                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#ddd', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
                     />
                     {renderSuggestions('character_name', suggestions.characters)}
                 </div>
@@ -178,7 +178,7 @@ export default function HistoryManager() {
                         onChange={e => setFilters({...filters, issued_by: e.target.value})}
                         onFocus={() => setActiveSuggestionField('issued_by')}
                         onBlur={() => setTimeout(() => setActiveSuggestionField(null), 200)}
-                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
+                        style={{ background: '#0a0a0a', border: '1px solid #333', color: '#ddd', padding: '10px 14px', borderRadius: '6px', width: '100%', outline: 'none', boxSizing: 'border-box' }}
                     />
                     {renderSuggestions('issued_by', suggestions.masters)}
                 </div>
@@ -237,7 +237,7 @@ export default function HistoryManager() {
                 <button 
                     disabled={page === 0} 
                     onClick={() => setPage(p => p - 1)}
-                    style={{ background: '#1a1a1a', color: '#fff', border: '1px solid #333', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', opacity: page === 0 ? 0.5 : 1 }}
+                    style={{ background: '#1a1a1a', color: '#ccc', border: '1px solid #333', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', opacity: page === 0 ? 0.5 : 1 }}
                 >
                     Назад
                 </button>
@@ -247,7 +247,7 @@ export default function HistoryManager() {
                 <button 
                     disabled={(page + 1) * limit >= total} 
                     onClick={() => setPage(p => p + 1)}
-                    style={{ background: '#1a1a1a', color: '#fff', border: '1px solid #333', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', opacity: (page + 1) * limit >= total ? 0.5 : 1 }}
+                    style={{ background: '#1a1a1a', color: '#ccc', border: '1px solid #333', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', opacity: (page + 1) * limit >= total ? 0.5 : 1 }}
                 >
                     Вперед
                 </button>

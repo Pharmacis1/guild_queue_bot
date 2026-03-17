@@ -133,10 +133,10 @@ export default function LimitsManager() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
             <div>
-                <h2 style={{ color: '#fff', fontFamily: "'Cinzel', serif", margin: '0 0 15px 0' }}>⚙️ Общие лимиты</h2>
+                <h2 style={{ color: '#ccc', fontFamily: "'Cinzel', serif", margin: '0 0 15px 0' }}>⚙️ Общие лимиты</h2>
                 <div style={{ background: '#151517', border: '1px solid #222', padding: '25px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '20px' }}>
                     <div style={{ flex: 1 }}>
-                        <div style={{ color: '#E0E0E0', fontWeight: 'bold', marginBottom: '5px' }}>Лимит записей по умолчанию</div>
+                        <div style={{ color: '#ccc', fontWeight: 'bold', marginBottom: '5px' }}>Лимит записей по умолчанию</div>
                         <div style={{ color: '#888', fontSize: '0.85rem' }}>Максимальное кол-во очередей, в которые может записаться игрок.</div>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
@@ -144,7 +144,7 @@ export default function LimitsManager() {
                             type="number" 
                             value={defaultLimit}
                             onChange={e => setDefaultLimit(e.target.value)}
-                            style={{ width: '80px', background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px', borderRadius: '6px', textAlign: 'center' }}
+                            style={{ width: '80px', background: '#0a0a0a', border: '1px solid #333', color: '#ddd', padding: '10px', borderRadius: '6px', textAlign: 'center' }}
                         />
                         <button 
                             onClick={saveDefault}
@@ -152,7 +152,7 @@ export default function LimitsManager() {
                             style={{ 
                                 background: '#8B0000', 
                                 border: 'none', 
-                                color: '#fff', 
+                                color: '#ddd', 
                                 padding: '10px 25px', 
                                 borderRadius: '6px', 
                                 cursor: savingDefault ? 'wait' : 'pointer',
@@ -166,7 +166,7 @@ export default function LimitsManager() {
             </div>
 
             <div>
-                <h2 style={{ color: '#fff', fontFamily: "'Cinzel', serif", margin: '0 0 15px 0' }}>👤 Индивидуальные лимиты</h2>
+                <h2 style={{ color: '#ddd', fontFamily: "'Cinzel', serif", margin: '0 0 15px 0' }}>👤 Индивидуальные лимиты</h2>
                 <div style={{ background: '#151517', border: '1px solid #222', padding: '25px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <p style={{ color: '#888', margin: 0, fontSize: '0.9rem' }}>
                         Вы можете установить персональный лимит для конкретного игрока. Это значение будет приоритетнее общего лимита.
@@ -185,7 +185,7 @@ export default function LimitsManager() {
                                         width: '100%',
                                         background: '#0a0a0a',
                                         border: '1px solid #333',
-                                        color: '#fff',
+                                        color: '#ddd',
                                         padding: '12px 15px',
                                         borderRadius: '8px',
                                         fontSize: '0.9rem',
@@ -223,7 +223,7 @@ export default function LimitsManager() {
                                                 onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
                                             >
                                                 <img src={`/icons/${p.class_id}.png`} alt="" style={{ width: '22px', height: '22px', borderRadius: '3px' }} onError={(e) => e.currentTarget.src='/icons/0.png'} />
-                                                <span style={{ color: '#fff', fontSize: '0.9rem' }}>{p.nickname}</span>
+                                                <span style={{ color: '#ddd', fontSize: '0.9rem' }}>{p.nickname}</span>
                                                 {!p.has_telegram && <span style={{ fontSize: '0.7rem', color: '#666', marginLeft: 'auto' }}>offline</span>}
                                             </div>
                                         ))}
@@ -247,7 +247,7 @@ export default function LimitsManager() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                     <img src={`/icons/${selectedPlayer.class_id}.png`} alt="" style={{ width: '28px', height: '28px' }} onError={(e) => e.currentTarget.src='/icons/0.png'} />
                                     <div>
-                                        <div style={{ color: '#fff', fontWeight: 'bold' }}>{selectedPlayer.nickname}</div>
+                                        <div style={{ color: '#ddd', fontWeight: 'bold' }}>{selectedPlayer.nickname}</div>
                                         <div style={{ color: '#666', fontSize: '0.75rem' }}>Установить персональный лимит</div>
                                     </div>
                                 </div>
@@ -256,7 +256,7 @@ export default function LimitsManager() {
                                         type="number" 
                                         value={newLimit}
                                         onChange={e => setNewLimit(e.target.value)}
-                                        style={{ width: '70px', background: '#111', border: '1px solid #333', color: '#fff', padding: '8px', borderRadius: '4px', textAlign: 'center' }}
+                                        style={{ width: '70px', background: '#111', border: '1px solid #333', color: '#ddd', padding: '8px', borderRadius: '4px', textAlign: 'center' }}
                                     />
                                     <button 
                                         onClick={() => setUserLimit(selectedPlayer.user_id, selectedPlayer.role_id, parseInt(newLimit))}
