@@ -45,6 +45,11 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
             if (data.status === 'ok') {
                 setQueues(data.queues);
                 setPendingNotifications(data.pending_notifications);
+                
+                // Select first queue by default if none selected
+                if (data.queues.length > 0 && !selectedQueue) {
+                    fetchEntries(data.queues[0]);
+                }
             } else {
                 alert(`Ошибка: ${data.message}`);
             }
@@ -140,6 +145,27 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
             console.error(e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const toggleAutoRequeue = async (entryId: number) => {
+        setActionLoading(entryId);
+        try {
+            const res = await fetch('/api/master/toggle_auto_requeue', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entry_id: entryId })
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                setEntries(entries.map(e => e.id === entryId ? { ...e, auto_requeue: data.auto_requeue } : e));
+            } else {
+                alert(data.message);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setActionLoading(null);
         }
     };
 
@@ -618,7 +644,7 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                                 >
                                                     <img src={`/icons/${p.class_id}.png`} alt="" style={{ width: '22px', height: '22px', borderRadius: '3px' }} onError={(e) => e.currentTarget.src='/icons/0.png'} />
-                                                    <span style={{ color: '#ccc', fontSize: '0.9rem', fontWeight: 500 }}>{p.nickname}</span>
+                                                    <span style={{ color: '#88B0D3', fontSize: '0.9rem', fontWeight: 500 }}>{p.nickname}</span>
                                                     {!p.has_telegram && <span style={{ fontSize: '0.65rem', color: '#666', marginLeft: 'auto' }}>offline</span>}
                                                 </div>
                                             ))}
@@ -870,11 +896,15 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                                 </div>
 
                                                 {/* Auto-requeue */}
-                                                <div style={{ textAlign: 'center' }}>
+                                                <div 
+                                                    style={{ textAlign: 'center', cursor: 'pointer', opacity: actionLoading === e.id ? 0.5 : 1 }}
+                                                    onClick={() => toggleAutoRequeue(e.id)}
+                                                    title="Кликните, чтобы изменить статус авто-записи"
+                                                >
                                                     {e.auto_requeue ? (
-                                                        <span style={{ color: '#48bb78', fontSize: '1.1rem' }} title="Автоматическая запись">✓</span>
+                                                        <span style={{ color: '#48bb78', fontSize: '1.1rem', transition: 'all 0.2s' }} onMouseOver={(ev) => ev.currentTarget.style.transform = 'scale(1.2)'} onMouseOut={(ev) => ev.currentTarget.style.transform = 'scale(1)'}>✓</span>
                                                     ) : (
-                                                        <span style={{ color: '#333', fontSize: '1rem' }}>—</span>
+                                                        <span style={{ color: '#333', fontSize: '1rem', transition: 'all 0.2s' }} onMouseOver={(ev) => { ev.currentTarget.style.color = '#555'; ev.currentTarget.style.transform = 'scale(1.2)'; }} onMouseOut={(ev) => { ev.currentTarget.style.color = '#333'; ev.currentTarget.style.transform = 'scale(1)'; }}>—</span>
                                                     )}
                                                 </div>
 

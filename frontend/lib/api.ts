@@ -250,4 +250,97 @@ export const logout = async (): Promise<any> => {
     return response.data;
 };
 
+// --- MASTER PANEL (New) ---
+
+export interface MasterUser {
+    id: number;
+    telegram_id: number;
+    username: string | null;
+    main_nickname: string | null;
+    main_role_id: number | null;
+    characters: {
+        nickname: string;
+        is_main: boolean;
+        is_in_clan: boolean;
+    }[];
+    is_master: boolean;
+    is_banned: boolean;
+    is_in_clan: boolean;
+    is_phantom: boolean;
+    afk_start: string | null;
+    afk_end: string | null;
+}
+
+export interface MasterUsersResponse {
+    users: MasterUser[];
+    total_users: number;
+    active_clan_users: number;
+    total_chars: number;
+    chars_in_clan: number;
+    total_clan_players: number;
+}
+
+export const fetchMasterUsers = async (): Promise<MasterUsersResponse> => {
+    const { data } = await api.get('/master/users');
+    if (data.status === 'error') throw new Error(data.message);
+    return {
+        users: data.users,
+        total_users: data.total_users,
+        active_clan_users: data.active_clan_users,
+        total_chars: data.total_chars,
+        chars_in_clan: data.chars_in_clan,
+        total_clan_players: data.total_clan_players
+    };
+};
+
+export const toggleUserBan = async (userId: number): Promise<boolean> => {
+    const { data } = await api.post('/master/user/toggle_ban', { user_id: userId });
+    if (data.status === 'error') throw new Error(data.message);
+    return data.is_banned;
+};
+
+export const toggleUserMaster = async (userId: number): Promise<boolean> => {
+    const { data } = await api.post('/master/user/toggle_master', { user_id: userId });
+    if (data.status === 'error') throw new Error(data.message);
+    return data.is_master;
+};
+
+export const deleteUser = async (userId: number): Promise<void> => {
+    const { data } = await api.post('/master/user/delete', { user_id: userId });
+    if (data.status === 'error') throw new Error(data.message);
+};
+
+export const fetchVerificationCode = async (): Promise<string> => {
+    const { data } = await api.get('/master/settings/verification_code');
+    if (data.status === 'error') throw new Error(data.message);
+    return data.code;
+};
+
+export const updateVerificationCode = async (code: string): Promise<void> => {
+    const { data } = await api.post('/master/settings/verification_code', { code });
+    if (data.status === 'error') throw new Error(data.message);
+};
+
+export const fetchMasterAfk = async (): Promise<any[]> => {
+    const { data } = await api.get('/master/afk');
+    if (data.status === 'error') throw new Error(data.message);
+    return data.afk_players;
+};
+
+export const saveMasterAfk = async (userId: number, start: string, end: string, reason: string): Promise<void> => {
+    const { data } = await api.post('/master/afk/save', { user_id: userId, start, end, reason });
+    if (data.status === 'error') throw new Error(data.message);
+};
+
+export const deleteMasterAfk = async (userId: number): Promise<void> => {
+    const { data } = await api.post('/master/afk/delete', { user_id: userId });
+    if (data.status === 'error') throw new Error(data.message);
+};
+
+export const fetchMasterAfkHistory = async (): Promise<any[]> => {
+    const { data } = await api.get('/master/afk/history');
+    if (data.status === 'error') throw new Error(data.message);
+    return data.history;
+};
+
 export default api;

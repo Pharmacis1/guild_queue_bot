@@ -176,15 +176,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                 afk_end: afkEnd,
                 afk_reason: afkReason
             });
-            // 2. Add to history
-            // Use user_id if linked, otherwise use role_id
-            await addAfkHistory({
-                user_id: data?.user_id || undefined,
-                role_id: !data?.user_id ? roleId : undefined,
-                start: afkStart,
-                end: afkEnd,
-                reason: afkReason
-            });
+            // 2. Add to history -> Handled by backend in update_player_logic
 
             alert("Отпуск добавлен!");
             // Refresh profile to show new history

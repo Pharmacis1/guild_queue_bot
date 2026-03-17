@@ -25,9 +25,16 @@ from logic import log_importer, party_manager, queue_manager
 from logic.player_manager import update_player_logic, get_player_profile
 from logic import reward_ops
 from sqlalchemy import func
-from database import session, QueueType, RewardHistory, User
+from database import session, QueueType, RewardHistory, User, Character, Settings, AFKHistory, get_setting, set_setting, get_msk_now, QueueEntry
 
 router = APIRouter(prefix="/api")
+
+
+async def get_current_user(request: Request):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    return session.query(User).filter_by(telegram_id=user_id).first()
 
 
 @router.get("/download/watcher")
@@ -186,6 +193,452 @@ async def master_get_queue_entries(request: Request):
         return {"status": "ok", "entries": result_entries}
     except Exception as e:
         logging.error(f"Error in master_get_queue_entries: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/users")
+async def get_master_users(request: Request):
+    """List all users for Player Management."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        from database import Player
+        users = session.query(User).all()
+
+        # Pre-fetch all players to map nicknames to role_ids
+        players = session.query(Player).all()
+        nick_to_role = {p.nickname.lower().strip(): p.role_id for p in players if p.nickname}
+
+        total_users = 0
+        active_clan_users = 0
+        total_chars = 0
+        chars_in_clan = 0
+        
+        # total_clan_players: all unique players in Player table with in_clan=1
+        total_clan_players = session.query(Player).filter_by(in_clan=1).count()
+
+        result = []
+        for u in users:
+            is_phantom = u.telegram_id is None or (u.telegram_id > 0 and u.telegram_id < 10000)
+            
+            main_char = next((c for c in u.characters if c.is_main), None)
+            alts = [c.nickname for c in u.characters if not c.is_main]
+            
+            is_in_clan = False
+            char_nicks = [c.nickname.lower().strip() for c in u.characters if c.nickname]
+            
+            user_players = [p for p in players if p.nickname and p.nickname.lower().strip() in char_nicks]
+            
+            card_chars_in_clan = 0
+            for p in user_players:
+                if p.in_clan == 1:
+                    card_chars_in_clan += 1
+
+            if any(p.in_clan == 1 for p in user_players):
+                is_in_clan = True
+            
+            # Update global stats
+            total_users += 1
+            if is_in_clan:
+                active_clan_users += 1
+
+            if not is_phantom:
+                total_chars += len(char_nicks)
+                chars_in_clan += card_chars_in_clan
+
+            # Detailed character info
+            all_chars_info = []
+            for c in u.characters:
+                char_in_clan = any(p.nickname and p.nickname.lower().strip() == c.nickname.lower().strip() and p.in_clan == 1 for p in players)
+                all_chars_info.append({
+                    "nickname": c.nickname,
+                    "is_main": c.is_main,
+                    "is_in_clan": char_in_clan
+                })
+
+            main_role_id = None
+            if main_char:
+                main_role_id = nick_to_role.get(main_char.nickname.lower().strip())
+
+            result.append({
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "main_nickname": main_char.nickname if main_char else None,
+                "main_role_id": main_role_id,
+                "characters": all_chars_info,
+                "is_master": u.is_master,
+                "is_banned": u.is_banned,
+                "is_in_clan": is_in_clan,
+                "is_phantom": is_phantom,
+                "afk_start": u.afk_start.strftime("%Y-%m-%d") if u.afk_start else None,
+                "afk_end": u.afk_end.strftime("%Y-%m-%d") if u.afk_end else None,
+            })
+        return {
+            "status": "ok", 
+            "users": result,
+            "total_users": total_users,
+            "active_clan_users": active_clan_users,
+            "total_chars": total_chars,
+            "chars_in_clan": chars_in_clan,
+            "total_clan_players": total_clan_players
+        }
+    except Exception as e:
+        logging.error(f"Error in get_master_users: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/user/toggle_ban")
+async def toggle_ban(request: Request):
+    """Toggle user ban status."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        data = await request.json()
+        target_id = data.get("user_id")
+        target = session.query(User).filter_by(id=target_id).first()
+        if not target:
+            return {"status": "error", "message": "User not found"}
+
+        if target.id == user.id:
+            return {"status": "error", "message": "Cannot ban yourself"}
+
+        target.is_banned = not target.is_banned
+        if target.is_banned:
+            # Clear queues
+            session.query(QueueEntry).filter_by(user_id=target.id).delete()
+
+        session.commit()
+        return {"status": "ok", "is_banned": target.is_banned}
+    except Exception as e:
+        logging.error(f"Error in toggle_ban: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/user/delete")
+async def delete_user(request: Request):
+    """Delete a user and all associated data."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        data = await request.json()
+        target_id = data.get("user_id")
+        target = session.query(User).filter_by(id=target_id).first()
+        if not target:
+            return {"status": "error", "message": "User not found"}
+
+        if target.id == user.id:
+            return {"status": "error", "message": "Cannot delete yourself"}
+
+        # Delete associated characters (cascaded if defined, but let's be safe)
+        session.query(Character).filter_by(user_id=target.id).delete()
+        # Delete queue entries
+        session.query(QueueEntry).filter_by(user_id=target.id).delete()
+        # Delete user
+        session.delete(target)
+        session.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        logging.error(f"Error in delete_user: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/user/toggle_master")
+async def toggle_master(request: Request):
+    """Toggle user master status."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        data = await request.json()
+        target_id = data.get("user_id")
+        target = session.query(User).filter_by(id=target_id).first()
+        if not target:
+            return {"status": "error", "message": "User not found"}
+
+        if target.id == user.id:
+            return {"status": "error", "message": "Cannot change your own master status"}
+
+        target.is_master = not target.is_master
+        session.commit()
+        return {"status": "ok", "is_master": target.is_master}
+    except Exception as e:
+        logging.error(f"Error in toggle_master: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/settings/verification_code")
+async def get_verification_code_endpoint(request: Request):
+    """Get current registration verification code."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        code = get_setting("verification_code", "")
+        return {"status": "ok", "code": code}
+    except Exception as e:
+        logging.error(f"Error in get_verification_code: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/settings/verification_code")
+async def set_verification_code_endpoint(request: Request):
+    """Update registration verification code."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        data = await request.json()
+        code = data.get("code")
+        set_setting("verification_code", code)
+        return {"status": "ok"}
+    except Exception as e:
+        logging.error(f"Error in set_verification_code: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/afk")
+async def get_master_afk(request: Request):
+    """List all currently AFK players."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        now = get_msk_now()
+        # Find all active AFK: from User table OR Players table
+        from database import Player
+        afk_users = session.query(User).filter(User.afk_start.isnot(None), User.afk_end.isnot(None)).all()
+        afk_players = session.query(Player).filter(Player.afk_start.isnot(None), Player.afk_end.isnot(None)).all()
+        
+        result = []
+        seen_user_ids = set()
+
+        # Process Users (Linked)
+        for u in afk_users:
+            s_date = u.afk_start
+            e_date = u.afk_end
+            if isinstance(s_date, str):
+                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
+                except: continue
+            if isinstance(e_date, str):
+                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
+                except: continue
+
+            if s_date <= now <= e_date.replace(hour=23, minute=59, second=59):
+                main_char = next((c for c in u.characters if c.is_main), None)
+                result.append({
+                    "id": u.id,
+                    "nickname": main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}"),
+                    "start": s_date.strftime("%Y-%m-%d"),
+                    "end": e_date.strftime("%Y-%m-%d"),
+                    "reason": u.afk_reason
+                })
+                seen_user_ids.add(u.id)
+
+        # Process Players (might be unlinked)
+        for p in afk_players:
+            # If already added via User record, skip
+            if p.user_id and p.user_id in seen_user_ids:
+                continue
+
+            s_date = p.afk_start
+            e_date = p.afk_end
+            if isinstance(s_date, str):
+                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
+                except: continue
+            if isinstance(e_date, str):
+                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
+                except: continue
+
+            if s_date <= now <= e_date.replace(hour=23, minute=59, second=59):
+                result.append({
+                    "id": None, # Signal it's player-only or use role_id? Master UI uses user.id but can handle it
+                    "role_id": p.role_id,
+                    "nickname": p.nickname,
+                    "start": s_date.strftime("%Y-%m-%d"),
+                    "end": e_date.strftime("%Y-%m-%d"),
+                    "reason": p.afk_reason
+                })
+        return {"status": "ok", "afk_players": result}
+    except Exception as e:
+        logging.error(f"Error in get_master_afk: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.get("/master/afk/history")
+async def get_master_afk_history(request: Request):
+    """List all historical AFK records."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+
+        from database import AFKHistory, User, Character
+        
+        # Fetch records joined with user (outerjoin to not lose orphaned records)
+        records = session.query(AFKHistory).outerjoin(User, AFKHistory.user_id == User.id).order_by(AFKHistory.timestamp.desc()).all()
+        
+        result = []
+        for r in records:
+            nickname = "Неизвестно"
+            s_date = r.start_date
+            e_date = r.end_date
+            if isinstance(s_date, str):
+                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
+                except: pass
+            if isinstance(e_date, str):
+                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
+                except: pass
+
+            if r.user:
+                main_char = next((c for c in r.user.characters if c.is_main), None)
+                nickname = main_char.nickname if main_char else (r.user.username or f"ID {r.user.telegram_id}")
+            elif hasattr(r, 'role_id') and r.role_id:
+                # Try to get nickname from Player table if User is missing
+                from database import Player
+                p_row = session.query(Player).filter_by(role_id=r.role_id).first()
+                if p_row: nickname = p_row.nickname
+
+            result.append({
+                "id": r.id,
+                "user_id": r.user_id,
+                "nickname": nickname,
+                "start": s_date.strftime("%Y-%m-%d") if hasattr(s_date, 'strftime') else "-",
+                "end": e_date.strftime("%Y-%m-%d") if hasattr(e_date, 'strftime') else "-",
+                "reason": r.reason or "",
+                "timestamp": r.timestamp.strftime("%d.%m %H:%M") if r.timestamp else "-",
+                "is_active_record": r.is_active_record
+            })
+            
+        return {"status": "ok", "history": result}
+    except Exception as e:
+        logging.error(f"Error in get_master_afk_history: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/afk/save")
+async def save_master_afk(request: Request):
+    """Add or update AFK status for a user."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+        
+        data = await request.json()
+        target_user_id = data.get("user_id")
+        role_id = data.get("role_id")
+        start_str = data.get("start")
+        end_str = data.get("end")
+        reason = data.get("reason", "")
+        
+        if not (target_user_id or role_id) or not start_str or not end_str:
+            return {"status": "error", "message": "Missing required fields"}
+            
+        from datetime import datetime
+        start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+        
+        from database import User, Player, AFKHistory, get_msk_now
+        
+        if target_user_id:
+            target_user = session.get(User, target_user_id)
+            if not target_user:
+                return {"status": "error", "message": "User not found"}
+                
+            target_user.afk_start = start_date
+            target_user.afk_end = end_date
+            target_user.afk_reason = reason
+            
+            # Update characters
+            session.query(Player).filter_by(user_id=target_user_id).update({
+                "afk_start": start_date,
+                "afk_end": end_date,
+                "afk_reason": reason
+            })
+
+            # Main character for history role_id
+            main_char = next((c for c in target_user.characters if c.is_main), None)
+            if main_char and not role_id:
+                p_row = session.query(Player).filter_by(nickname=main_char.nickname).first()
+                if p_row: role_id = p_row.role_id
+        elif role_id:
+            player = session.get(Player, role_id)
+            if not player:
+                return {"status": "error", "message": "Player not found"}
+            
+            player.afk_start = start_date
+            player.afk_end = end_date
+            player.afk_reason = reason
+            
+            # If player is linked to user, update user too
+            if player.user_id:
+                target_user_id = player.user_id
+                target_user = session.get(User, target_user_id)
+                if target_user:
+                    target_user.afk_start = start_date
+                    target_user.afk_end = end_date
+                    target_user.afk_reason = reason
+        
+        # Log to history
+        new_hist = AFKHistory(
+            user_id=target_user_id,
+            role_id=role_id,
+            start_date=start_date,
+            end_date=end_date,
+            reason=reason,
+            is_active_record=True,
+            timestamp=get_msk_now()
+        )
+        session.add(new_hist)
+        session.commit()
+        
+        return {"status": "ok", "message": "AFK статус обновлен"}
+    except Exception as e:
+        logging.error(f"Error in save_master_afk: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/afk/delete")
+async def delete_master_afk(request: Request):
+    """Remove AFK status for a user."""
+    try:
+        user = await get_current_user(request)
+        if not user or not user.is_master:
+            return {"status": "error", "message": "Unauthorized"}
+            
+        data = await request.json()
+        target_user_id = data.get("user_id")
+        if not target_user_id:
+            return {"status": "error", "message": "user_id is required"}
+            
+        from database import User
+        target_user = session.get(User, target_user_id)
+        if not target_user:
+            return {"status": "error", "message": "User not found"}
+            
+        target_user.afk_start = None
+        target_user.afk_end = None
+        target_user.afk_reason = None
+        
+        # Also clear in players table
+        from database import Player
+        session.query(Player).filter_by(user_id=target_user_id).update({
+            "afk_start": None,
+            "afk_end": None,
+            "afk_reason": None
+        })
+        session.commit()
+        
+        return {"status": "ok", "message": "AFK статус удален"}
+    except Exception as e:
+        logging.error(f"Error in delete_master_afk: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 @router.post("/master/issue_reward")
@@ -433,6 +886,7 @@ async def master_add_to_queue(request: Request):
             for p in all_players:
                 if p.nickname and p.nickname.lower() == target_low:
                     player = p
+                    char_name = p.nickname # Use correct casing
                     break
         
         user_id = None
@@ -447,6 +901,7 @@ async def master_add_to_queue(request: Request):
                 for c in all_chars:
                     if c.nickname and c.nickname.lower() == char_name.lower():
                         char = c
+                        char_name = c.nickname # Use correct casing
                         break
             
             if char:
@@ -460,25 +915,61 @@ async def master_add_to_queue(request: Request):
             if existing:
                 return {"status": "error", "message": f"Основа или твин этого игрока ({existing.character_name}) уже в очереди."}
         else:
-            # No user_id (not in TG), just check exact nickname
             existing = session.query(QueueEntry).filter_by(queue_type_id=queue_id, character_name=char_name).first()
             if existing:
-                return {"status": "error", "message": "Данный никнейм уже в этой очереди."}
+                return {"status": "error", "message": f"Игрок '{char_name}' уже в очереди."}
+        
+        # Determine nickname from character table if exists, else use input
+        final_nick = char_name
+        char_row = session.query(Character).filter_by(nickname=char_name).first()
+        if not char_row:
+            # Try case-insensitive
+            all_c = session.query(Character).all()
+            for c in all_c:
+                if c.nickname and c.nickname.lower() == char_name.lower():
+                    char_row = c
+                    final_nick = c.nickname
+                    break
 
+        from sqlalchemy import func
         # Get max position
         max_pos = session.query(func.max(QueueEntry.position)).filter_by(queue_type_id=queue_id).scalar() or 0
-        
+
         new_entry = QueueEntry(
-            user_id=user_id,
             queue_type_id=queue_id,
-            character_name=char_name,
+            user_id=user_id,
+            character_name=final_nick,
             position=max_pos + 1,
             auto_requeue=auto_requeue
         )
         session.add(new_entry)
         session.commit()
-        return {"status": "ok", "message": f"Игрок {char_name} добавлен"}
+        return {"status": "ok", "message": f"Игрок {final_nick} добавлен"}
     except Exception as e:
+        session.rollback()
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/toggle_auto_requeue")
+async def toggle_auto_requeue(request: Request):
+    """Toggle auto_requeue flag for a queue entry."""
+    try:
+        data = await request.json()
+        entry_id = data.get("entry_id")
+        
+        if not entry_id:
+            return {"status": "error", "message": "entry_id is required"}
+            
+        from database import QueueEntry
+        entry = session.query(QueueEntry).filter_by(id=entry_id).first()
+        if not entry:
+            return {"status": "error", "message": "Запись не найдена"}
+            
+        entry.auto_requeue = not entry.auto_requeue
+        session.commit()
+        
+        return {"status": "ok", "auto_requeue": entry.auto_requeue}
+    except Exception as e:
+        session.rollback()
         return {"status": "error", "message": str(e)}
 
 

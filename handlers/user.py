@@ -648,7 +648,7 @@ async def view_queue(callback: types.CallbackQuery):
     user = ensure_user(callback.from_user.id, callback.from_user.username)
     entries = (
         session.query(QueueEntry)
-        .outerjoin(Player, QueueEntry.character_name == Player.nickname)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
         .filter(QueueEntry.queue_type_id == qid)
         .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
         .order_by(QueueEntry.position.asc(), QueueEntry.id.asc())

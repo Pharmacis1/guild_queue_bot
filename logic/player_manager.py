@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 import aiosqlite
@@ -185,7 +185,7 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
                 )
 
         # 6. REFLECT AFK DATES
-        logging.info(f"Update Logic: new_user_id={new_user_id}, afk_str={afk_start_str}")
+        logging.info(f"Update Logic: role_id={role_id}, afk_start={afk_start_str}")
         if new_user_id:
             # Only update if the key is explicitly present in the data payload (handles None/null correctly to clear AFK)
             if "afk_start" in update_data:
@@ -195,9 +195,25 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
                 end_val = parse_date_safe(update_data.get("afk_end"))
                 new_reason = update_data.get("afk_reason")
 
+                # 1. Update Current Status in Users table (if linked)
+                if new_user_id:
+                    await conn.execute(
+                        "UPDATE users SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE id = ?", 
+                        (start_val, end_val, new_reason if new_reason is not None else None, new_user_id)
+                    )
+
+                # 2. Update Current Status in Players table (always, for unlinked chars)
                 await conn.execute(
-                    "UPDATE users SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE id = ?", 
-                    (start_val, end_val, new_reason if new_reason is not None else None, new_user_id)
+                    "UPDATE players SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE role_id = ?",
+                    (start_val, end_val, new_reason if new_reason is not None else None, role_id)
+                )
+                
+                # 3. Also log to history table (MSK Time)
+                now_msk = datetime.utcnow() + timedelta(hours=3)
+                now_str = now_msk.strftime("%Y-%m-%d %H:%M:%S")
+                await conn.execute(
+                    "INSERT INTO afk_history (user_id, role_id, start_date, end_date, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                    (new_user_id, role_id, start_val, end_val, new_reason, now_str)
                 )
 
 

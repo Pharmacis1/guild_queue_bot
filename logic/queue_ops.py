@@ -84,7 +84,7 @@ def get_admin_queue_entries(session: Session, queue_id: int):
     """
     return (
         session.query(QueueEntry)
-        .outerjoin(Player, QueueEntry.character_name == Player.nickname)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
         .filter(QueueEntry.queue_type_id == queue_id)
         .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
         .order_by(QueueEntry.position.asc(), QueueEntry.id.asc())
@@ -98,7 +98,7 @@ def get_admin_queue_count(session: Session, queue_id: int) -> int:
     """
     return (
         session.query(QueueEntry)
-        .outerjoin(Player, QueueEntry.character_name == Player.nickname)
+        .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
         .filter(QueueEntry.queue_type_id == queue_id)
         .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
         .count()

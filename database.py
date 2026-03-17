@@ -101,6 +101,9 @@ class Player(Base):
     class_id = Column(Integer, default=-1)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     is_alt = Column(Boolean, default=False)
+    afk_start = Column(DateTime, nullable=True)
+    afk_end = Column(DateTime, nullable=True)
+    afk_reason = Column(String, nullable=True)
     # Relationship to user
     user = relationship("User", backref="game_characters")
 
@@ -132,6 +135,9 @@ class AFKHistory(Base):
     end_date = Column(DateTime)
     is_active_record = Column(Boolean, default=True)  # True if this was a finalized period
     reason = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=get_msk_now)
+    # Relationship
+    user = relationship("User", backref="afk_history")
 
 
 
@@ -338,7 +344,7 @@ def init_db():
             except Exception as e:
                 print(f"Migration failed (issued_by): {e}")
 
-        # 6. Player User Link & Alt Status
+        # 6. User Linking Migration for existing Players
         try:
             conn.execute(text("SELECT user_id FROM players LIMIT 1"))
         except Exception:
@@ -358,6 +364,19 @@ def init_db():
                 print("Migration successful: Added players.is_alt")
             except Exception as e:
                 print(f"Migration failed (players.is_alt): {e}")
+
+        # 6.1. AFK Columns in Players Table
+        try:
+            conn.execute(text("SELECT afk_start FROM players LIMIT 1"))
+        except Exception:
+            print("Columns 'afk_start/end/reason' in players missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE players ADD COLUMN afk_start DATETIME"))
+                conn.execute(text("ALTER TABLE players ADD COLUMN afk_end DATETIME"))
+                conn.execute(text("ALTER TABLE players ADD COLUMN afk_reason VARCHAR"))
+                print("Migration successful: Added AFK columns to players")
+            except Exception as e:
+                print(f"Migration failed (players AFK columns): {e}")
 
         # 7. Disable Removed Queues
         queues_to_disable = ["Камень доблести", "Метеориты", "Опыт в диск", "Проходки в УФ", "Камни бессмертных"]
@@ -431,6 +450,18 @@ def init_db():
                 print("Migration successful: Added afk_history.reason")
             except Exception as e:
                 print(f"Migration failed (afk_history.reason): {e}")
+
+        # 8.3. AFK History Timestamp Migration
+        try:
+            conn.execute(text("SELECT timestamp FROM afk_history LIMIT 1"))
+        except Exception:
+            print("Column 'timestamp' in afk_history missing. Migrating...")
+            try:
+                conn.execute(text("ALTER TABLE afk_history ADD COLUMN timestamp DATETIME"))
+                conn.execute(text("UPDATE afk_history SET timestamp = start_date WHERE timestamp IS NULL"))
+                print("Migration successful: Added afk_history.timestamp")
+            except Exception as e:
+                print(f"Migration failed (afk_history.timestamp): {e}")
 
 
         # 9. FAQ Topics Table (Ensure existence)
