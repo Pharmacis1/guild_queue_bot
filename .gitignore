@@ -28,3 +28,9 @@ Desktop/
 *.zip
 *.rar
 *.7z
+
+# Исключения для веб-ресурсов
+!frontend/public/**/*.png
+!frontend/public/**/*.jpg
+!static/**/*.png
+!static/**/*.jpg

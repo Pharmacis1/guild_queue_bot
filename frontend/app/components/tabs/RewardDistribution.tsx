@@ -236,10 +236,6 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
         }
     };
 
-    const formatDate = () => {
-        const now = new Date();
-        return `${now.toLocaleDateString('ru-RU')} ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} (МСК)`;
-    };
 
     const getColorForInitial = (initial: string) => {
         const colors = ['#a25ed5', '#24a1cf', '#d69e2e', '#4a5568', '#f56565', '#48bb78', '#ed8936', '#9f7aea', '#ed64a6'];
@@ -465,17 +461,6 @@ export default function RewardDistribution({ currentUser, onBack }: RewardDistri
                                         Нажми на кнопку "Выдать", после того как отправишь награду в игре.
                                     </p>
                                 </div>
-                            </div>
-                            
-                            <div style={{ 
-                                backgroundColor: '#1a1a1a', 
-                                padding: '6px 15px', 
-                                borderRadius: '20px', 
-                                fontSize: '0.75rem', 
-                                color: '#aaa',
-                                border: '1px solid #333'
-                            }}>
-                                Обновлено: {formatDate()}
                             </div>
                         </div>
 
