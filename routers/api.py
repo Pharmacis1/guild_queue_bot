@@ -1802,3 +1802,103 @@ async def delete_event(request: Request):
             await session.commit()
         return {"status": "ok"}
     except Exception as e: return {"status": "error", "message": str(e)}
+
+
+@router.post("/master/announce")
+async def master_announce(request: Request):
+    """Create a new broadcast announcement."""
+    try:
+        from database import ScheduledAnnouncement
+        from loader import bot
+        from handlers.admin import schedule_job
+        
+        data = await request.json()
+        text = data.get("text")
+        schedule_type = data.get("schedule_type")
+        run_time = data.get("run_time", "")
+        days_of_week = data.get("days_of_week", "")
+        
+        if not text or not schedule_type:
+            return {"status": "error", "message": "Text and schedule type are required"}
+            
+        async with AsyncSessionLocal() as session:
+            ann = ScheduledAnnouncement(
+                text=text,
+                schedule_type=schedule_type,
+                run_time=run_time,
+                days_of_week=days_of_week,
+                is_active=True
+            )
+            session.add(ann)
+            await session.commit()
+            
+            # Immediately run or schedule
+            if schedule_type == "now":
+                from handlers.admin import run_broadcast
+                import asyncio
+                # Run it asynchronously
+                asyncio.create_task(run_broadcast(ann.id, bot))
+            else:
+                schedule_job(ann, bot)
+                
+            return {"status": "ok", "message": "Объявление успешно создано/запланировано"}
+            
+    except Exception as e:
+        import logging
+        logging.error(f"Error in master_announce: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/master/announcements")
+async def master_announcements(request: Request):
+    """Get active scheduled announcements."""
+    try:
+        from database import ScheduledAnnouncement
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScheduledAnnouncement).filter_by(is_active=True).order_by(ScheduledAnnouncement.id.desc())
+            )
+            anns = result.scalars().all()
+            return {
+                "status": "ok", 
+                "announcements": [{
+                    "id": a.id,
+                    "text": a.text,
+                    "schedule_type": a.schedule_type,
+                    "run_time": a.run_time,
+                    "days_of_week": a.days_of_week
+                } for a in anns]
+            }
+    except Exception as e:
+        import logging
+        logging.error(f"Error in master_announcements: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/master/announcements/delete")
+async def master_announcements_delete(request: Request):
+    """Delete (deactivate) an active announcement."""
+    try:
+        from database import ScheduledAnnouncement
+        from loader import scheduler
+        data = await request.json()
+        ann_id = data.get("id")
+        if not ann_id: return {"status": "error", "message": "ID required"}
+        
+        async with AsyncSessionLocal() as session:
+            ann = await session.get(ScheduledAnnouncement, ann_id)
+            if ann:
+                ann.is_active = False
+                await session.commit()
+                
+        # Remove from scheduler
+        job_id = f"ann_{ann_id}"
+        try:
+            scheduler.remove_job(job_id)
+        except Exception:
+            pass # Job might not exist, already ran, or was a 'once_now'
+            
+        return {"status": "ok"}
+    except Exception as e:
+        import logging
+        logging.error(f"Error in master_announcements_delete: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}

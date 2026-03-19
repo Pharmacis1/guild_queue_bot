@@ -343,4 +343,10 @@ export const fetchMasterAfkHistory = async (): Promise<any[]> => {
     return data.history;
 };
 
+export const sendAnnouncement = async (payload: { text: string; schedule_type: string; run_time?: string; days_of_week?: string }): Promise<string> => {
+    const { data } = await api.post('/master/announce', payload);
+    if (data.status === 'error') throw new Error(data.message);
+    return data.message || 'Объявление отправлено';
+};
+
 export default api;

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { UserData } from '@/lib/api';
 import RewardDistribution from './RewardDistribution';
 import PlayerManagement from './PlayerManagement';
+import AnnouncementsPanel from './AnnouncementsPanel';
 
 interface MasterPanelProps {
     currentUser?: UserData | null;
@@ -31,6 +32,14 @@ export default function MasterPanel({ currentUser }: MasterPanelProps) {
         return (
             <div className="table-wrapper glow-border" style={{ marginTop: '20px', padding: '30px' }}>
                 <PlayerManagement onBack={() => setActiveSection('hub')} />
+            </div>
+        );
+    }
+
+    if (activeSection === 'announce') {
+        return (
+            <div className="table-wrapper glow-border" style={{ marginTop: '20px', padding: '30px' }}>
+                <AnnouncementsPanel onBack={() => setActiveSection('hub')} />
             </div>
         );
     }
@@ -105,7 +114,9 @@ export default function MasterPanel({ currentUser }: MasterPanelProps) {
                     <p style={{ color: '#888', fontSize: '0.9rem' }}>Выдача наград по очередям и отправка уведомлений.</p>
                 </div>
 
-                <div style={{ 
+                <div 
+                    onClick={() => setActiveSection('announce')}
+                    style={{ 
                     flex: '1 1 300px', 
                     backgroundColor: 'rgba(20, 20, 20, 0.7)', 
                     border: '1px solid #444', 
@@ -113,15 +124,22 @@ export default function MasterPanel({ currentUser }: MasterPanelProps) {
                     padding: '25px',
                     textAlign: 'center',
                     transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                    cursor: 'not-allowed',
-                    opacity: 0.7
-                }}>
+                    cursor: 'pointer'
+                }}
+                onMouseOver={(e) => {
+                    e.currentTarget.style.borderColor = '#8B0000';
+                    e.currentTarget.style.boxShadow = '0 0 15px rgba(209, 0, 31, 0.2)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseOut={(e) => {
+                    e.currentTarget.style.borderColor = '#444';
+                    e.currentTarget.style.boxShadow = 'none';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                }}
+                >
                     <div style={{ fontSize: '3rem', marginBottom: '15px' }}>📢</div>
                     <h3 style={{ color: '#E0E0E0', marginBottom: '10px' }}>Объявления</h3>
                     <p style={{ color: '#888', fontSize: '0.9rem' }}>Настройка рассылок и системных уведомлений.</p>
-                    <div style={{ marginTop: '15px', display: 'inline-block', padding: '5px 15px', backgroundColor: '#333', borderRadius: '20px', fontSize: '0.8rem', color: '#aaa' }}>
-                        В разработке
-                    </div>
                 </div>
             </div>
         </div>

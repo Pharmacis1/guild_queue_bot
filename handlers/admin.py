@@ -1368,12 +1368,18 @@ async def m_global_log(callback: types.CallbackQuery, session: AsyncSession = No
 # --- ОБЪЯВЛЕНИЯ (BROADCAST) ---
 # Вспомогательные функции для шедулера
 async def run_broadcast(ann_id, bot_instance):
+    from database import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
         ann = await session.get(ScheduledAnnouncement, ann_id)
         if not ann or not ann.is_active:
             return
-        result = await session.execute(select(User))
+            
+        from database import Player
+        result = await session.execute(
+            select(User).join(Player, Player.user_id == User.id).where(Player.in_clan == 1).distinct()
+        )
         users = result.scalars().all()
+        
         for u in users:
             try:
                 await bot_instance.send_message(u.telegram_id, f"📢 <b>ОБЪЯВЛЕНИЕ</b>\n\n{ann.text}", parse_mode="HTML")
