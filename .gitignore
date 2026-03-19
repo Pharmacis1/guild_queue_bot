@@ -34,3 +34,7 @@ Desktop/
 !frontend/public/**/*.jpg
 !static/**/*.png
 !static/**/*.jpg
+
+# Бэкапы
+backups/
+*.sql
