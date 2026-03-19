@@ -2,9 +2,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List
 
-import aiosqlite
+from sqlalchemy import select, func, and_, String
 
 from consts import CLASSES
+from database import AsyncSessionLocal, Event, Player, Character, ConstantParty, PartyMember, User
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,10 +95,9 @@ def get_intervals(start_date_str, end_date_str, period, count=1):
 
 async def get_last_update_time():
     """Gets the date of the freshest record in DB and converts to MSK (UTC+3)."""
-    async with aiosqlite.connect(DB_NAME) as conn:
-        cursor = await conn.execute("SELECT MAX(timestamp) FROM events")
-        row = await cursor.fetchone()
-        ts = row[0]
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(func.max(Event.timestamp)))
+        ts = result.scalar()
         if ts:
             # 1. Get date as UTC
             dt_utc = datetime.fromtimestamp(ts, timezone.utc)
@@ -223,41 +223,43 @@ async def get_data_from_db(
     if group_period:
         intervals = get_intervals(start_date, end_date, group_period, group_count)
 
-    async with aiosqlite.connect(DB_NAME) as conn:
-        # Base SQL
-        # Added joins for User, PartyMember, ConstantParty
-        sql = """
-            SELECT 
-                p.role_id, 
-                COALESCE(p.nickname, 'ID ' || p.role_id), 
-                p.class_id,
-                e.timestamp, 
-                e.value, 
-                e.event_type,
-                COALESCE(p.user_id, c.user_id),
-                p.is_alt,
-                cp.id,
-                cp.color
-            FROM players p
-            LEFT JOIN characters c ON p.nickname = c.nickname
-            LEFT JOIN events e ON p.role_id = e.role_id 
-                AND e.event_type IN (1, 2)
-                AND substr(e.event_date, 1, 10) >= ? 
-                AND substr(e.event_date, 1, 10) <= ?
-            LEFT JOIN party_members pm ON p.role_id = pm.player_role_id
-            LEFT JOIN constant_parties cp ON pm.party_id = cp.id
-            WHERE p.in_clan = 1
-        """
-        params = [start_date, end_date]
+    async with AsyncSessionLocal() as session:
+        # Base Query using SQLAlchemy ORM
+        stmt = (
+            select(
+                Player.role_id,
+                func.coalesce(Player.nickname, "ID " + func.cast(Player.role_id, String)).label("nickname"),
+                Player.class_id,
+                Event.timestamp,
+                Event.value,
+                Event.event_type,
+                func.coalesce(Player.user_id, Character.user_id).label("user_id"),
+                Player.is_alt,
+                ConstantParty.id.label("cp_id"),
+                ConstantParty.color.label("cp_color")
+            )
+            .join(Character, Player.nickname == Character.nickname, isouter=True)
+            .join(
+                Event,
+                and_(
+                    Player.role_id == Event.role_id,
+                    Event.event_type.in_([1, 2]),
+                    func.substr(Event.event_date, 1, 10) >= start_date,
+                    func.substr(Event.event_date, 1, 10) <= end_date
+                ),
+                isouter=True
+            )
+            .join(PartyMember, Player.role_id == PartyMember.player_role_id, isouter=True)
+            .join(ConstantParty, PartyMember.party_id == ConstantParty.id, isouter=True)
+            .where(Player.in_clan == 1)
+        )
 
         # Filter by classes
         if classes:
-            placeholders = ",".join("?" * len(classes))
-            sql += f" AND p.class_id IN ({placeholders})"
-            params.extend(classes)
+            stmt = stmt.where(Player.class_id.in_(classes))
 
-        cursor = await conn.execute(sql, tuple(params))
-        raw_rows = await cursor.fetchall()
+        result = await session.execute(stmt)
+        raw_rows = result.all()
 
     # Grouping
     players_events = {}

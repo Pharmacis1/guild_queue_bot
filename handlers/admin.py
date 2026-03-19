@@ -4,13 +4,14 @@ import math
 import os
 import sys
 from datetime import datetime, timedelta
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import ChatMemberUpdated, FSInputFile
-from apscheduler.jobstores.base import JobLookupError
+from aiogram.types import ChatMemberUpdated
 
 from database import (
     AFKHistory,
@@ -25,7 +26,6 @@ from database import (
     User,
     get_msk_now,
     get_setting,
-    session,
     set_setting,
 )
 from handlers.user import parse_date_input
@@ -61,12 +61,13 @@ PAGE_SIZE = 10
 
 
 # Проверка на мастера
-def is_master(telegram_id):
-    user = session.query(User).filter_by(telegram_id=telegram_id).first()
+async def is_master(session: AsyncSession, telegram_id: int):
+    result = await session.execute(select(User).filter_by(telegram_id=telegram_id))
+    user = result.scalar_one_or_none()
     return user and user.is_master
 
 
-def get_weekly_valor_map(nicknames):
+async def get_weekly_valor_map(session: AsyncSession, nicknames):
     """
     Calculates weekly valor (from Monday) for a list of nicknames.
     Returns: {nickname: total_valor}
@@ -74,16 +75,14 @@ def get_weekly_valor_map(nicknames):
     if not nicknames:
         return {}
 
-    from datetime import timedelta
-
     today = datetime.now()
     monday = today - timedelta(days=today.weekday())
     start_date = monday.strftime("%Y-%m-%d")
 
     # We need to find role_ids for these nicknames first (from Players table)
     # This assumes nicknames in QueueEntry match Players table exactly (case sensitive-ish)
-
-    players = session.query(Player).filter(Player.nickname.in_(nicknames)).all()
+    result_players = await session.execute(select(Player).filter(Player.nickname.in_(nicknames)))
+    players = result_players.scalars().all()
     if not players:
         return {}
 
@@ -92,14 +91,13 @@ def get_weekly_valor_map(nicknames):
 
     # Query Events (Type 1 = Valor)
     # Using substr for date comparison as Event.event_date is String "YYYY-MM-DD HH:MM:SS"
-    from sqlalchemy import func
-
-    events = (
-        session.query(Event.role_id, func.sum(Event.value))
+    stmt = (
+        select(Event.role_id, func.sum(Event.value))
         .filter(Event.event_type == 1, Event.role_id.in_(role_ids), func.substr(Event.event_date, 1, 10) >= start_date)
         .group_by(Event.role_id)
-        .all()
     )
+    result_events = await session.execute(stmt)
+    events = result_events.all()
 
     result = {}
 
@@ -120,15 +118,23 @@ def get_weekly_valor_map(nicknames):
 
 # --- ПАНЕЛЬ МАСТЕРА ---
 @router.callback_query(F.data == "menu_master")
-async def master_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def master_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await master_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text("👑 **Панель Мастера**", reply_markup=get_master_menu(), parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "m_menu_queues")
-async def open_queues_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def open_queues_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await open_queues_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text(
         "🛡 **Управление очередями**", reply_markup=get_master_queues_menu(), parse_mode="Markdown"
@@ -136,8 +142,12 @@ async def open_queues_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "m_menu_community")
-async def open_community_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def open_community_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await open_community_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text(
         "👥 **Сообщество и игроки**", reply_markup=get_master_community_menu(), parse_mode="Markdown"
@@ -145,8 +155,12 @@ async def open_community_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "m_menu_announce")
-async def open_announce_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def open_announce_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await open_announce_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text(
         "📢 **Объявления**", reply_markup=get_master_announce_menu(), parse_mode="Markdown"
@@ -154,8 +168,12 @@ async def open_announce_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "m_menu_system")
-async def open_system_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def open_system_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await open_system_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text(
         "💾 **Система и Бэкапы**", reply_markup=get_master_system_menu(), parse_mode="Markdown"
@@ -203,9 +221,12 @@ async def instruction_upload_db(callback: types.CallbackQuery):
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
 @router.callback_query(F.data == "instruction_back_from_upload")
-async def instruction_back_from_upload(callback: types.CallbackQuery):
+async def instruction_back_from_upload(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await instruction_back_from_upload(callback, session)
     # Depending on context, it could just be a generic back, or delete the doc message
-    # If it was an edit_text, we could just send the "start_menu", but we deleted it inside `answer_document`.
     # It's cleaner to handle deletion and resending menu
     await callback.message.delete()
     text = (
@@ -225,13 +246,20 @@ async def instruction_back_from_upload(callback: types.CallbackQuery):
 
 # --- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ---
 @router.callback_query(F.data.startswith("m_users_list"))
-async def m_users_list(callback: types.CallbackQuery):
+async def m_users_list(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_users_list(callback, session)
     try:
         page = int(callback.data.split(":")[1])
     except Exception:
         page = 0
 
-    users = session.query(User).join(Character).distinct().all()
+    # Need eager loading or session-bound object for characters
+    stmt = select(User).join(Character).options(selectinload(User.characters)).distinct()
+    result = await session.execute(stmt)
+    users = result.scalars().all()
 
     if not users:
         return await callback.message.edit_text(
@@ -288,23 +316,32 @@ async def m_users_list(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("m_u_manage_"))
-async def m_user_manage(callback: types.CallbackQuery):
+async def m_user_manage(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_user_manage(callback, session)
     parts = callback.data.split("_")
     uid, page = int(parts[3]), int(parts[4])
-    await render_user_manage(callback, uid, page)
+    await render_user_manage(callback, uid, page, session)
 
 
-async def render_user_manage(event, uid, page):
+async def render_user_manage(event, uid, page, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await render_user_manage(event, uid, page, session)
     # Support both CallbackQuery and Message (if needed, though mostly callback here)
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
     if not user:
         if isinstance(event, types.CallbackQuery):
             await event.answer("Пользователь не найден.", show_alert=True)
         return
 
-    chars = session.query(Character).filter_by(user_id=user.id).all()
+    result_chars = await session.execute(select(Character).filter_by(user_id=user.id))
+    chars = result_chars.scalars().all()
     user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без юзернейма'}</a>"
     status_emoji = "⛔ ЗАБАНЕН" if user.is_banned else "✅ Активен"
     ban_text = "🕊 Разбанить" if user.is_banned else "🔨 ЗАБАНИТЬ"
@@ -314,9 +351,9 @@ async def render_user_manage(event, uid, page):
         afk_info = f"\n🛌 <b>Текущий AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}"
 
     # History text
-    history_recs = (
-        session.query(AFKHistory).filter_by(user_id=user.id).order_by(AFKHistory.start_date.desc()).limit(5).all()
-    )
+    stmt_afk = select(AFKHistory).filter_by(user_id=user.id).order_by(AFKHistory.start_date.desc()).limit(5)
+    result_afk = await session.execute(stmt_afk)
+    history_recs = result_afk.scalars().all()
     if history_recs:
         afk_info += "\n\n📜 <b>История AFK:</b>"
         for h in history_recs:
@@ -363,11 +400,15 @@ async def render_user_manage(event, uid, page):
 
 
 @router.callback_query(F.data.startswith("m_master_toggle_"))
-async def m_master_toggle_handler(callback: types.CallbackQuery):
+async def m_master_toggle_handler(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_master_toggle_handler(callback, session)
     parts = callback.data.split("_")
     uid, page = int(parts[3]), int(parts[4])
 
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
     if not user:
         return await callback.answer("Пользователь не найден.", show_alert=True)
 
@@ -376,36 +417,45 @@ async def m_master_toggle_handler(callback: types.CallbackQuery):
         return await callback.answer("❌ Нельзя изменить статус самому себе!", show_alert=True)
 
     user.is_master = not user.is_master
-    session.commit()
+    await session.commit()
 
     status = "👑 ТЕПЕРЬ МАСТЕР" if user.is_master else "⚡ БОЛЬШЕ НЕ МАСТЕР"
     await callback.answer(f"Статус изменен: {status}")
 
     # Refresh view
-    await render_user_manage(callback, uid, page)
+    await render_user_manage(callback, uid, page, session)
 
 
 @router.callback_query(F.data.startswith("m_ban_toggle_"))
-async def m_toggle_ban(callback: types.CallbackQuery):
+async def m_toggle_ban(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_toggle_ban(callback, session)
     parts = callback.data.split("_")
     uid, page = int(parts[3]), int(parts[4])
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
     if user:
         if user.is_master:
             return await callback.answer("❌ Нельзя забанить Мастера!", show_alert=True)
         user.is_banned = not user.is_banned
         if user.is_banned:
-            session.query(QueueEntry).filter_by(user_id=uid).delete()
-        session.commit()
+            from sqlalchemy import delete
+            await session.execute(delete(QueueEntry).filter_by(user_id=uid))
+        await session.commit()
         await callback.answer(f"Пользователь {'забанен' if user.is_banned else 'разбанен'}.")
-        await render_user_manage(callback, uid, page)
+        await render_user_manage(callback, uid, page, session)
 
 
 @router.callback_query(F.data.startswith("m_char_menu_"))
-async def m_char_menu(callback: types.CallbackQuery):
+async def m_char_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_char_menu(callback, session)
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
     if not char:
         return await callback.answer("Персонаж не найден.", show_alert=True)
 
@@ -421,10 +471,14 @@ async def m_char_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("m_ren_start_"))
-async def m_rename_start(callback: types.CallbackQuery, state: FSMContext):
+async def m_rename_start(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_rename_start(callback, state, session)
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
     if not char:
         return await callback.answer("Ошибка char.", show_alert=True)
 
@@ -438,12 +492,16 @@ async def m_rename_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(MasterManageStates.waiting_for_rename)
-async def m_rename_save(message: types.Message, state: FSMContext):
+async def m_rename_save(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_rename_save(message, state, session)
     data = await state.get_data()
     cid, uid, page = data["target_cid"], data["uid"], data["page"]
     new_nick = message.text.strip()
 
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
     if not char:
         await message.answer("Персонаж удален.")
         await state.clear()
@@ -454,12 +512,13 @@ async def m_rename_save(message: types.Message, state: FSMContext):
 
     # Update Queues
     count = 0
-    entries = session.query(QueueEntry).filter_by(character_name=old_nick).all()
-    for e in entries:
-        e.character_name = new_nick
-        count += 1
+    from sqlalchemy import update
+    result_update = await session.execute(
+        update(QueueEntry).filter_by(character_name=old_nick).values(character_name=new_nick)
+    )
+    count = result_update.rowcount
 
-    session.commit()
+    await session.commit()
 
     await message.answer(f"✅ Переименовано: {old_nick} -> {new_nick}\nОбновлено записей в очередях: {count}")
 
@@ -472,44 +531,35 @@ async def m_rename_save(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("m_del_char_"))
-async def m_delete_char_admin(callback: types.CallbackQuery):
+async def m_delete_char_admin(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_delete_char_admin(callback, session)
     parts = callback.data.split("_")
     cid, uid, page = int(parts[3]), int(parts[4]), int(parts[5])
 
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
 
     if char:
         nick = char.nickname
         user_id = char.user_id
-        # user = session.get(User, user_id)
 
-        session.delete(char)
+        await session.delete(char)
         # Orphan queue entries instead of deleting
-        session.query(QueueEntry).filter_by(character_name=nick).update({"user_id": None})
-        session.commit()
+        from sqlalchemy import update
+        await session.execute(
+            update(QueueEntry).filter_by(character_name=nick).values(user_id=None)
+        )
+        await session.commit()
         await callback.answer(f"✅ Ник {nick} отвязан.")
 
         # Check for kick
-        session.expire_all()
-        # count = session.query(Character).filter_by(user_id=user_id).count()
-        # chat_id = get_setting("clan_chat_id")
-
-        # Disabled Kick Logic
-        # if count == 0 and chat_id:
-        #     try:
-        #         await bot.ban_chat_member(chat_id, user.telegram_id)
-        #         await bot.unban_chat_member(chat_id, user.telegram_id)
-        #         await bot.send_message(user.telegram_id, "⚠️ Вы были исключены из группы клана, так как администратор удалил вашего последнего персонажа.")
-        #         await callback.message.answer(f"👢 Игрок {user.username} был кикнут из чата (0 персонажей).")
-        #     except Exception as e:
-        #         # Ignore "chat owner" error or log silently
-        #         if "chat owner" not in str(e):
-        #             await callback.message.answer(f"⚠️ Ошибка кика: {e}")
-
+        await session.expire_all()
     else:
         await callback.answer("Уже удален.")
 
-    await render_user_manage(callback, uid, page)
+    await render_user_manage(callback, uid, page, session)
 
 
 # --- ДОБАВЛЕНИЕ АДМИНА ---
@@ -524,29 +574,42 @@ async def m_add_admin_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(MasterManageStates.waiting_for_admin_username)
-async def m_add_admin_save(message: types.Message, state: FSMContext):
+async def m_add_admin_save(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_add_admin_save(message, state, session)
     target = message.text.replace("@", "").strip()
-    user = session.query(User).filter(User.username == target).first()
+    result = await session.execute(select(User).filter(User.username == target))
+    user = result.scalar_one_or_none()
     if not user:
         return await message.answer(
             f"❌ Пользователь @{target} не найден в базе.", reply_markup=get_back_btn("menu_master")
         )
 
     user.is_master = True
-    session.commit()
+    await session.commit()
     await message.answer(f"✅ @{target} теперь Мастер.", reply_markup=get_master_menu())
     await state.clear()
 
 
 # --- РАЗДАЧА НАГРАД ---
 @router.callback_query(F.data == "m_distribute")
-async def m_dist_start(callback: types.CallbackQuery):
-    session.expire_all()
-    queues = session.query(QueueType).filter_by(is_active=True).all()
+async def m_dist_start(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_dist_start(callback, session)
+    await session.expire_all()
+    stmt_queues = select(QueueType).filter_by(is_active=True)
+    result_queues = await session.execute(stmt_queues)
+    queues = result_queues.scalars().all()
     kb = []
 
     # Check pending notifications
-    pending_count = session.query(RewardHistory).filter_by(is_notified=False).count()
+    stmt_pending = select(func.count(RewardHistory.id)).filter_by(is_notified=False)
+    result_pending = await session.execute(stmt_pending)
+    pending_count = result_pending.scalar() or 0
     if pending_count > 0:
         kb.append(
             [
@@ -557,7 +620,7 @@ async def m_dist_start(callback: types.CallbackQuery):
         )
 
     for q in queues:
-        count = get_admin_queue_count(session, q.id)
+        count = await get_admin_queue_count(session, q.id)
         kb.append([types.InlineKeyboardButton(text=f"{q.name} ({count})", callback_data=f"dist_{q.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text(
@@ -566,17 +629,25 @@ async def m_dist_start(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("dist_"))
-async def m_show_dist_list(callback: types.CallbackQuery):
+async def m_show_dist_list(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_show_dist_list(callback, session)
     qid = int(callback.data.split("_")[1])
-    await render_dist_list(callback, qid)
+    await render_dist_list(callback, qid, session)
 
 
-async def render_dist_list(event, qid):
-    session.expire_all()
+async def render_dist_list(event, qid, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await render_dist_list(event, qid, session)
+    await session.expire_all()
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
-    q = session.get(QueueType, qid)
-    entries = get_admin_queue_entries(session, qid)
+    q = await session.get(QueueType, qid)
+    entries = await get_admin_queue_entries(session, qid)
 
     if not entries:
         return await message.edit_text(
@@ -589,7 +660,7 @@ async def render_dist_list(event, qid):
 
     # Fetch Valor Stats
     nicks = [e.character_name for e in entries]
-    valor_map = get_weekly_valor_map(nicks)
+    valor_map = await get_weekly_valor_map(session, nicks)
 
     nick_list = ""
     now = get_msk_now()
@@ -630,93 +701,78 @@ async def render_dist_list(event, qid):
 
 
 @router.callback_query(F.data.startswith("issue_"))
-async def m_issue_reward(callback: types.CallbackQuery):
+async def m_issue_reward(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_issue_reward(callback, session)
     try:
         eid = int(callback.data.split("_")[1])
     except Exception:
         return
-    entry = session.get(QueueEntry, eid)
+    entry = await session.get(QueueEntry, eid)
     if not entry:
         return await callback.answer("Уже выдано/удалено.")
 
     qid, q_name, char_nick = entry.queue_type_id, entry.queue.name, entry.character_name
-    user = session.get(User, entry.user_id)
-    master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
+    uid = entry.user_id
+    
+    result_master = await session.execute(select(User).filter_by(telegram_id=callback.from_user.id))
+    master = result_master.scalar_one_or_none()
 
     # Логика поиска основы
     main_nick = char_nick
-    if user:
-        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    if uid:
+        stmt_main = select(Character).filter_by(user_id=uid, is_main=True)
+        result_main = await session.execute(stmt_main)
+        main_char = result_main.scalar_one_or_none()
         if main_char:
             main_nick = main_char.nickname
 
     # LOGIC CALL
-    success, msg, hist = issue_reward(session, entry.id, master.username)
+    success, msg, hist = await issue_reward(session, entry.id, master.username if master else "Admin")
 
     if success:
         # Side Effects (Google Sheet)
-        # Note: reward_ops commits, so entry is deleted. We used cached values (qid, q_name, char_nick).
-        # We need to know if auto-requeued to log correctly?
-        # issue_reward returns just success/msg/hist.
-        # msg has suffix.
-        # But we want precise status for sheet?
-        # logic/reward_ops uses "reward" as type.
-        # We can deduce status from message or modify logic to return status string.
-        # Or just use the message content which is fine for UI, but Sheet needs "issued / auto"?
-
-        # Re-check what was logged in original:
-        # if entry.auto_requeue: status="В очереди (Авто)" -> Wait, original code logged "✅ Выдано: ... (Перезаписан)" via status_msg var?
-        # No, `log_reward_to_sheet` takes `status` arg.
-        # Original:
-        # if entry.auto_requeue: status_msg = ... (Перезаписан)
-        # else: status_msg = ... (Ушел)
-        # BUT `log_reward_to_sheet` was called with what status?
-        # WAIT, original code called `log_reward_to_sheet` BEFORE delete? No.
-
-        # Original:
-        # 2. Гугл таблица
-        # asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
-        # -> Default status? `log_reward_to_sheet` signature?
-        # Let's check `utils.py` later or assume default is "Выдано".
-
-        # In original code line 471: `log_reward_to_sheet(q_name, ..., master.username)`
-        # It didn't pass `status` explicitly here?
-        # line 555 (join) passed `status`.
-        # line 569 (leave) passed `status`.
-        # line 471 (issue) did NOT pass status. So it uses default.
-
-        # So we just call it.
-        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
+        asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username if master else "Admin"))
 
         await callback.answer(msg)
-        await render_dist_list(callback, qid)
+        await render_dist_list(callback, qid, session)
     else:
         await callback.answer(msg, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("warn_"))
-async def m_warn_user(callback: types.CallbackQuery):
+async def m_warn_user(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_warn_user(callback, session)
     try:
         eid = int(callback.data.split("_")[1])
     except Exception:
         return
-    entry = session.get(QueueEntry, eid)
+    entry = await session.get(QueueEntry, eid)
     if not entry:
         return await callback.answer("Запись не найдена.", show_alert=True)
 
-    # user = session.get(User, entry.user_id)
-    master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
+    result_master = await session.execute(select(User).filter_by(telegram_id=callback.from_user.id))
+    master = result_master.scalar_one_or_none()
 
-    master = session.query(User).filter_by(telegram_id=callback.from_user.id).first()
-
-    success, msg, hist = warn_user(session, entry.id, master.username)
+    success, msg, hist = await warn_user(session, entry.id, master.username if master else "Admin")
 
     await callback.answer(msg)
 
 
 @router.callback_query(F.data == "m_send_batch")
-async def m_send_batch_notifications(callback: types.CallbackQuery):
-    pending = session.query(RewardHistory).filter_by(is_notified=False).all()
+async def m_send_batch_notifications(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_send_batch_notifications(callback, session)
+    stmt = select(RewardHistory).filter_by(is_notified=False)
+    result = await session.execute(stmt)
+    pending = result.scalars().all()
     if not pending:
         return await callback.answer("Нет уведомлений для отправки.", show_alert=True)
 
@@ -729,10 +785,9 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
 
     count_users = 0
     for uid, items in user_map.items():
-        user = session.get(User, uid)
+        user = await session.get(User, uid)
         if not user:
             # Mark as processed if user gone? Or keep pending?
-            # Better to mark processed to avoid stuck loop
             # Better to mark processed to avoid stuck loop
             for i in items:
                 i.is_notified = True
@@ -756,6 +811,7 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
             for item in warnings:
                 msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
+                item.is_notified = True
         msg_text += "👇 <b>Выберите действие:</b>"
 
         kb_notify = types.InlineKeyboardMarkup(
@@ -774,8 +830,8 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             pass
 
     # --- PUBLIC LOG BROADCAST ---
-    log_enabled = get_setting("public_log_enabled")
-    log_channel = get_setting("public_log_channel_id")
+    log_enabled = await get_setting(session, "public_log_enabled")
+    log_channel = await get_setting(session, "public_log_channel_id")
 
     if log_enabled == "true" and log_channel:
         try:
@@ -802,7 +858,7 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
                     log_text += "\n"
 
                 # Send
-                thread_id = get_setting("public_log_thread_id")
+                thread_id = await get_setting(session, "public_log_thread_id")
                 await bot.send_message(log_channel, log_text, parse_mode="HTML", message_thread_id=thread_id)
 
         except Exception as e:
@@ -810,20 +866,30 @@ async def m_send_batch_notifications(callback: types.CallbackQuery):
             # Don't fail the whole flow
     # ----------------------------
 
-    session.commit()
+    await session.commit()
     await callback.answer(f"✅ Отправлено {count_users} пользователям.")
 
     # Refresh menu to hide button if empty
-    await m_dist_start(callback)
+    await m_dist_start(callback, session)
 
 
 # --- ЛИМИТЫ, ОПИСАНИЕ, LOCKS ---
 @router.callback_query(F.data == "m_limits_menu")
-async def m_limits_menu(callback: types.CallbackQuery):
-    g_limit = session.query(Settings).filter_by(key="default_limit").first().value
+@router.callback_query(F.data == "m_limits_menu")
+async def m_limits_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_limits_menu(callback, session)
+    stmt_global = select(Settings).filter_by(key="default_limit")
+    result_global = await session.execute(stmt_global)
+    g_limit_obj = result_global.scalar_one_or_none()
+    g_limit = g_limit_obj.value if g_limit_obj else "Unknown"
 
     # Fetch personal limits
-    p_users = session.query(User).filter(User.personal_limit.is_not(None)).all()
+    stmt_personal = select(User).filter(User.personal_limit.is_not(None)).options(selectinload(User.characters))
+    result_personal = await session.execute(stmt_personal)
+    p_users = result_personal.scalars().all()
 
     text = "⚙️ <b>Настройки лимитов</b>\n\n"
     text += f"🌐 <b>Общий лимит:</b> {g_limit} (записей на человека)\n\n"
@@ -856,14 +922,21 @@ async def m_set_global_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(LimitStates.waiting_for_global_limit)
-async def m_set_global_save(message: types.Message, state: FSMContext):
+async def m_set_global_save(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_set_global_save(message, state, session)
     try:
         val = int(message.text)
         if val < 1:
             raise ValueError
-        setting = session.query(Settings).filter_by(key="default_limit").first()
-        setting.value = str(val)
-        session.commit()
+        stmt = select(Settings).filter_by(key="default_limit")
+        result = await session.execute(stmt)
+        setting = result.scalar_one_or_none()
+        if setting:
+            setting.value = str(val)
+        await session.commit()
         await message.answer(f"✅ Общий лимит: {val}", reply_markup=get_master_menu())
         await state.clear()
     except Exception:
@@ -871,9 +944,15 @@ async def m_set_global_save(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "m_set_personal")
-async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext):
+async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_set_personal_start(callback, state, session)
     # Fetch personal limits for display
-    p_users = session.query(User).filter(User.personal_limit.is_not(None)).all()
+    stmt = select(User).filter(User.personal_limit.is_not(None)).options(selectinload(User.characters))
+    result = await session.execute(stmt)
+    p_users = result.scalars().all()
 
     text = "👤 <b>Установка личного лимита.</b>\n\n"
     if p_users:
@@ -893,8 +972,14 @@ async def m_set_personal_start(callback: types.CallbackQuery, state: FSMContext)
 
 
 @router.message(LimitStates.waiting_for_nick_limit)
-async def m_set_personal_nick(message: types.Message, state: FSMContext):
-    char = session.query(Character).filter_by(nickname=message.text.strip()).first()
+async def m_set_personal_nick(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_set_personal_nick(message, state, session)
+    stmt = select(Character).filter_by(nickname=message.text.strip())
+    result = await session.execute(stmt)
+    char = result.scalar_one_or_none()
     if not char:
         return await message.answer("❌ Не найден.", reply_markup=get_back_btn("m_limits_menu"))
     await state.update_data(user_id=char.user_id, nick=char.nickname)
@@ -903,13 +988,17 @@ async def m_set_personal_nick(message: types.Message, state: FSMContext):
 
 
 @router.message(LimitStates.waiting_for_personal_limit_value)
-async def m_set_personal_save(message: types.Message, state: FSMContext):
+async def m_set_personal_save(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_set_personal_save(message, state, session)
     try:
         val = int(message.text)
         data = await state.get_data()
-        user = session.get(User, data["user_id"])
+        user = await session.get(User, data["user_id"])
         user.personal_limit = val if val > 0 else None
-        session.commit()
+        await session.commit()
         await message.answer(
             f"✅ Лимит для {data['nick']} {'обновлен' if val>0 else 'сброшен'}.", reply_markup=get_master_menu()
         )
@@ -919,8 +1008,14 @@ async def m_set_personal_save(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "m_lock_menu")
-async def m_lock_menu(callback: types.CallbackQuery):
-    queues = session.query(QueueType).filter_by(is_active=True).all()
+async def m_lock_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_lock_menu(callback, session)
+    stmt = select(QueueType).filter_by(is_active=True)
+    result = await session.execute(stmt)
+    queues = result.scalars().all()
     kb = []
     for q in queues:
         icon = "🔴 ЗАКРЫТО" if q.is_locked else "🟢 ОТКРЫТО"
@@ -932,27 +1027,41 @@ async def m_lock_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("toggle_lock_"))
-async def m_toggle_lock(callback: types.CallbackQuery):
+async def m_toggle_lock(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_toggle_lock(callback, session)
     qid = int(callback.data.split("_")[2])
-    q = session.get(QueueType, qid)
+    q = await session.get(QueueType, qid)
     q.is_locked = not q.is_locked
-    session.commit()
+    await session.commit()
     await callback.answer(f"{q.name}: {'Закрыто' if q.is_locked else 'Открыто'}")
-    await m_lock_menu(callback)
+    await m_lock_menu(callback, session)
 
 
 @router.callback_query(F.data == "m_edit_desc")
-async def m_edit_desc(callback: types.CallbackQuery):
-    queues = session.query(QueueType).filter_by(is_active=True).all()
+async def m_edit_desc(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_edit_desc(callback, session)
+    stmt = select(QueueType).filter_by(is_active=True)
+    result = await session.execute(stmt)
+    queues = result.scalars().all()
     kb = [[types.InlineKeyboardButton(text=q.name, callback_data=f"edit_d_{q.id}")] for q in queues]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text("✏️ Выбери очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.startswith("edit_d_"))
-async def m_edit_input(callback: types.CallbackQuery, state: FSMContext):
+async def m_edit_input(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_edit_input(callback, state, session)
     qid = int(callback.data.split("_")[2])
-    q = session.get(QueueType, qid)
+    q = await session.get(QueueType, qid)
     await state.update_data(qid=qid)
     await callback.message.edit_text(
         f"Текущее: {q.description}\n👇 **Новое описание:**",
@@ -963,11 +1072,15 @@ async def m_edit_input(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(EditQueueStates.waiting_for_new_description)
-async def m_edit_save(message: types.Message, state: FSMContext):
+async def m_edit_save(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_edit_save(message, state, session)
     data = await state.get_data()
-    q = session.get(QueueType, data["qid"])
+    q = await session.get(QueueType, data["qid"])
     q.description = message.text
-    session.commit()
+    await session.commit()
     await message.answer("✅ Сохранено.", reply_markup=get_master_menu())
     await state.clear()
 
@@ -992,22 +1105,33 @@ async def m_force_single_start(callback: types.CallbackQuery, state: FSMContext)
 
 
 @router.message(MasterManageStates.waiting_for_nickname_add)
-async def m_force_nick(message: types.Message, state: FSMContext):
+async def m_force_nick(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_force_nick(message, state, session)
     if not await check_google_sheet(message.text):
         return await message.answer("❌ Невалидный ник.")
     await state.update_data(nick=message.text)
+    stmt = select(QueueType).filter_by(is_active=True)
+    result = await session.execute(stmt)
+    queues = result.scalars().all()
     kb = [
         [types.InlineKeyboardButton(text=q.name, callback_data=f"f_add_{q.id}")]
-        for q in session.query(QueueType).filter_by(is_active=True).all()
+        for q in queues
     ]
     await message.answer("Куда?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
     await state.set_state(MasterManageStates.waiting_for_queue_add)
 
 
 @router.callback_query(F.data.startswith("f_add_"))
-async def m_force_add_queue_select(callback: types.CallbackQuery, state: FSMContext):
+async def m_force_add_queue_select(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_force_add_queue_select(callback, state, session)
     qid = int(callback.data.split("_")[2])
-    q = session.get(QueueType, qid)
+    q = await session.get(QueueType, qid)
 
     # Store context
     await state.update_data(qid=qid, action_type="single")
@@ -1019,7 +1143,7 @@ async def m_force_add_queue_select(callback: types.CallbackQuery, state: FSMCont
     ]
     if q.name == "Цилинь":
         # Force Once
-        await finalize_add(callback, state, qid, "single", auto_requeue=False)
+        await finalize_add(callback, state, qid, "single", session, auto_requeue=False)
     else:
         await callback.message.edit_text(
             f"Выбрана: {q.name}.\nВыберите режим:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
@@ -1038,7 +1162,11 @@ async def m_bulk_add_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(MasterManageStates.waiting_for_bulk_list)
-async def m_bulk_input(message: types.Message, state: FSMContext):
+async def m_bulk_input(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_bulk_input(message, state, session)
     raw = message.text
     nicks = [line.strip() for line in raw.split("\n") if line.strip()]
 
@@ -1048,9 +1176,12 @@ async def m_bulk_input(message: types.Message, state: FSMContext):
     # Validate? Optional. Let's assume Master knows what they do.
     await state.update_data(bulk_nicks=nicks)
 
+    stmt = select(QueueType)
+    result = await session.execute(stmt)
+    queues = result.scalars().all()
     kb = [
         [types.InlineKeyboardButton(text=q.name, callback_data=f"f_bulk_{q.id}")]
-        for q in session.query(QueueType).all()
+        for q in queues
     ]
     await message.answer(
         f"Найдено ников: {len(nicks)}. Куда их добавить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
@@ -1058,9 +1189,13 @@ async def m_bulk_input(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("f_bulk_"))
-async def m_bulk_add_queue_select(callback: types.CallbackQuery, state: FSMContext):
+async def m_bulk_add_queue_select(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_bulk_add_queue_select(callback, state, session)
     qid = int(callback.data.split("_")[2])
-    q = session.get(QueueType, qid)
+    q = await session.get(QueueType, qid)
 
     await state.update_data(qid=qid, action_type="bulk")
 
@@ -1071,7 +1206,7 @@ async def m_bulk_add_queue_select(callback: types.CallbackQuery, state: FSMConte
     ]
 
     if q.name == "Цилинь":
-        await finalize_add(callback, state, qid, "bulk", auto_requeue=False)
+        await finalize_add(callback, state, qid, "bulk", session, auto_requeue=False)
     else:
         await callback.message.edit_text(
             f"Выбрана: {q.name}.\nВыберите режим для СПИСКА:",
@@ -1081,7 +1216,11 @@ async def m_bulk_add_queue_select(callback: types.CallbackQuery, state: FSMConte
 
 
 @router.callback_query(F.data.startswith("m_mode_"))
-async def m_force_mode_select(callback: types.CallbackQuery, state: FSMContext):
+async def m_force_mode_select(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_force_mode_select(callback, state, session)
     mode = callback.data.split("_")[2]  # once / auto
     auto_requeue = mode == "auto"
 
@@ -1089,14 +1228,19 @@ async def m_force_mode_select(callback: types.CallbackQuery, state: FSMContext):
     qid = data["qid"]
     action_type = data["action_type"]
 
-    await finalize_add(callback, state, qid, action_type, auto_requeue)
+    await finalize_add(callback, state, qid, action_type, session, auto_requeue)
 
 
-async def finalize_add(event, state, qid, action_type, auto_requeue):
+async def finalize_add(event, state, qid, action_type, session: AsyncSession = None, auto_requeue = False):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await finalize_add(event, state, qid, action_type, session, auto_requeue)
     data = await state.get_data()
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
-    q_name = session.get(QueueType, qid).name
+    q = await session.get(QueueType, qid)
+    q_name = q.name if q else "Que"
     master_username = event.from_user.username
 
     nicks = []
@@ -1109,10 +1253,14 @@ async def finalize_add(event, state, qid, action_type, auto_requeue):
     mode_str = " (Авто)" if auto_requeue else ""
 
     for nick in nicks:
-        char = session.query(Character).filter_by(nickname=nick).first()
+        stmt_char = select(Character).filter_by(nickname=nick)
+        result_char = await session.execute(stmt_char)
+        char = result_char.scalar_one_or_none()
         if char:
             uid = char.user_id
-            main_char = session.query(Character).filter_by(user_id=char.user_id, is_main=True).first()
+            stmt_main = select(Character).filter_by(user_id=char.user_id, is_main=True)
+            result_main = await session.execute(stmt_main)
+            main_char = result_main.scalar_one_or_none()
             main_nick = main_char.nickname if main_char else nick
         else:
             uid = None
@@ -1122,7 +1270,7 @@ async def finalize_add(event, state, qid, action_type, auto_requeue):
         asyncio.create_task(log_reward_to_sheet(q_name, main_nick, nick, master_username, f"👑 Мастер{mode_str}"))
         added_count += 1
 
-    session.commit()
+    await session.commit()
 
     if isinstance(event, types.CallbackQuery):
         await event.message.edit_text(
@@ -1137,34 +1285,56 @@ async def finalize_add(event, state, qid, action_type, auto_requeue):
 
 
 @router.callback_query(F.data == "m_force_del")
-async def m_force_del(callback: types.CallbackQuery):
-    queues = session.query(QueueType).all()
+async def m_force_del(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_force_del(callback, session)
+    stmt = select(QueueType)
+    result = await session.execute(stmt)
+    queues = result.scalars().all()
     kb = []
     for q in queues:
-        if session.query(QueueEntry).filter_by(queue_type_id=q.id).count() > 0:
+        stmt_count = select(func.count(QueueEntry.id)).filter_by(queue_type_id=q.id)
+        result_count = await session.execute(stmt_count)
+        if result_count.scalar() > 0:
             kb.append([types.InlineKeyboardButton(text=f"{q.name}", callback_data=f"sel_del_{q.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text("❌ Выбери очередь:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.startswith("sel_del_"))
-async def m_force_del_list(callback: types.CallbackQuery):
+async def m_force_del_list(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_force_del_list(callback, session)
     qid = int(callback.data.split("_")[2])
-    await render_force_del_list(callback, qid)
+    await render_force_del_list(callback, qid, session)
 
 
-async def render_force_del_list(event, qid):
+async def render_force_del_list(event, qid, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await render_force_del_list(event, qid, session)
     message = event.message if isinstance(event, types.CallbackQuery) else event
-    entries = session.query(QueueEntry).filter_by(queue_type_id=qid).all()
+    stmt = select(QueueEntry).filter_by(queue_type_id=qid)
+    result = await session.execute(stmt)
+    entries = result.scalars().all()
     kb = [[types.InlineKeyboardButton(text=f"❌ {e.character_name}", callback_data=f"kill_{e.id}")] for e in entries]
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await message.edit_text("Кого удалить?", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
 
 @router.callback_query(F.data.startswith("kill_"))
-async def m_kill(callback: types.CallbackQuery):
+async def m_kill(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_kill(callback, session)
     eid = int(callback.data.split("_")[1])
-    e = session.get(QueueEntry, eid)
+    e = await session.get(QueueEntry, eid, options=[selectinload(QueueEntry.queue)])
     if e:
         qid = e.queue_type_id
         asyncio.create_task(
@@ -1172,18 +1342,23 @@ async def m_kill(callback: types.CallbackQuery):
                 e.queue.name, e.character_name, e.character_name, callback.from_user.username, "⛔ Кик Мастером"
             )
         )
-        session.delete(e)
-        session.commit()
+        await session.delete(e)
+        await session.commit()
         await callback.answer("✅ Удалено.")
-        await callback.answer("✅ Удалено.")
-        await render_force_del_list(callback, qid)
+        await render_force_del_list(callback, qid, session)
     else:
         await callback.answer("Уже удален.")
 
 
 @router.callback_query(F.data == "m_global_log")
-async def m_global_log(callback: types.CallbackQuery):
-    hist = session.query(RewardHistory).order_by(RewardHistory.timestamp.desc()).limit(15).all()
+async def m_global_log(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_global_log(callback, session)
+    stmt = select(RewardHistory).order_by(RewardHistory.timestamp.desc()).limit(15)
+    result = await session.execute(stmt)
+    hist = result.scalars().all()
     text = "🗄 <b>Лог последних выдач:</b>\n\n" + ("Архив пуст." if not hist else "")
     for h in hist:
         text += f"• <code>{h.timestamp.strftime('%d.%m')}</code> <b>{h.character_name}</b> → {h.queue_name}\n"
@@ -1193,11 +1368,12 @@ async def m_global_log(callback: types.CallbackQuery):
 # --- ОБЪЯВЛЕНИЯ (BROADCAST) ---
 # Вспомогательные функции для шедулера
 async def run_broadcast(ann_id, bot_instance):
-    with session.no_autoflush:
-        ann = session.get(ScheduledAnnouncement, ann_id)
+    async with AsyncSessionLocal() as session:
+        ann = await session.get(ScheduledAnnouncement, ann_id)
         if not ann or not ann.is_active:
             return
-        users = session.query(User).all()
+        result = await session.execute(select(User))
+        users = result.scalars().all()
         for u in users:
             try:
                 await bot_instance.send_message(u.telegram_id, f"📢 <b>ОБЪЯВЛЕНИЕ</b>\n\n{ann.text}", parse_mode="HTML")
@@ -1205,7 +1381,7 @@ async def run_broadcast(ann_id, bot_instance):
                 pass
         if ann.schedule_type == "once_future":
             ann.is_active = False
-            session.commit()
+            await session.commit()
 
 
 def schedule_job(ann, bot_instance):
@@ -1248,14 +1424,20 @@ async def m_ann_start(callback: types.CallbackQuery, state: FSMContext):
 
 # --- AFK LIST ---
 @router.callback_query(F.data == "m_afk_list")
-async def m_afk_list(callback: types.CallbackQuery):
+async def m_afk_list(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_afk_list(callback, session)
     now = get_msk_now()
     # Find active AFKs
     # Ideally logic: end_date >= now or (start <= now <= end) ?
     # Let's show all valid future/present periods.
     # filter(User.afk_end >= now) basically.
 
-    users = session.query(User).filter(User.afk_end >= now).all()
+    stmt = select(User).filter(User.afk_end >= now).options(selectinload(User.characters))
+    result = await session.execute(stmt)
+    users = result.scalars().all()
 
     text = "🛌 <b>Список текущих и будущих AFK:</b>\n\n"
     if not users:
@@ -1279,10 +1461,14 @@ async def m_afk_list(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("m_afk_set_"))
-async def m_afk_admin_start(callback: types.CallbackQuery, state: FSMContext):
+async def m_afk_admin_start(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_afk_admin_start(callback, state, session)
     parts = callback.data.split("_")
     uid, page = int(parts[3]), int(parts[4])
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
     if not user:
         return await callback.answer("Ошибка user")
 
@@ -1306,6 +1492,7 @@ async def m_afk_admin_date_click(callback: types.CallbackQuery, state: FSMContex
         dt = now + timedelta(days=1)
 
     await state.update_data(start_date=dt)
+    await callback.answer()
     await m_afk_admin_ask_end(callback.message, state)
 
 
@@ -1326,7 +1513,11 @@ async def m_afk_admin_ask_end(message, state):
 
 
 @router.callback_query(MasterManageStates.waiting_for_afk_end, F.data.startswith("afk_dur_"))
-async def m_afk_admin_dur_click(callback: types.CallbackQuery, state: FSMContext):
+async def m_afk_admin_dur_click(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_afk_admin_dur_click(callback, state, session)
     data = await state.get_data()
     start_dt = data.get("start_date")
     action = callback.data.split("_")[2]
@@ -1341,11 +1532,15 @@ async def m_afk_admin_dur_click(callback: types.CallbackQuery, state: FSMContext
         days = int(action)
         end_dt = start_dt + timedelta(days=days)
 
-    await m_afk_admin_finish(callback, state, start_dt, end_dt)
+    await m_afk_admin_finish(callback, state, start_dt, end_dt, session=session)
 
 
 @router.message(MasterManageStates.waiting_for_afk_end)
-async def m_afk_admin_dur_manual(message: types.Message, state: FSMContext):
+async def m_afk_admin_dur_manual(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_afk_admin_dur_manual(message, state, session)
     data = await state.get_data()
     start_dt = data.get("start_date")
     end_dt = parse_date_input(message.text)
@@ -1356,40 +1551,38 @@ async def m_afk_admin_dur_manual(message: types.Message, state: FSMContext):
     if end_dt < start_dt:
         return await message.answer("⚠️ Дата окончания раньше начала.", reply_markup=get_afk_end_kb())
 
-    # Determine context for reply usually callback, here message
-    # We call finish but finish expects callback for edit. We should handle message properly.
-    # Let's adapt finish.
-
     uid = data["target_uid"]
     page = data["page"]
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
 
     user.afk_start = start_dt
     user.afk_end = end_dt
     session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
-    session.commit()
+    await session.commit()
 
-    await message.answer(f"✅ AFK установлен для {user.username}.")
-    # We need to render user manage again. We need a callback object or fake it.
-    # It's cleaner to just show text and clear state, as we can't easily jump back to inline menu from reply message without sending a fresh one.
+    await message.answer(f"✅ AFK установлен для {user.username or user.telegram_id}.")
     kb = [[types.InlineKeyboardButton(text="🔙 К профилю", callback_data=f"m_u_manage_{uid}_{page}")]]
     await message.answer("Вернуться:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
     await state.clear()
 
 
-async def m_afk_admin_finish(callback, state, start_dt, end_dt):
+async def m_afk_admin_finish(callback, state, start_dt, end_dt, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await m_afk_admin_finish(callback, state, start_dt, end_dt, session)
     data = await state.get_data()
     uid = data["target_uid"]
     page = data["page"]
-    user = session.get(User, uid)
+    user = await session.get(User, uid)
 
     user.afk_start = start_dt
     user.afk_end = end_dt
     session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt))
-    session.commit()
+    await session.commit()
 
     await callback.answer("✅ AFK установлен.")
-    await render_user_manage(callback, uid, page)
+    await render_user_manage(callback, uid, page, session)
     await state.clear()
 
 
@@ -1411,13 +1604,13 @@ async def m_ann_text(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("ann_"))
-async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
+async def m_ann_type(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     atype = callback.data.split("_")[1]
     if atype == "now":
         data = await state.get_data()
         ann = ScheduledAnnouncement(text=data["text"], schedule_type="once_now", run_time="now", is_active=True)
         session.add(ann)
-        session.commit()
+        await session.commit()
         await run_broadcast(ann.id, callback.bot)
         await callback.message.edit_text("✅ Отправлено.", reply_markup=get_master_menu())
         await state.clear()
@@ -1439,14 +1632,14 @@ async def m_ann_type(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(AnnounceStates.waiting_for_datetime)
-async def process_future_datetime(message: types.Message, state: FSMContext):
+async def process_future_datetime(message: types.Message, state: FSMContext, session: AsyncSession):
     try:
         dt = message.text.strip()
         datetime.strptime(dt, "%d.%m.%Y %H:%M")
         data = await state.get_data()
         ann = ScheduledAnnouncement(text=data["text"], schedule_type="once_future", run_time=dt, is_active=True)
         session.add(ann)
-        session.commit()
+        await session.commit()
         schedule_job(ann, message.bot)
         await message.answer(f"✅ Запланировано на {dt}", reply_markup=get_master_menu())
         await state.clear()
@@ -1479,7 +1672,7 @@ async def confirm_days(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(AnnounceStates.waiting_for_time_only)
-async def process_time_only(message: types.Message, state: FSMContext):
+async def process_time_only(message: types.Message, state: FSMContext, session: AsyncSession):
     try:
         t_str = message.text.strip()
         datetime.strptime(t_str, "%H:%M")
@@ -1490,7 +1683,7 @@ async def process_time_only(message: types.Message, state: FSMContext):
             text=data["text"], schedule_type=sch_type, run_time=t_str, days_of_week=days_str, is_active=True
         )
         session.add(ann)
-        session.commit()
+        await session.commit()
         schedule_job(ann, message.bot)
         await message.answer(f"✅ Расписание создано: {t_str}", reply_markup=get_master_menu())
         await state.clear()
@@ -1499,8 +1692,10 @@ async def process_time_only(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "m_schedule")
-async def m_show_schedule(callback: types.CallbackQuery):
-    tasks = session.query(ScheduledAnnouncement).filter_by(is_active=True).all()
+async def m_show_schedule(callback: types.CallbackQuery, session: AsyncSession):
+    stmt = select(ScheduledAnnouncement).filter_by(is_active=True)
+    result = await session.execute(stmt)
+    tasks = result.scalars().all()
     text = "🗓 <b>Активные задачи:</b>\n\n" + ("Пусто" if not tasks else "")
     kb = []
     for t in tasks:
@@ -1509,7 +1704,7 @@ async def m_show_schedule(callback: types.CallbackQuery):
             if t.schedule_type == "daily"
             else (f"📆 {t.days_of_week}" if t.schedule_type == "weekly" else f"📅 {t.run_time}")
         )
-        text += f"{desc} в {t.run_time} — {t.text[:10]}...\n"
+        text += f"{desc} в {t.run_time} — {(t.text or '')[:10]}...\n"
         kb.append([types.InlineKeyboardButton(text=f"❌ Удалить ({desc})", callback_data=f"del_sch_{t.id}")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="menu_master")])
     await callback.message.edit_text(
@@ -1518,20 +1713,20 @@ async def m_show_schedule(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("del_sch_"))
-async def m_del_schedule(callback: types.CallbackQuery):
+async def m_del_schedule(callback: types.CallbackQuery, session: AsyncSession):
     aid = int(callback.data.split("_")[2])
-    task = session.get(ScheduledAnnouncement, aid)
+    task = await session.get(ScheduledAnnouncement, aid)
     if task:
         task.is_active = False
-        session.commit()
+        await session.commit()
         try:
             scheduler.remove_job(f"ann_{aid}")
         except JobLookupError:
             pass
         await callback.answer("Отключено.")
-        await m_show_schedule(callback)
+        await m_show_schedule(callback, session)
     else:
-        await m_show_schedule(callback)
+        await m_show_schedule(callback, session)
 
 
 # --- БЭКАП СИСТЕМА (NEW) ---
@@ -1692,10 +1887,10 @@ async def m_bk_restore_do(callback: types.CallbackQuery):
 
 # --- PUBLIC LOG SETTINGS ---
 @router.callback_query(F.data == "m_log_settings")
-async def m_log_settings_menu(callback: types.CallbackQuery):
-    enabled = get_setting("public_log_enabled")
-    chan_id = get_setting("public_log_channel_id")
-    thread_id = get_setting("public_log_thread_id")
+async def m_log_settings_menu(callback: types.CallbackQuery, session: AsyncSession):
+    enabled = await get_setting(session, "public_log_enabled")
+    chan_id = await get_setting(session, "public_log_channel_id")
+    thread_id = await get_setting(session, "public_log_thread_id")
 
     status_icon = "✅ ВКЛ" if enabled == "true" else "❌ ВЫКЛ"
 
@@ -1728,11 +1923,11 @@ async def m_log_settings_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "m_toggle_log")
-async def m_toggle_log(callback: types.CallbackQuery):
-    was = get_setting("public_log_enabled")
+async def m_toggle_log(callback: types.CallbackQuery, session: AsyncSession):
+    was = await get_setting(session, "public_log_enabled")
     new_val = "false" if was == "true" else "true"
-    set_setting("public_log_enabled", new_val)
-    await m_log_settings_menu(callback)
+    await set_setting(session, "public_log_enabled", new_val)
+    await m_log_settings_menu(callback, session)
 
 
 @router.callback_query(F.data == "m_set_log_chan")
@@ -1746,7 +1941,7 @@ async def m_set_log_chan_start(callback: types.CallbackQuery, state: FSMContext)
 
 
 @router.message(MasterManageStates.waiting_for_log_channel_id)
-async def m_set_log_chan_save(message: types.Message, state: FSMContext):
+async def m_set_log_chan_save(message: types.Message, state: FSMContext, session: AsyncSession):
     val = message.text.strip()
 
     chat_id = val
@@ -1764,12 +1959,12 @@ async def m_set_log_chan_save(message: types.Message, state: FSMContext):
         )
         return
 
-    set_setting("public_log_channel_id", chat_id)
+    await set_setting(session, "public_log_channel_id", chat_id)
     if thread_id:
-        set_setting("public_log_thread_id", thread_id)
+        await set_setting(session, "public_log_thread_id", thread_id)
     else:
         # Clear thread id if not provided
-        set_setting("public_log_thread_id", "")
+        await set_setting(session, "public_log_thread_id", "")
 
     await message.answer(
         f"✅ Канал сохранен: {chat_id}" + (f" (Топик: {thread_id})" if thread_id else ""),
@@ -1793,7 +1988,7 @@ async def m_set_log_chan_save(message: types.Message, state: FSMContext):
 
 # --- APPROVAL SYSTEM (NEW ACCESS) ---
 @router.callback_query(F.data.startswith("appr:"))
-async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
+async def m_process_approval(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     parts = callback.data.split(":")
     action = parts[1]  # ok, edit, no
     user_id = int(parts[2])
@@ -1807,7 +2002,7 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
-    target_user = session.get(User, user_id)
+    target_user = await session.get(User, user_id)
     if not target_user:
         return await callback.answer("Пользователь не найден.", show_alert=True)
 
@@ -1822,7 +2017,7 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
 
         # Clear pending state
         target_user.pending_request_nick = None
-        session.commit()
+        await session.commit()
 
         await callback.message.answer(f"❌ Заявка отклонена ({target_user.username}).")
         await callback.answer()
@@ -1844,7 +2039,7 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
                 await callback.answer("Заявка отменена пользователем.", show_alert=True)
                 return
 
-        await finalize_approval(callback, target_user, nick, reg_type)
+        await finalize_approval(callback, target_user, nick, reg_type, session)
 
     # 3. Approve Edit (Ask for nick)
     if action == "edit":
@@ -1857,27 +2052,32 @@ async def m_process_approval(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(MasterManageStates.waiting_for_approve_edit)
-async def m_approve_edit_save(message: types.Message, state: FSMContext):
+async def m_approve_edit_save(message: types.Message, state: FSMContext, session: AsyncSession):
     data = await state.get_data()
     uid = data["target_uid"]
     reg_type = data["reg_type"]
     nick = message.text.strip()
 
-    target_user = session.get(User, uid)
+    target_user = await session.get(User, uid)
     if target_user:
-        await finalize_approval(message, target_user, nick, reg_type)
+        await finalize_approval(message, target_user, nick, reg_type, session)
 
     await state.clear()
 
 
-async def finalize_approval(event, target_user, nick, reg_type):
+async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSession):
     # Logic similar to finish_main_input / finish_alt_input
     # But since we are in admin.py and can't easy import from user.py, we replicate core logic.
 
     # 1. Main Char Logic
     if reg_type == "main_input":
-        existing_char = session.query(Character).filter_by(user_id=target_user.id, nickname=nick).first()
-        old_main = session.query(Character).filter_by(user_id=target_user.id, is_main=True).first()
+        stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
+        result_existing = await session.execute(stmt_existing)
+        existing_char = result_existing.scalar_one_or_none()
+
+        stmt_old = select(Character).filter_by(user_id=target_user.id, is_main=True)
+        result_old = await session.execute(stmt_old)
+        old_main = result_old.scalar_one_or_none()
 
         if not old_main:
             if existing_char:
@@ -1886,19 +2086,6 @@ async def finalize_approval(event, target_user, nick, reg_type):
             else:
                 session.add(Character(user_id=target_user.id, nickname=nick, is_main=True))
                 msg = f"✅ Основа установлена: <b>{nick}</b> (Одобрено Мастером)"
-
-                # Invite Link for First Char -> DISABLED
-                # count = session.query(Character).filter_by(user_id=target_user.id).count()
-                # if count == 0: # It was 0 before this add
-                #      chat_id = get_setting('clan_chat_id')
-                #      if chat_id:
-                #         try:
-                #             # We need bot instance. event can be Message or Callback
-                #             bot_inst = event.bot
-                #             link = await bot_inst.create_chat_invite_link(chat_id, member_limit=1, name=f"For {target_user.username}")
-                #             try: await bot_inst.send_message(target_user.telegram_id, f"👋 Заявка одобрена!\nВот твоя ссылка: {link.invite_link}")
-                #             except Exception: pass
-                #         except Exception as e: print(f"Invite error approval: {e}")
 
         else:
             # Logic for changing main is complex (confirmations etc).
@@ -1911,15 +2098,18 @@ async def finalize_approval(event, target_user, nick, reg_type):
             msg = f"✅ Основа сменена на <b>{nick}</b> (Мастером)."
 
             # Queue updates
-            entries = session.query(QueueEntry).filter_by(user_id=target_user.id).all()
+            stmt_entries = select(QueueEntry).filter_by(user_id=target_user.id)
+            result_entries = await session.execute(stmt_entries)
+            entries = result_entries.scalars().all()
             for e in entries:
                 if e.character_name != nick:
                     e.character_name = nick
-                    # Log update logic omitted for brevity or can copy-paste log call
 
     # 2. Alt Logic
     elif reg_type == "alt_input":
-        if session.query(Character).filter_by(user_id=target_user.id, nickname=nick).first():
+        stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
+        result_existing = await session.execute(stmt_existing)
+        if result_existing.scalar_one_or_none():
             msg = f"⚠️ Твин {nick} уже был у пользователя."
         else:
             session.add(Character(user_id=target_user.id, nickname=nick, is_main=False))
@@ -1927,13 +2117,13 @@ async def finalize_approval(event, target_user, nick, reg_type):
 
     # Clear pending state
     target_user.pending_request_nick = None
-    session.commit()
+    await session.commit()
 
     # Notify User with Main Menu
     try:
         # Generate the main menu text with the approval message as header
-        menu_text, restricted = get_menu_text(target_user, custom_title=msg)
-        main_menu_kb = get_main_menu(target_user, restricted)
+        menu_text, restricted = await get_menu_text(session, target_user, custom_title=msg)
+        main_menu_kb = await get_main_menu(session, target_user, restricted)
 
         await bot.send_message(target_user.telegram_id, menu_text, parse_mode="HTML", reply_markup=main_menu_kb)
     except Exception:
@@ -1970,9 +2160,10 @@ async def finalize_approval(event, target_user, nick, reg_type):
 
 
 # --- ГРУППА КЛАНА ---
+
 @router.message(Command("set_clan_group"))
-async def cmd_set_clan_group(message: types.Message):
-    if not is_master(message.from_user.id):
+async def cmd_set_clan_group(message: types.Message, session: AsyncSession):
+    if not await is_master(session, message.from_user.id):
         return
 
     # If command argument is present, use it. Else use current chat.
@@ -1982,7 +2173,7 @@ async def cmd_set_clan_group(message: types.Message):
     else:
         chat_id = message.chat.id
 
-    set_setting("clan_chat_id", chat_id)
+    await set_setting(session, "clan_chat_id", chat_id)
     await message.answer(
         f"✅ ID этой группы ({chat_id}) сохранен как Клановая Группа.\nТеперь бот будет приглашать сюда новичков и кикать тех, кто удалил всех персонажей."
     )
@@ -1990,8 +2181,8 @@ async def cmd_set_clan_group(message: types.Message):
 
 # --- VERIFICATION CODE SETTINGS ---
 @router.callback_query(F.data == "m_verification")
-async def m_verification_menu(callback: types.CallbackQuery):
-    code = get_setting("verification_code")
+async def m_verification_menu(callback: types.CallbackQuery, session: AsyncSession):
+    code = await get_setting(session, "verification_code")
     status = f"✅ ВКЛ ({code})" if code else "❌ ВЫКЛ"
 
     text = f"🔐 <b>Код верификации</b>\nТекущий статус: {status}\n\nЕсли включено, бот будет требовать этот код при добавлении любого персонажа (основы или твина)."
@@ -2015,9 +2206,9 @@ async def m_set_code_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(MasterManageStates.waiting_for_code_setting)
-async def m_set_code_save(message: types.Message, state: FSMContext):
+async def m_set_code_save(message: types.Message, state: FSMContext, session: AsyncSession):
     code = message.text.strip()
-    set_setting("verification_code", code)
+    await set_setting(session, "verification_code", code)
     await message.answer(
         f"✅ Код верификации установлен: <b>{code}</b>", parse_mode="HTML", reply_markup=get_master_menu()
     )
@@ -2025,32 +2216,20 @@ async def m_set_code_save(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "m_disable_code")
-async def m_disable_code(callback: types.CallbackQuery):
-    set_setting(
-        "verification_code", None
-    )  # None удаляет или ставит null (в нашей функции set_setting надо проверить реализацию, обычно она делает update, если None -> удалим?)
-    # Проверим реализацию set_setting. Если она просто пишет строку, то None может упасть или записаться как "None".
-    # Лучше записать пустую строку или удалить запись.
-    # В database.py:
-    # def set_setting(key, value):
-    #     s = session.query(Settings).filter_by(key=key).first()
-    #     if s: s.value = value
-    #     else: session.add(Settings(key=key, value=value))
-    #     session.commit()
-    # Если value=None, то s.value = None. В базе Column(String).
-
-    # Чтобы было надежнее, удалим запись.
-    s = session.query(Settings).filter_by(key="verification_code").first()
+async def m_disable_code(callback: types.CallbackQuery, session: AsyncSession):
+    stmt = select(Settings).filter_by(key="verification_code")
+    result = await session.execute(stmt)
+    s = result.scalar_one_or_none()
     if s:
-        session.delete(s)
-        session.commit()
+        await session.delete(s)
+        await session.commit()
 
     await callback.answer("✅ Проверка кодом отключена.")
-    await m_verification_menu(callback)
+    await m_verification_menu(callback, session)
 
 
 # @router.chat_member()
-async def on_user_join(event: ChatMemberUpdated):
+async def on_user_join(event: ChatMemberUpdated, session: AsyncSession):
     # Проверяем, что это вступление (был left/kicked/restricted -> стал member/creator/administrator)
     old = event.old_chat_member.status
     new = event.new_chat_member.status
@@ -2061,7 +2240,7 @@ async def on_user_join(event: ChatMemberUpdated):
     if old in ["member", "administrator", "creator"]:
         return  # Уже был в чате (смена прав)
 
-    chat_id = get_setting("clan_chat_id")
+    chat_id = await get_setting(session, "clan_chat_id")
     current_chat_id = str(event.chat.id)
 
     # Проверяем, что это целевая группа
@@ -2073,12 +2252,15 @@ async def on_user_join(event: ChatMemberUpdated):
         return
 
     # Проверка по базе
-    db_user = session.query(User).filter_by(telegram_id=user.id).first()
+    stmt_user = select(User).filter_by(telegram_id=user.id)
+    result_user = await session.execute(stmt_user)
+    db_user = result_user.scalar_one_or_none()
     has_chars = False
 
     if db_user:
-        count = session.query(Character).filter_by(user_id=db_user.id).count()
-        if count > 0:
+        stmt_count = select(func.count(Character.id)).filter_by(user_id=db_user.id)
+        result_count = await session.execute(stmt_count)
+        if result_count.scalar() > 0:
             has_chars = True
 
     if not has_chars:

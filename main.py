@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 # Web imports
 from starlette.middleware.sessions import SessionMiddleware
 
-from database import ScheduledAnnouncement, init_db, session
+from database import ScheduledAnnouncement, init_db, AsyncSessionLocal
 from handlers import admin, user, ai_admin, ai_user
 from handlers.admin import schedule_job
 
@@ -54,9 +54,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"status": "error", "message": f"Internal Server Error: {str(exc)}"})
 
 
-async def on_startup():
+async def main():
+    # 0. Init Database
+    await init_db()
+    
     # 1. Init Web DB
-    # 1. Web DB init removed (handled by sync init_db)
+    # 1. Web DB init removed (handled by async init_db)
     pass
 
     # 1.1 Observer Browser Init
@@ -68,12 +71,15 @@ async def on_startup():
     await bot.set_my_commands([BotCommand(command="/start", description="🏠 Главное меню")])
 
     # 3. Restore Scheduled Tasks
-    tasks = session.query(ScheduledAnnouncement).filter_by(is_active=True).all()
-    count = 0
-    for t in tasks:
-        if t.schedule_type != "once_now":
-            schedule_job(t, bot)
-            count += 1
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(ScheduledAnnouncement).filter_by(is_active=True))
+        tasks = result.scalars().all()
+        count = 0
+        for t in tasks:
+            if t.schedule_type != "once_now":
+                schedule_job(t, bot)
+                count += 1
 
     # 3.1 Schedule Daily Backup (at 04:00 AM)
     from scripts.backup_db import perform_backup
@@ -97,15 +103,16 @@ async def on_startup():
     print("Version: 2.5.0 (AI Features + RAG + Summary)")
 
 
-async def main():
     # Setup Bot Routers
+    from middlewares import DbSessionMiddleware
+    dp.update.outer_middleware(DbSessionMiddleware())
+    
     dp.include_router(user.router)
     dp.include_router(admin.router)
     dp.include_router(ai_admin.router)
     dp.include_router(ai_user.router)
 
     await bot.delete_webhook(drop_pending_updates=True)
-    await on_startup()
 
     # Configure Web Server
     import os
@@ -157,7 +164,6 @@ async def serve_react_app(full_path: str):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    init_db()  # Init Bot DB (Sync)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

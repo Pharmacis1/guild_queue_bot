@@ -1,11 +1,17 @@
 import datetime
+from typing import Dict, List, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from database import Event, Player, QueueEntry, PartyMember, get_effective_limit_logic, get_msk_now, get_user_active_queues, session
+from database import Character, Event, PartyMember, Player, QueueEntry, User, \
+    get_effective_limit_logic, get_msk_now, get_user_active_queues
+
+session = None # Placeholder for legacy sync tests to patch
 
 
-def get_start_of_week():
+def get_start_of_week() -> int:
     """Возвращает timestamp (int) начала текущей недели (понедельник 00:00)."""
     now = datetime.datetime.now()
     start_of_week = now - datetime.timedelta(days=now.weekday())
@@ -13,22 +19,21 @@ def get_start_of_week():
     return int(start_of_week.timestamp())
 
 
-def is_character_in_guild(nickname: str) -> bool:
+async def is_character_in_guild(session: AsyncSession, nickname: str) -> bool:
     """
     Проверяет, состоит ли персонаж в гильдии.
-    - Если персонажа нет в таблице Player - считается 'в ги' (мог быть добавлен через мастера).
-    - Если Player.in_clan == 1 - 'в ги'.
-    - В остальных случаях - 'не в ги'.
     """
-    player = session.query(Player).filter(func.lower(Player.nickname) == func.lower(nickname)).first()
+    result = await session.execute(
+        select(Player).filter(func.lower(Player.nickname) == func.lower(nickname))
+    )
+    player = result.scalar_one_or_none()
     if not player:
         return True  # Нет в базе - считаем легальным (добавлен мастером)
     return player.in_clan == 1
 
 
-def get_user_weekly_valor_map(user):
+async def get_user_weekly_valor_map(session: AsyncSession, user: User) -> Dict[str, int]:
     """Возвращает словарь {nickname: valor} для персонажей пользователя за текущую неделю."""
-    # 1. Собираем ники и мапим их структуру для быстрого доступа
     char_map = {c.nickname: 0 for c in user.characters}
     if not char_map:
         return {}
@@ -36,7 +41,8 @@ def get_user_weekly_valor_map(user):
     nicks = list(char_map.keys())
 
     # 2. Ищем role_id этих персонажей
-    players = session.query(Player).filter(Player.nickname.in_(nicks)).all()
+    result = await session.execute(select(Player).filter(Player.nickname.in_(nicks)))
+    players = result.scalars().all()
     if not players:
         return char_map
 
@@ -48,12 +54,13 @@ def get_user_weekly_valor_map(user):
 
     # 3. Суммируем события за неделю с группировкой по role_id
     start_ts = get_start_of_week()
-    events = (
-        session.query(Event.role_id, func.sum(Event.value))
+    stmt = (
+        select(Event.role_id, func.sum(Event.value))
         .filter(Event.event_type == 1, Event.role_id.in_(role_ids), Event.timestamp >= start_ts)
         .group_by(Event.role_id)
-        .all()
     )
+    result = await session.execute(stmt)
+    events = result.all()
 
     # 4. Заполняем результат
     for rid, total in events:
@@ -65,30 +72,26 @@ def get_user_weekly_valor_map(user):
     return char_map
 
 
-def get_queue_position(entry):
+async def get_queue_position(session: AsyncSession, entry: QueueEntry) -> int:
     """Возвращает позицию персонажа в очереди (1-based), исключая тех, кто не в ги."""
-    # Считаем количество записей в ТОЙ ЖЕ очереди, у которых id МЕНЬШЕ текущего
-    # И при этом персонаж состоит в гильдии (или отсутствует в Player)
-    position = (
-        session.query(QueueEntry)
+    stmt = (
+        select(func.count(QueueEntry.id))
         .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
         .filter(
             QueueEntry.queue_type_id == entry.queue_type_id,
             QueueEntry.id < entry.id,
             (Player.in_clan == 1) | (Player.in_clan.is_(None))
         )
-        .count()
     )
+    result = await session.execute(stmt)
+    position = result.scalar() or 0
     return position + 1
 
 
-def get_menu_text(user, custom_title=None):
+async def get_menu_text(session: AsyncSession, user: User, custom_title=None) -> Tuple[str, bool]:
     """
     Генерирует текст меню.
-    :param user: Объект пользователя
-    :param custom_title: (Опционально) Заголовок сообщения. Если None — ставит приветствие.
     """
-    # Если нет персонажей — всегда показываем инструкцию, заголовки тут не важны
     if not user.characters:
         return (
             "👋 <b>Привет!</b>\n\n"
@@ -97,23 +100,21 @@ def get_menu_text(user, custom_title=None):
             "2️⃣ Нажми <b>«✍️ Записаться в очередь»</b>, выбери нужную очередь и нажми на ник своего персонажа.\n\n"
             "🤖 Бот пришлет уведомление, когда Мастер выдаст тебе награду.\n\n"
             "👇 <b>Выбери действие:</b>"
-        )
+        ), False
 
     # --- СБОР СТАТИСТИКИ ---
-    active_queues = get_user_active_queues(user.id)
+    active_queues = await get_user_active_queues(session, user.id)
     current_count = len(active_queues)
-    limit = get_effective_limit_logic(user)
-    available_slots = limit - current_count
-    if available_slots < 0:
-        available_slots = 0
+    limit = await get_effective_limit_logic(session, user)
+    available_slots = max(0, limit - current_count)
 
     # Считаем доблесть по персонажам
-    valor_map = get_user_weekly_valor_map(user)
+    valor_map = await get_user_weekly_valor_map(session, user)
 
     chars_display_list = []
     all_out_of_guild = True
     for char in user.characters:
-        in_guild = is_character_in_guild(char.nickname)
+        in_guild = await is_character_in_guild(session, char.nickname)
         if in_guild:
             all_out_of_guild = False
         
@@ -123,17 +124,36 @@ def get_menu_text(user, custom_title=None):
         char_line = f"• <b>{char.nickname}</b>{suffix} ({val} добл.)"
         
         # Получаем информацию о КП
-        player = session.query(Player).filter(func.lower(Player.nickname) == func.lower(char.nickname)).first()
+        result = await session.execute(
+            select(Player).filter(func.lower(Player.nickname) == func.lower(char.nickname))
+        )
+        player = result.scalar_one_or_none()
         if player and player.role_id:
-            pm = session.query(PartyMember).filter_by(player_role_id=player.role_id).first()
+            # Need to load pm and its party
+            stmt = (
+                select(PartyMember)
+                .filter_by(player_role_id=player.role_id)
+                .options(selectinload(PartyMember.party))
+            )
+            result = await session.execute(stmt)
+            pm = result.scalar_one_or_none()
             if pm:
                 party = pm.party
                 if party.name:
                     char_line += f"\n  КП: «{party.name}»"
                 else:
-                    leader_pm = session.query(PartyMember).filter_by(party_id=party.id, is_leader=True).first()
+                    # Find leader
+                    stmt_leader = (
+                        select(PartyMember)
+                        .filter_by(party_id=party.id, is_leader=True)
+                    )
+                    result_leader = await session.execute(stmt_leader)
+                    leader_pm = result_leader.scalar_one_or_none()
                     if leader_pm:
-                        leader_player = session.query(Player).filter_by(role_id=leader_pm.player_role_id).first()
+                        result_leader_player = await session.execute(
+                            select(Player).filter_by(role_id=leader_pm.player_role_id)
+                        )
+                        leader_player = result_leader_player.scalar_one_or_none()
                         leader_nick = leader_player.nickname if leader_player else "Неизвестно"
                         char_line += f"\n  КП: {leader_nick}"
                     else:
@@ -146,19 +166,21 @@ def get_menu_text(user, custom_title=None):
     if active_queues:
         q_list_lines = []
         for q in active_queues:
-            pos = get_queue_position(q)
-            q_list_lines.append(f"- <b>{q.queue.name}</b> ({q.character_name}) — {pos}-й в очереди")
+            # Re-fetch with join to get queue name
+            result = await session.execute(
+                select(QueueEntry).filter_by(id=q.id).options(selectinload(QueueEntry.queue))
+            )
+            full_q = result.scalar_one()
+            pos = await get_queue_position(session, full_q)
+            q_list_lines.append(f"- <b>{full_q.queue.name}</b> ({full_q.character_name}) — {pos}-й в очереди")
         queues_display = "\n".join(q_list_lines)
     else:
         queues_display = "<i>Нет активных записей</i>"
 
-    # --- ФОРМИРОВАНИЕ ЗАГОЛОВКА ---
-    # Если заголовок передали — используем его, иначе — стандартное приветствие
     header = custom_title if custom_title else "👋 <b>С возвращением!</b>"
 
     afk_info = ""
     if user.afk_start and user.afk_end:
-        # Check expiration
         now = get_msk_now()
         if user.afk_end >= now:
             afk_info = f"🛌 <b>Режим AFK:</b> {user.afk_start.strftime('%d.%m')} - {user.afk_end.strftime('%d.%m')}\n\n"

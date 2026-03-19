@@ -1,37 +1,57 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from database import session, User, FaqTopic, Settings, get_setting, set_setting
+from database import User, FaqTopic, Settings, get_setting, set_setting
 from states import AIAdminStates
 from keyboards import get_back_btn, get_main_menu, get_master_ai_menu
 from loader import bot
 
 router = Router()
+session = None
 
-def is_master(user_id):
-    u = session.query(User).filter_by(telegram_id=user_id).first()
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def is_master(session: AsyncSession, user_id):
+    stmt = select(User).filter_by(telegram_id=user_id)
+    result = await session.execute(stmt)
+    u = result.scalar_one_or_none()
     return u and u.is_master
 
 @router.callback_query(F.data == "m_menu_ai")
-async def open_ai_menu(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def open_ai_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await open_ai_menu(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text(
         "🤖 **AI & FAQ Управление**", reply_markup=get_master_ai_menu(), parse_mode="Markdown"
     )
 
 @router.callback_query(F.data == "m_ai_add")
-async def cb_add_topic(callback: types.CallbackQuery, state: FSMContext):
-    if not is_master(callback.from_user.id):
+async def cb_add_topic(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cb_add_topic(callback, state, session)
+    if not await is_master(session, callback.from_user.id):
         return
     await callback.message.edit_text("✍️ Введите название темы (вопрос):", reply_markup=get_back_btn("m_menu_ai"))
     await state.set_state(AIAdminStates.waiting_for_topic)
 
 @router.callback_query(F.data == "m_ai_list")
-async def cb_list_topics(callback: types.CallbackQuery):
-    if not is_master(callback.from_user.id):
+async def cb_list_topics(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cb_list_topics(callback, session)
+    if not await is_master(session, callback.from_user.id):
         return
-    topics = session.query(FaqTopic).all()
+    stmt = select(FaqTopic)
+    result = await session.execute(stmt)
+    topics = result.scalars().all()
     
     text = "📚 <b>Список тем FAQ:</b>\n"
     if not topics:
@@ -50,8 +70,12 @@ async def cb_set_channel(callback: types.CallbackQuery):
 
 
 @router.message(Command("add_topic"))
-async def cmd_add_topic(message: types.Message, state: FSMContext):
-    if not is_master(message.from_user.id):
+async def cmd_add_topic(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_add_topic(message, state, session)
+    if not await is_master(session, message.from_user.id):
         return
     await message.answer("✍️ Введите название темы (вопрос):", reply_markup=get_back_btn())
     await state.set_state(AIAdminStates.waiting_for_topic)
@@ -67,7 +91,11 @@ async def process_topic(message: types.Message, state: FSMContext):
     await state.set_state(AIAdminStates.waiting_for_content)
 
 @router.message(AIAdminStates.waiting_for_content)
-async def process_content(message: types.Message, state: FSMContext):
+async def process_content(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await process_content(message, state, session)
     # Check for completion command
     if message.text == "/done":
         data = await state.get_data()
@@ -82,6 +110,8 @@ async def process_content(message: types.Message, state: FSMContext):
         wait_msg = await message.answer("💾 Сохраняю тему и генерирую эмбеддинги...")
         
         # 1. Prepare full text for embedding
+        from logic.ai_helper import get_ai_helper
+        ai = get_ai_helper()
         full_text = f"Topic: {topic_name}\n"
         for m in messages_data:
             if m.get('text'):
@@ -90,8 +120,6 @@ async def process_content(message: types.Message, state: FSMContext):
                 full_text += "[Photo]\n"
         
         # 2. Compute embedding
-        from logic.ai_helper import get_ai_helper
-        ai = get_ai_helper()
         embedding = []
         if ai:
             embedding = await ai.embed_text(full_text)
@@ -100,16 +128,16 @@ async def process_content(message: types.Message, state: FSMContext):
         embedding_json = json.dumps(embedding) if embedding else None
         
         # 3. Save to DB
+        from database import FaqTopic, FaqMessage
         new_topic = FaqTopic(
             topic=topic_name,
             created_by=message.from_user.id,
             embedding=embedding_json
         )
         session.add(new_topic)
-        session.flush() # get ID
+        await session.flush() # get ID
         
         # 4. Save messages
-        from database import FaqMessage
         for i, m in enumerate(messages_data):
             faq_msg = FaqMessage(
                 topic_id=new_topic.id,
@@ -119,11 +147,15 @@ async def process_content(message: types.Message, state: FSMContext):
             )
             session.add(faq_msg)
             
-        session.commit()
+        await session.commit()
+        
+        stmt_user = select(User).filter_by(telegram_id=message.from_user.id)
+        result_user = await session.execute(stmt_user)
+        db_user = result_user.scalar_one_or_none()
         
         await wait_msg.edit_text(
             f"✅ Тема '{topic_name}' успешно создана! ({len(messages_data)} сообщений)",
-            reply_markup=get_main_menu(session.query(User).filter_by(telegram_id=message.from_user.id).first())
+            reply_markup=get_main_menu(db_user)
         )
         await state.clear()
         return
@@ -151,10 +183,16 @@ async def process_content(message: types.Message, state: FSMContext):
     await message.answer(f"➕ Сообщение добавлено (всего: {len(msgs)}). Напишите /done для завершения.")
 
 @router.message(Command("list_topics"))
-async def cmd_list_topics(message: types.Message):
-    if not is_master(message.from_user.id):
+async def cmd_list_topics(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_list_topics(message, session)
+    if not await is_master(session, message.from_user.id):
         return
-    topics = session.query(FaqTopic).all()
+    stmt = select(FaqTopic)
+    result = await session.execute(stmt)
+    topics = result.scalars().all()
     if not topics:
         await message.answer("Список тем пуст.")
         return
@@ -165,8 +203,12 @@ async def cmd_list_topics(message: types.Message):
     await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("delete_topic"))
-async def cmd_delete_topic(message: types.Message):
-    if not is_master(message.from_user.id):
+async def cmd_delete_topic(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_delete_topic(message, session)
+    if not await is_master(session, message.from_user.id):
         return
     args = message.text.split()
     if len(args) < 2:
@@ -175,10 +217,10 @@ async def cmd_delete_topic(message: types.Message):
     
     try:
         tid = int(args[1])
-        t = session.get(FaqTopic, tid)
+        t = await session.get(FaqTopic, tid)
         if t:
-            session.delete(t)
-            session.commit()
+            await session.delete(t)
+            await session.commit()
             await message.answer(f"🗑 Тема ID {tid} удалена.")
         else:
             await message.answer("❌ Тема не найдена.")
@@ -186,8 +228,12 @@ async def cmd_delete_topic(message: types.Message):
         await message.answer("⚠️ ID должен быть числом.")
 
 @router.message(Command("edit_topic"))
-async def cmd_edit_topic(message: types.Message, state: FSMContext):
-    if not is_master(message.from_user.id):
+async def cmd_edit_topic(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_edit_topic(message, state, session)
+    if not await is_master(session, message.from_user.id):
         return
     args = message.text.split()
     if len(args) < 2:
@@ -196,7 +242,7 @@ async def cmd_edit_topic(message: types.Message, state: FSMContext):
     
     try:
         tid = int(args[1])
-        t = session.get(FaqTopic, tid)
+        t = await session.get(FaqTopic, tid)
         if t:
             await state.update_data(edit_id=tid)
             await message.answer(f"Редактирование темы: <b>{t.topic}</b>\n\nВведите новое содержание:", parse_mode="HTML", reply_markup=get_back_btn())
@@ -207,32 +253,45 @@ async def cmd_edit_topic(message: types.Message, state: FSMContext):
         await message.answer("⚠️ ID должен быть числом.")
 
 @router.message(AIAdminStates.waiting_for_edit_content)
-async def process_edit_content(message: types.Message, state: FSMContext):
+async def process_edit_content(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await process_edit_content(message, state, session)
     data = await state.get_data()
     tid = data['edit_id']
-    t = session.get(FaqTopic, tid)
+    t = await session.get(FaqTopic, tid)
     if t:
         t.content = message.text
-        session.commit()
-        await message.answer("✅ Тема обновлена.", reply_markup=get_main_menu(session.query(User).filter_by(telegram_id=message.from_user.id).first()))
+        await session.commit()
+        
+        stmt_user = select(User).filter_by(telegram_id=message.from_user.id)
+        result_user = await session.execute(stmt_user)
+        db_user = result_user.scalar_one_or_none()
+        
+        await message.answer("✅ Тема обновлена.", reply_markup=get_main_menu(db_user))
     else:
         await message.answer("❌ Ошибка: тема не найдена.")
     await state.clear()
 
 @router.message(Command("set_summary_channel"))
-async def cmd_set_summary_channel(message: types.Message):
-    if not is_master(message.from_user.id):
+async def cmd_set_summary_channel(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_set_summary_channel(message, session)
+    if not await is_master(session, message.from_user.id):
         return
     
     # If used in the target channel, just set it
     chat_id = message.chat.id
     thread_id = message.message_thread_id
     
-    set_setting("summary_channel_id", str(chat_id))
+    await set_setting(session, "summary_channel_id", str(chat_id))
     if thread_id:
-        set_setting("summary_thread_id", str(thread_id))
+        await set_setting(session, "summary_thread_id", str(thread_id))
     else:
-        set_setting("summary_thread_id", "")
+        await set_setting(session, "summary_thread_id", "")
         
     target = f"{message.chat.title} (ID: {chat_id})"
     if thread_id:
@@ -241,8 +300,12 @@ async def cmd_set_summary_channel(message: types.Message):
     await message.answer(f"✅ Канал для саммари установлен: {target}")
 
 @router.message(Command("save_faq"))
-async def cmd_save_faq(message: types.Message):
-    if not is_master(message.from_user.id):
+async def cmd_save_faq(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_save_faq(message, session)
+    if not await is_master(session, message.from_user.id):
         return
 
     if not message.reply_to_message:
@@ -259,21 +322,21 @@ async def cmd_save_faq(message: types.Message):
     
     # Extract content
     text = reply.caption if reply.caption else reply.text
-    photo_id = reply.photo[-1].file_id if reply.photo else None
+    photo_ids = reply.photo[-1].file_id if reply.photo else None
     
-    if not text and not photo_id:
+    if not text and not photo_ids:
          await message.answer("⚠️ Сообщение пустое (нет текста и фото).")
          return
 
     wait_msg = await message.answer("💾 Сохраняю...")
 
     # Embed
-    full_text = f"Topic: {topic_name}\n"
-    if text: full_text += text
-    if photo_id: full_text += "\n[Photo]"
-
     from logic.ai_helper import get_ai_helper
     ai = get_ai_helper()
+    full_text = f"Topic: {topic_name}\n"
+    if text: full_text += text
+    if photo_ids: full_text += "\n[Photo]"
+
     embedding = []
     if ai:
         embedding = await ai.embed_text(full_text)
@@ -282,22 +345,22 @@ async def cmd_save_faq(message: types.Message):
     embedding_json = json.dumps(embedding) if embedding else None
     
     # Save
+    from database import FaqTopic, FaqMessage
     new_topic = FaqTopic(
         topic=topic_name,
         created_by=message.from_user.id,
         embedding=embedding_json
     )
     session.add(new_topic)
-    session.flush()
+    await session.flush()
     
-    from database import FaqMessage
     faq_msg = FaqMessage(
         topic_id=new_topic.id,
         text=text,
-        photo_id=photo_id,
+        photo_id=photo_ids,
         order_index=0
     )
     session.add(faq_msg)
-    session.commit()
+    await session.commit()
     
     await wait_msg.edit_text(f"✅ Тема '{topic_name}' быстро сохранена!")

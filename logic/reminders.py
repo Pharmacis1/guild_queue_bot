@@ -1,45 +1,44 @@
 from datetime import datetime
 import asyncio
-from database import session, User, Event, get_msk_now
+from database import AsyncSessionLocal, User, Event, get_msk_now, select
 import logging
 
 async def send_db_upload_reminder(bot, time_window_hours: float):
     try:
-        # Check freshness
-        # Look for the latest event
-        # Use timestamp! id doesn't guarantee chronology if old logs are uploaded late
-        latest_event = session.query(Event).filter(Event.timestamp.isnot(None)).order_by(Event.timestamp.desc()).first()
+        async with AsyncSessionLocal() as session:
+            # Check freshness
+            latest_event_result = await session.execute(
+                select(Event).filter(Event.timestamp.isnot(None)).order_by(Event.timestamp.desc())
+            )
+            latest_event = latest_event_result.scalar_one_or_none()
 
-        now_msk = get_msk_now()
-        is_fresh = False
+            now_msk = get_msk_now()
+            is_fresh = False
 
-        if latest_event:
-            # First try timestamp
-            if latest_event.timestamp:
-                event_time_utc = datetime.utcfromtimestamp(latest_event.timestamp)
-                # Convert to MSK naive for comparison conceptually, or compare raw seconds
-                from loader import MSK
-                event_time_msk = datetime.fromtimestamp(latest_event.timestamp, tz=MSK).replace(tzinfo=None)
-                diff = now_msk - event_time_msk
-            else:
-                # Fallback to string parse "YYYY-MM-DD HH:MM:SS"
-                try:
-                    event_time_msk = datetime.strptime(latest_event.event_date, "%Y-%m-%d %H:%M:%S")
+            if latest_event:
+                if latest_event.timestamp:
+                    from loader import MSK
+                    event_time_msk = datetime.fromtimestamp(latest_event.timestamp, tz=MSK).replace(tzinfo=None)
                     diff = now_msk - event_time_msk
-                except:
-                    diff = None
+                else:
+                    try:
+                        event_time_msk = datetime.strptime(latest_event.event_date, "%Y-%m-%d %H:%M:%S")
+                        diff = now_msk - event_time_msk
+                    except:
+                        diff = None
 
-            if diff is not None and diff.total_seconds() < time_window_hours * 3600:
-                is_fresh = True
-                logging.info(f"DB is fresh (last update {diff.total_seconds()/60:.1f} mins ago, within {time_window_hours} hour window). Skipping reminder.")
-        
-        if is_fresh:
-            return
+                if diff is not None and diff.total_seconds() < time_window_hours * 3600:
+                    is_fresh = True
+                    logging.info(f"DB is fresh (last update {diff.total_seconds()/60:.1f} mins ago, within {time_window_hours} hour window). Skipping reminder.")
+            
+            if is_fresh:
+                return
 
-        # Find Masters
-        masters = session.query(User).filter_by(is_master=True).all()
-        if not masters:
-            return
+            # Find Masters
+            masters_result = await session.execute(select(User).filter_by(is_master=True))
+            masters = masters_result.scalars().all()
+            if not masters:
+                return
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 

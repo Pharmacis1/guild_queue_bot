@@ -3,9 +3,9 @@ import pytz
 import logging
 from typing import Any, Dict, Set, Tuple
 
-import aiosqlite
+from sqlalchemy import select, update, func
 
-import web_database
+from database import AsyncSessionLocal, Player, Event, Item
 
 # Try to import dependencies
 try:
@@ -36,15 +36,12 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
         item_ids = set()
 
         # 2. Write to DB
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            cursor = await conn.cursor()
-            
+        async with AsyncSessionLocal() as session:
             # Current MSK time
             current_msk = datetime.datetime.now(pytz.timezone("Europe/Moscow"))
             current_ts = int(current_msk.timestamp())
 
             # Pre-fetch known nicknames for description replacement
-            # We collect all IDs mentioned in descriptions or acting
             all_involved_ids = set()
             for row in data:
                 all_involved_ids.add(row["role_id"])
@@ -58,24 +55,22 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
             # Fetch existing nicknames
             id_to_nick = {}
             if all_involved_ids:
-                q_placeholders = ",".join(["?"] * len(all_involved_ids))
-                async with conn.execute(
-                    f"SELECT role_id, nickname FROM players WHERE role_id IN ({q_placeholders})", list(all_involved_ids)
-                ) as fetch_cursor:
-                    rows = await fetch_cursor.fetchall()
-                    for r_id, r_nick in rows:
-                        if r_nick:
-                            id_to_nick[r_id] = r_nick
+                result = await session.execute(
+                    select(Player.role_id, Player.nickname).filter(Player.role_id.in_(list(all_involved_ids)))
+                )
+                for r_id, r_nick in result.all():
+                    if r_nick:
+                        id_to_nick[r_id] = r_nick
 
             for row in data:
                 rid = row["role_id"]
 
-                # Check if event is from the future (in MSK, with 24h leeway for timezone/clock desync)
+                # Check if event is from the future (in MSK, with 24h leeway)
                 if row["timestamp"] > current_ts + 86400:
                     logging.warning(f"Skipping future event for role_id {rid} at {row['date']}")
                     continue
 
-                # [FIX] Filter invalid IDs (like ID 1)
+                # Filter invalid IDs (like ID 1)
                 if rid < 16:
                     continue
 
@@ -88,70 +83,67 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
                 if row["raw_params"]:
                     try:
                         val = int(row["raw_params"].split(",")[0])
-                        target_id = val  # p0 is often the target
+                        target_id = val
                         if etype == 0:  # Item event
                             item_ids.add(val)
                     except Exception:
                         pass
 
-                # [FIX] Resolve ID in description
+                # Resolve ID in description
                 if target_id and f"ID {target_id}" in desc:
                     t_nick = id_to_nick.get(target_id)
                     if t_nick:
                         desc = desc.replace(f"ID {target_id}", f"{t_nick}")
 
                 # Ensure actor exists
-                await cursor.execute("INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (rid,))
+                existing = await session.execute(select(Player).filter_by(role_id=rid))
+                if not existing.scalar_one_or_none():
+                    session.add(Player(role_id=rid, in_clan=1))
+                    await session.flush()
 
-                # [FIX] Status Updates
+                # Status Updates
                 is_leave_self = etype == 8  # Покинул гильдию
                 is_kick = etype == 10  # Изгнал ID ...
-                # is_join = (etype == 6)       # Вступил (unused)
 
                 if is_leave_self:
-                    # Actor left
-                    await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (rid,))
+                    await session.execute(update(Player).filter_by(role_id=rid).values(in_clan=0))
 
                 elif is_kick:
-                    # Actor KICKED someone. The TARGET (val) left.
-                    # Ensure target exists in DB first
                     if target_id:
-                        await cursor.execute(
-                            "INSERT OR IGNORE INTO players (role_id, in_clan) VALUES (?, 1)", (target_id,)
-                        )
-                        await cursor.execute("UPDATE players SET in_clan = 0 WHERE role_id = ?", (target_id,))
+                        existing_target = await session.execute(select(Player).filter_by(role_id=target_id))
+                        if not existing_target.scalar_one_or_none():
+                            session.add(Player(role_id=target_id, in_clan=1))
+                            await session.flush()
+                        await session.execute(update(Player).filter_by(role_id=target_id).values(in_clan=0))
 
                 elif etype in [1, 2, 6] or "принят" in desc.lower() or "joined" in desc.lower():
-                    await cursor.execute("UPDATE players SET in_clan = 1 WHERE role_id = ?", (rid,))
+                    await session.execute(update(Player).filter_by(role_id=rid).values(in_clan=1))
 
-                # Event
-                await cursor.execute(
-                    """
-                    INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (rid, row["timestamp"], row["date"], etype, val, desc),
+                # Insert Event
+                new_event = Event(
+                    role_id=rid,
+                    timestamp=row["timestamp"],
+                    event_date=row["date"],
+                    event_type=etype,
+                    value=val,
+                    raw_desc=desc,
                 )
+                session.add(new_event)
+                new_events += 1
 
-                if cursor.rowcount > 0:
-                    new_events += 1
-
-            await conn.commit()
+            await session.commit()
 
         # 3. Check items to scrape
         missing_ids = set()
         if item_ids:
-            async with aiosqlite.connect(web_database.DB_NAME) as conn:
-                placeholders = ",".join(["?"] * len(item_ids))
-                async with conn.execute(f"SELECT id FROM items WHERE id IN ({placeholders})", list(item_ids)) as cursor:
-                    existing_rows = await cursor.fetchall()
-                    existing_ids = {r[0] for r in existing_rows}
-
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(Item.id).filter(Item.id.in_(list(item_ids)))
+                )
+                existing_ids = {r[0] for r in result.all()}
                 missing_ids = item_ids - existing_ids
                 logging.info(f"Missing item IDs to scrape: {missing_ids}")
 
-        # Return success with context for background tasks
-        # We always return True for pwobs scraper check if success, allowing controller to decide based on config/flag
         return {"status": "ok", "new_events": new_events, "total_parsed": len(data)}, missing_ids, True
 
     except Exception as e:

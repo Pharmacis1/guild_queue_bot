@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime, timedelta
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
@@ -19,7 +21,6 @@ from database import (
     ensure_user,
     get_msk_now,
     get_setting,
-    session,
 )
 from helpers import get_menu_text
 from keyboards import (
@@ -38,6 +39,7 @@ from states import AFKState, Registration
 from utils import check_google_sheet, log_reward_to_sheet
 
 router = Router()
+session = None # Placeholder for legacy sync tests to patch
 
 
 @router.message(Command("id"))
@@ -55,20 +57,26 @@ async def group_start_stub(message: types.Message):
 
 # --- START ---
 @router.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user = ensure_user(message.from_user.id, message.from_user.username)
+async def cmd_start(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cmd_start(message, session)
+    user = await ensure_user(session, message.from_user.id, message.from_user.username)
     if user.is_banned:
         return await message.answer("⛔ <b>Вы забанены.</b>", parse_mode="HTML")
 
     # Check for main character
-    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+    main_char = result.scalar_one_or_none()
 
     # Self-healing: If no main char found, but user HAS characters (e.g. main deleted), make one main.
     if not main_char:
-        any_char = session.query(Character).filter_by(user_id=user.id).first()
+        result = await session.execute(select(Character).filter_by(user_id=user.id))
+        any_char = result.scalar_one_or_none()
         if any_char:
             any_char.is_main = True
-            session.commit()
+            await session.commit()
             main_char = any_char  # Recovered
 
     if not main_char:
@@ -91,7 +99,7 @@ async def cmd_start(message: types.Message):
         )
         return await message.answer(text, parse_mode="HTML", reply_markup=get_unauthorized_menu())
 
-    text, restricted = get_menu_text(user)
+    text, restricted = await get_menu_text(session, user)
     # Send persistent keyboard separately or attach? usually attach to answer.
     # We send the inline menu message, AND a separate message (or same) with ReplyKeyboard?
     # ReplyKeyboard cannot be combined with Inline in same message?
@@ -103,23 +111,32 @@ async def cmd_start(message: types.Message):
 
 
 @router.message(F.text == "🏠 Главное меню")
-async def main_menu_text(message: types.Message):
-    await cmd_start(message)
+async def main_menu_text(message: types.Message, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await main_menu_text(message, session)
+    await cmd_start(message, session)
 
 
 # ... (rest of simple handlers)
 
 
 @router.callback_query(F.data == "cancel_request")
-async def cancel_pending_request(callback: types.CallbackQuery, state: FSMContext):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+async def cancel_pending_request(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await cancel_pending_request(callback, state, session)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
     cancelled_nick = user.pending_request_nick
     user.pending_request_nick = None
-    session.commit()
+    await session.commit()
 
     # Notify Masters about cancellation
     if cancelled_nick:
-        masters = session.query(User).filter_by(is_master=True).all()
+        result = await session.execute(select(User).filter_by(is_master=True))
+        masters = result.scalars().all()
         user_desc = f"@{user.username}" if user.username else f"ID {user.telegram_id}"
         for m in masters:
             try:
@@ -133,17 +150,21 @@ async def cancel_pending_request(callback: types.CallbackQuery, state: FSMContex
 
     await callback.answer("Заявка отменена.")
     # Show welcome again
-    await cmd_start(callback.message)  # Reuse start logic for simplicity
+    await cmd_start(callback.message, session)  # Reuse start logic for simplicity
 
 
 @router.callback_query(F.data == "back_to_main")
-async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
+async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await back_to_menu(callback, state, session)
     await state.clear()
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
     if user.is_banned:
         return await callback.message.edit_text("⛔ Вы забанены.", parse_mode="HTML")
 
-    text, restricted = get_menu_text(user)
+    text, restricted = await get_menu_text(session, user)
     try:
         await callback.message.edit_text(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
     except Exception:
@@ -154,9 +175,13 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "menu_chars")
-async def chars_menu(callback: types.CallbackQuery):
+async def chars_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await chars_menu(callback, session)
     # Получаем пользователя
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
 
     kb = [
         [types.InlineKeyboardButton(text="➕ Добавить или изменить основу", callback_data="add_main")],
@@ -166,7 +191,7 @@ async def chars_menu(callback: types.CallbackQuery):
     ]
 
     # Генерируем текст с кастомным заголовком
-    text, _ = get_menu_text(user, custom_title="⚙️ <b>Управление персонажами:</b>")
+    text, _ = await get_menu_text(session, user, custom_title="⚙️ <b>Управление персонажами:</b>")
 
     await callback.message.edit_text(
         text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML"
@@ -182,21 +207,18 @@ async def add_main_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(Registration.waiting_for_main_nickname)
-async def process_main_input_entry(message: types.Message, state: FSMContext):
+async def process_main_input_entry(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await process_main_input_entry(message, state, session)
     nick = message.text.strip()
 
     # Check if exists in DB
     is_known = await check_google_sheet(nick)
     await state.update_data(needs_approval=not is_known)
 
-    code = get_setting("verification_code")
-    # If code is required, OR if user is unknown (we always want code for unknown? User said "also ask code")
-    # Actually user said "if nick not in base, also ask code".
-    # So if code setting is enabled -> ask.
-    # If code setting is DISABLED -> if unknown -> logic?
-    # Let's assume if code is disabled, we skip code. But user said "person should be in guild", implying code is the key.
-    # If code is OFF, we probably should still ask for approval if unknown.
-
+    code = await get_setting(session, "verification_code")
     if code:
         await state.update_data(temp_nick=nick, temp_action="main_input")
         text = "🔐 Введите код верификации:"
@@ -209,48 +231,42 @@ async def process_main_input_entry(message: types.Message, state: FSMContext):
 
     # If NO code setting:
     if is_known:
-        await finish_main_input(message, state, nick_override=nick)
+        await finish_main_input(message, state, nick_override=nick, session=session)
     else:
-        # Unknown + No Code => Send to Master directly? Or reject?
-        # User imply code is necessary for proof. But if code is off...
-        # Let's send to Master anyway.
-        await send_approval_request(message, state, nick, "main_input")
+        await send_approval_request(message, state, nick, "main_input", session=session)
 
 
-async def finish_main_input(message: types.Message, state: FSMContext, nick_override=None):
+async def finish_main_input(message: types.Message, state: FSMContext, nick_override=None, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await finish_main_input(message, state, nick_override, session)
     nick = nick_override if nick_override else message.text.strip()
+    user = await ensure_user(session, message.from_user.id, message.from_user.username)
 
-    user = ensure_user(message.from_user.id, message.from_user.username)
-
-    # Check if already exists (globally or for user?)
-    # Nickname uniqueness is not strictly enforced in DB schema, but logically should be.
-    # Check if this user already has main?
-
-    existing = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+    existing = result.scalar_one_or_none()
     if existing:
         existing.is_main = False
-        # Optional: rename old main to alt?
-        # For this bot logic: user can have only one main? or switch?
-        # Usually we just set new main.
 
-    # Check if nick taken by SOMEONE ELSE?
-    taken = session.query(Character).filter_by(nickname=nick).first()
+    result = await session.execute(select(Character).filter_by(nickname=nick))
+    taken = result.scalar_one_or_none()
     if taken and taken.user_id != user.id:
-        old_user = taken.user
+        # We need to load taken.user
+        result_user = await session.execute(select(User).filter_by(id=taken.user_id))
+        old_user = result_user.scalar_one_or_none()
         if old_user and old_user.telegram_id is None:
-            # MERGE LOGIC: Transfer all characters from stub to real user
+            # MERGE LOGIC
             print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id}")
-            other_chars = session.query(Character).filter_by(user_id=old_user.id).all()
+            result_chars = await session.execute(select(Character).filter_by(user_id=old_user.id))
+            other_chars = result_chars.scalars().all()
             for oc in other_chars:
                 oc.user_id = user.id
             
-            # Transfer AFK history or other links if needed? 
-            # For now, characters are the main thing.
-            
-            session.delete(old_user)
-            session.commit()
-            # After merge, 'taken' now belongs to user.id (or it will be updated below)
-            taken = session.query(Character).filter_by(nickname=nick).first()
+            await session.delete(old_user)
+            await session.commit()
+            result = await session.execute(select(Character).filter_by(nickname=nick))
+            taken = result.scalar_one_or_none()
         else:
             return await message.answer(
                 f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
@@ -260,32 +276,22 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
 
     if taken and taken.user_id == user.id:
         taken.is_main = True
-        session.commit()
+        await session.commit()
     else:
         session.add(Character(user_id=user.id, nickname=nick, is_main=True))
         # Adopt orphaned entries
-        orphans = session.query(QueueEntry).filter_by(character_name=nick, user_id=None).all()
-        for o in orphans:
-            o.user_id = user.id
-        session.commit()
+        from sqlalchemy import update
+        await session.execute(
+            update(QueueEntry).filter_by(character_name=nick, user_id=None).values(user_id=user.id)
+        )
+        await session.commit()
 
-    text, restricted = get_menu_text(user)
+    text, restricted = await get_menu_text(session, user)
     await message.answer(
         f"✅ Основа сохранена: <b>{nick}</b>\n\nДобро пожаловать в клан! 🕷",
         parse_mode="HTML",
         reply_markup=get_main_menu(user, restricted),
     )
-
-    # Auto-Invite: DISABLED
-    # count = session.query(Character).filter_by(user_id=user.id).count()
-    # if count == 1:
-    #     chat_id = get_setting('clan_chat_id')
-    #     if chat_id:
-    #         try:
-    #             link = await message.bot.create_chat_invite_link(chat_id, member_limit=1, name=f"For {user.username or user.telegram_id}")
-    #             await message.answer(f"👋 <b>Ссылка на вступление в группу клана:</b>\n{link.invite_link}", parse_mode="HTML")
-    #         except Exception as e:
-    #             print(f"Error creating invite: {e}")
     await state.clear()
 
 
@@ -298,14 +304,18 @@ async def add_alt_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(Registration.waiting_for_alt_nickname)
-async def process_alt_input_entry(message: types.Message, state: FSMContext):
+async def process_alt_input_entry(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await process_alt_input_entry(message, state, session)
     nick = message.text.strip()
 
     # Check Google
     is_known = await check_google_sheet(nick)
     await state.update_data(needs_approval=not is_known)
 
-    code = get_setting("verification_code")
+    code = await get_setting(session, "verification_code")
     if code:
         await state.update_data(temp_nick=nick, temp_action="alt_input")
         text = "🔐 Введите код верификации:"
@@ -320,38 +330,44 @@ async def process_alt_input_entry(message: types.Message, state: FSMContext):
         return
 
     if is_known:
-        await finish_alt_input(message, state, nick_override=nick)
+        await finish_alt_input(message, state, nick_override=nick, session=session)
     else:
-        await send_approval_request(message, state, nick, "alt_input")
+        await send_approval_request(message, state, nick, "alt_input", session=session)
 
 
 # @router.message(Registration.waiting_for_alt_nickname)
-async def finish_alt_input(message: types.Message, state: FSMContext, nick_override=None):
+async def finish_alt_input(message: types.Message, state: FSMContext, nick_override=None, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await finish_alt_input(message, state, nick_override, session)
     nick = nick_override if nick_override else message.text.strip()
-
-    # We retain basic checks but skip Google/Main check as they should be done in entry
-    user = ensure_user(message.from_user.id, message.from_user.username)
-    main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+    user = await ensure_user(session, message.from_user.id, message.from_user.username)
+    result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+    main_char = result.scalar_one_or_none()
 
     if not main_char:
-        # Should not happen if pre-checked, but safe to keep
         return await message.answer(
             "⛔ Сначала добавь <b>Основу</b>.", parse_mode="HTML", reply_markup=get_back_btn("menu_chars")
         )
 
     # Check if nick taken by SOMEONE ELSE
-    taken = session.query(Character).filter_by(nickname=nick).first()
+    result = await session.execute(select(Character).filter_by(nickname=nick))
+    taken = result.scalar_one_or_none()
     if taken and taken.user_id != user.id:
-        old_user = taken.user
+        result_user = await session.execute(select(User).filter_by(id=taken.user_id))
+        old_user = result_user.scalar_one_or_none()
         if old_user and old_user.telegram_id is None:
             # MERGE LOGIC
             print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id} (via alt)")
-            other_chars = session.query(Character).filter_by(user_id=old_user.id).all()
+            result_chars = await session.execute(select(Character).filter_by(user_id=old_user.id))
+            other_chars = result_chars.scalars().all()
             for oc in other_chars:
                 oc.user_id = user.id
-            session.delete(old_user)
-            session.commit()
-            taken = session.query(Character).filter_by(nickname=nick).first()
+            await session.delete(old_user)
+            await session.commit()
+            result = await session.execute(select(Character).filter_by(nickname=nick))
+            taken = result.scalar_one_or_none()
         else:
             return await message.answer(
                 f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
@@ -364,20 +380,25 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
 
     session.add(Character(user_id=user.id, nickname=nick, is_main=False))
     # Adopt orphans
-    orphans = session.query(QueueEntry).filter_by(character_name=nick, user_id=None).all()
-    for o in orphans:
-        o.user_id = user.id
+    from sqlalchemy import update
+    await session.execute(
+        update(QueueEntry).filter_by(character_name=nick, user_id=None).values(user_id=user.id)
+    )
 
-    session.commit()
-    text, restricted = get_menu_text(user)
+    await session.commit()
+    text, restricted = await get_menu_text(session, user)
     await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user, restricted))
     await state.clear()
 
 
 @router.message(Registration.waiting_for_code)
-async def process_verification_code(message: types.Message, state: FSMContext):
+async def process_verification_code(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await process_verification_code(message, state, session)
     input_code = message.text.strip()
-    correct_code = get_setting("verification_code")
+    correct_code = await get_setting(session, "verification_code")
 
     if correct_code and input_code.lower() != correct_code.lower():
         return await message.answer(
@@ -390,27 +411,33 @@ async def process_verification_code(message: types.Message, state: FSMContext):
     needs_approval = data.get("needs_approval", False)
 
     if needs_approval:
-        await send_approval_request(message, state, nick, action)
+        await send_approval_request(message, state, nick, action, session=session)
         return
 
     if action == "main_input":
-        await finish_main_input(message, state, nick_override=nick)
+        await finish_main_input(message, state, nick_override=nick, session=session)
     elif action == "alt_input":
-        await finish_alt_input(message, state, nick_override=nick)
+        await finish_alt_input(message, state, nick_override=nick, session=session)
     else:
-        text, restricted = get_menu_text(ensure_user(message.from_user.id, message.from_user.username))
+        user = await ensure_user(session, message.from_user.id, message.from_user.username)
+        text, restricted = await get_menu_text(session, user)
         await message.answer(
             "Ошибка состояния. Начни заново.",
-            reply_markup=get_main_menu(ensure_user(message.from_user.id, message.from_user.username), restricted),
+            reply_markup=get_main_menu(user, restricted),
         )
         await state.clear()
 
 
-async def send_approval_request(message: types.Message, state: FSMContext, nick: str, action: str):
+async def send_approval_request(message: types.Message, state: FSMContext, nick: str = None, action: str = None, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await send_approval_request(message, state, nick, action, session)
     # Find masters
-    masters = session.query(User).filter_by(is_master=True).all()
-    user = ensure_user(message.from_user.id, message.from_user.username)
-    text_menu, restricted = get_menu_text(user)
+    result = await session.execute(select(User).filter_by(is_master=True))
+    masters = result.scalars().all()
+    user = await ensure_user(session, message.from_user.id, message.from_user.username)
+    text_menu, restricted = await get_menu_text(session, user)
     if not masters:
         await message.answer(
             "⚠️ Нет Мастеров в сети. Попробуй позже.",
@@ -419,7 +446,6 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
         await state.clear()
         return
 
-    user = ensure_user(message.from_user.id, message.from_user.username)
     type_str = "ОСНОВА" if action == "main_input" else "ТВИН"
     user_link = f"<a href='tg://user?id={user.telegram_id}'>{user.username or 'Без ника'}</a>"
 
@@ -437,8 +463,6 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
     count = 0
     for m in masters:
         try:
-            # Save temp data in a temporary storage? logic is stateless in callback.
-            # We pass data in callback_data.
             await message.bot.send_message(
                 m.telegram_id, text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
             )
@@ -450,7 +474,7 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
         # Save pending state ONLY if it's a main char request (unauthorized user flow)
         if action == "main_input":
             user.pending_request_nick = nick
-            session.commit()
+            await session.commit()
             await message.answer(
                 f"⏳ <b>Заявка на {nick} отправлена Мастеру.</b>\nОжидайте подтверждения.",
                 parse_mode="HTML",
@@ -469,9 +493,14 @@ async def send_approval_request(message: types.Message, state: FSMContext, nick:
 
 
 @router.callback_query(F.data == "del_alt_menu")
-async def del_alt_menu(callback: types.CallbackQuery):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    alts = session.query(Character).filter_by(user_id=user.id, is_main=False).all()
+async def del_alt_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await del_alt_menu(callback, session)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=False))
+    alts = result.scalars().all()
     if not alts:
         return await callback.answer("Нет твинов.", show_alert=True)
     kb = [[types.InlineKeyboardButton(text=f"❌ {c.nickname}", callback_data=f"del_c_{c.id}")] for c in alts]
@@ -480,16 +509,22 @@ async def del_alt_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("del_c_"))
-async def del_char_action(callback: types.CallbackQuery):
+async def del_char_action(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await del_char_action(callback, session)
     cid = int(callback.data.split("_")[2])
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
     if not char:
         return await callback.answer("Не найден.")
 
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    entries = session.query(QueueEntry).filter_by(character_name=char.nickname).all()
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    result = await session.execute(select(QueueEntry).filter_by(character_name=char.nickname))
+    entries = result.scalars().all()
     if entries:
-        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+        main_char = result_main.scalar_one_or_none()
         text = f"⚠️ Персонаж <b>{char.nickname}</b> записан в очередях ({len(entries)} шт.)!\n\n"
         kb = []
         if main_char:
@@ -510,43 +545,52 @@ async def del_char_action(callback: types.CallbackQuery):
         )
     else:
         nick = char.nickname
-        session.delete(char)
-        session.commit()
+        await session.delete(char)
+        await session.commit()
         await callback.answer(f"{nick} удален.")
 
         # Check for kick
-        count = session.query(Character).filter_by(user_id=user.id).count()
+        result_count = await session.execute(select(func.count(Character.id)).filter_by(user_id=user.id))
+        count = result_count.scalar()
         if count == 0:
-            chat_id = get_setting("clan_chat_id")
+            chat_id = await get_setting(session, "clan_chat_id")
             if chat_id:
                 try:
                     await callback.bot.ban_chat_member(chat_id, user.telegram_id)
-                    await callback.bot.unban_chat_member(chat_id, user.telegram_id)
+                    await callback.bot.unbal_chat_member(chat_id, user.telegram_id)
                     await callback.message.answer(
                         "⚠️ Вы были исключены из группы клана, так как у вас не осталось активных персонажей."
                     )
                 except Exception as e:
                     print(f"Kick error: {e}")
 
-        await del_alt_menu(callback)
+        await del_alt_menu(callback, session)
 
 
 @router.callback_query(F.data.startswith("conf_del_"))
-async def confirm_del_char_complex(callback: types.CallbackQuery):
+async def confirm_del_char_complex(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await confirm_del_char_complex(callback, session)
     parts = callback.data.split("_")
     cid, action = int(parts[2]), parts[3]
-    char = session.get(Character, cid)
+    char = await session.get(Character, cid)
     if not char:
         return await callback.answer("Уже удален.")
 
     nick_to_del, user_id = char.nickname, char.user_id
-    user = session.get(User, user_id)
-    entries = session.query(QueueEntry).filter_by(character_name=nick_to_del).all()
+    user = await session.get(User, user_id)
+    result = await session.execute(
+        select(QueueEntry).filter_by(character_name=nick_to_del).options(selectinload(QueueEntry.queue))
+    )
+    entries = result.scalars().all()
 
     for e in entries:
         q_name = e.queue.name
         if action == "swap":
-            main_char = session.query(Character).filter_by(user_id=user_id, is_main=True).first()
+            result_main = await session.execute(select(Character).filter_by(user_id=user_id, is_main=True))
+            main_char = result_main.scalar_one_or_none()
             if main_char:
                 e.character_name = main_char.nickname
                 asyncio.create_task(
@@ -559,9 +603,9 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
                     )
                 )
             else:
-                session.delete(e)
+                await session.delete(e)
         elif action == "kill":
-            session.delete(e)
+            await session.delete(e)
             asyncio.create_task(
                 log_reward_to_sheet(
                     queue_name=q_name,
@@ -572,13 +616,14 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
                 )
             )
 
-    session.delete(char)
-    session.commit()
+    await session.delete(char)
+    await session.commit()
 
     # Check for kick
-    count = session.query(Character).filter_by(user_id=user_id).count()
+    result_count = await session.execute(select(func.count(Character.id)).filter_by(user_id=user_id))
+    count = result_count.scalar()
     if count == 0:
-        chat_id = get_setting("clan_chat_id")
+        chat_id = await get_setting(session, "clan_chat_id")
         if chat_id:
             try:
                 await callback.bot.ban_chat_member(chat_id, user.telegram_id)
@@ -596,12 +641,17 @@ async def confirm_del_char_complex(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "menu_join")
-async def join_menu(callback: types.CallbackQuery):
+async def join_menu(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await join_menu(callback, session)
     session.expire_all()
     # Получаем пользователя для генерации текста
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
 
-    queues = session.query(QueueType).filter_by(is_active=True).all()
+    result = await session.execute(select(QueueType).filter_by(is_active=True))
+    queues = result.scalars().all()
 
     # Sort queues based on DEFAULT_QUEUES order
     def get_sort_index(q):
@@ -618,22 +668,23 @@ async def join_menu(callback: types.CallbackQuery):
     kb = []
 
     for q in queues:
-        count = (
-            session.query(QueueEntry)
+        stmt = (
+            select(func.count(QueueEntry.id))
             .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
             .filter(
                 QueueEntry.queue_type_id == q.id,
                 (Player.in_clan == 1) | (Player.in_clan.is_(None))
             )
-            .count()
         )
+        result_count = await session.execute(stmt)
+        count = result_count.scalar() or 0
         status = "🔒 ЗАКРЫТА" if q.is_locked else f"({count})"
         kb.append([types.InlineKeyboardButton(text=f"{q.name} {status}", callback_data=f"view_q_{q.id}")])
 
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
 
     # Генерируем текст с кастомным заголовком
-    text, _ = get_menu_text(user, custom_title="✍️ <b>Запись в очередь:</b>")
+    text, _ = await get_menu_text(session, user, custom_title="✍️ <b>Запись в очередь:</b>")
 
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
@@ -641,19 +692,27 @@ async def join_menu(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("view_q_"))
-async def view_queue(callback: types.CallbackQuery):
+async def view_queue(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await view_queue(callback, session)
     session.expire_all()
     qid = int(callback.data.split("_")[2])
-    q = session.get(QueueType, qid)
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    entries = (
-        session.query(QueueEntry)
+    q = await session.get(QueueType, qid)
+    if not q:
+        return await callback.answer("Очередь не найдена.")
+
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    stmt = (
+        select(QueueEntry)
         .outerjoin(Player, func.lower(QueueEntry.character_name) == func.lower(Player.nickname))
         .filter(QueueEntry.queue_type_id == qid)
         .filter((Player.in_clan == 1) | (Player.in_clan.is_(None)))
         .order_by(QueueEntry.position.asc(), QueueEntry.id.asc())
-        .all()
     )
+    result_entries = await session.execute(stmt)
+    entries = result_entries.scalars().all()
 
     text = f"🛡 <b>Очередь: {q.name}</b>\n\n"
     text += "Условия для получения награды из очереди:\n"
@@ -665,7 +724,10 @@ async def view_queue(callback: types.CallbackQuery):
             text += f"{i}. {e.character_name}\n"
 
     kb = []
-    user_entry = session.query(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id).first()
+    stmt_user_entry = select(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id)
+    result_user_entry = await session.execute(stmt_user_entry)
+    user_entry = result_user_entry.scalar_one_or_none()
+
     if user_entry:
         kb.append([types.InlineKeyboardButton(text="🏃 Выйти из очереди", callback_data=f"leave_q_{qid}")])
     else:
@@ -696,13 +758,17 @@ async def view_queue(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("pre_join_"))
-async def pre_join(callback: types.CallbackQuery):
+async def pre_join(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await pre_join(callback, session)
     parts = callback.data.split("_")
     qid = int(parts[2])
     # Check for mode in callback data (pre_join_{qid}_{mode})
     mode = parts[3] if len(parts) > 3 else "once"
 
-    q = session.get(QueueType, qid)
+    q = await session.get(QueueType, qid)
     if q.is_locked:
         return await callback.answer("⛔ Очередь закрыта Мастером!", show_alert=True)
 
@@ -710,8 +776,9 @@ async def pre_join(callback: types.CallbackQuery):
     if q.name == "Цилинь" and mode == "auto":
         mode = "once"
 
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    chars = session.query(Character).filter_by(user_id=user.id).all()
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    result_chars = await session.execute(select(Character).filter_by(user_id=user.id))
+    chars = result_chars.scalars().all()
     if not chars:
         return await callback.answer("Нет персонажей!", show_alert=True)
 
@@ -733,82 +800,69 @@ async def pre_join(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("join_final_"))
-async def join_final(callback: types.CallbackQuery):
+async def join_final(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await join_final(callback, session)
     parts = callback.data.split("_")
     qid, cid, mode = int(parts[2]), int(parts[3]), parts[4]
 
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    # char and logic checks moved to queue_ops
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
 
     # Logic Call
     is_auto = mode == "auto"
-    success, msg, entry = join_queue(session, user.id, qid, cid, is_auto)
+    success, msg, entry = await join_queue(session, user.id, qid, cid, is_auto)
 
     if not success:
         return await callback.answer(msg, show_alert=True)
 
-    # Logging (Sheet)
-    # Re-fetch or use entry?
-    # entry is attached to session if session is same.
-    # Note: queue_ops commits, so entry might be expired but refetchable?
-    # Actually if we committed, the ID is valid.
-
     if entry:
-        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+        main_char = result_main.scalar_one_or_none()
         main_nick = main_char.nickname if main_char else entry.character_name
 
         log_status = "В очереди (Авто)" if is_auto else "В очереди"
-        # We need Queue Name. Relationships should work if session is open for them.
-        # But allow for lazy load or refresh.
-        q_name = entry.queue.name
+        # Access entry.queue (should be lazy loaded or eager?)
+        # Let's refresh with relation to be sure
+        result_entry_full = await session.execute(
+            select(QueueEntry).filter_by(id=entry.id).options(selectinload(QueueEntry.queue))
+        )
+        full_entry = result_entry_full.scalar_one()
+        q_name = full_entry.queue.name
 
         asyncio.create_task(
             log_reward_to_sheet(
                 queue_name=q_name,
                 main_nick=main_nick,
-                char_nick=entry.character_name,
+                char_nick=full_entry.character_name,
                 manager_name=user.username,
                 status=log_status,
             )
         )
 
     await callback.answer(msg)
-    await view_queue(callback)
+    await view_queue(callback, session)
 
 
 @router.callback_query(F.data.startswith("leave_q_"))
-async def leave_queue_handler(callback: types.CallbackQuery):
+async def leave_queue_handler(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await leave_queue_handler(callback, session)
     qid = int(callback.data.split("_")[2])
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
 
-    success, msg, deleted_entry = leave_queue(session, user.id, qid)
+    success, msg, deleted_entry = await leave_queue(session, user.id, qid)
 
     if success and deleted_entry:
-        # Logging
-        # deleted_entry is detached but has character_name field populated?
-        # leave_queue returns the object. Attributes like character_name are string, so they persist.
-        # But relationships (deleted_entry.queue) might fail if lazy loaded from closed session or deleted row?
-        # In leave_queue we committed delete.
-        # So we can't access .queue logic attribute easily on deleted object unless it was eager loaded?
-        # But leave_queue impl: `start_q = entry.queue.name` BEFORE delete.
-        # Wait, I didn't update leave_queue to attach that info to the return object properly?
-        # I returned `entry`.
-        # In `leave_queue`:
-        # `start_q = entry.queue.name`
-        # `session.delete(entry)`
-        # `return True, ..., entry`
-        # The `entry` object will have its columns, but relations might be gone.
-        # The `queue` relation probably fails.
-        # I should simply query Queue name by ID separately or assume it from `start_q` if I passed it.
-        # Actually I prefer `leave_queue` logic to return the summary dict or modified object with needed info.
+        result_q = await session.execute(select(QueueType).filter_by(id=qid))
+        q_name = result_q.scalar_one().name
 
-        # IMPROVEMENT: Let's fetch Queue Name explicitly here since we have QID.
-        q_name = session.get(QueueType, qid).name
-
-        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
-        # deleted_entry.character_name should still be available in RAM object?
-        # Yes, usually simple column attributes remain on the instance.
-
+        result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+        main_char = result_main.scalar_one_or_none()
+        
         main_nick = main_char.nickname if main_char else deleted_entry.character_name
         asyncio.create_task(
             log_reward_to_sheet(
@@ -824,13 +878,20 @@ async def leave_queue_handler(callback: types.CallbackQuery):
     else:
         await callback.answer(msg, show_alert=True)
 
-    await view_queue(callback)
+    await view_queue(callback, session)
 
 
 @router.callback_query(F.data == "my_active_queues")
-async def show_my_active_queues(callback: types.CallbackQuery):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    entries = session.query(QueueEntry).filter_by(user_id=user.id).all()
+async def show_my_active_queues(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await show_my_active_queues(callback, session)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    result = await session.execute(
+        select(QueueEntry).filter_by(user_id=user.id).options(selectinload(QueueEntry.queue))
+    )
+    entries = result.scalars().all()
 
     if not entries:
         return await callback.message.edit_text(
@@ -872,37 +933,50 @@ async def show_my_active_queues(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("toggle_mode_"))
-async def toggle_mode_handler(callback: types.CallbackQuery):
+async def toggle_mode_handler(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await toggle_mode_handler(callback, session)
     try:
         eid = int(callback.data.split("_")[2])
     except Exception:
         return
-    entry = session.get(QueueEntry, eid)
+    entry = await session.get(QueueEntry, eid)
     if not entry:
         return await callback.answer("Запись не найдена.", show_alert=True)
 
-    if entry.queue.name == "Цилинь":
+    # Need to load entry.queue
+    result_q = await session.execute(select(QueueType).filter_by(id=entry.queue_type_id))
+    q = result_q.scalar_one()
+
+    if q.name == "Цилинь":
         return await callback.answer("Для этой очереди доступна только разовая запись.", show_alert=True)
 
     entry.auto_requeue = not entry.auto_requeue
-    session.commit()
+    await session.commit()
 
     status = "♾ Авто-запись" if entry.auto_requeue else "1️⃣ Разовая запись"
     await callback.answer(f"Режим изменен: {status}")
-    await show_my_active_queues(callback)
+    await show_my_active_queues(callback, session)
 
 
 @router.callback_query(F.data.startswith("swap_start_"))
-async def swap_start(callback: types.CallbackQuery):
+async def swap_start(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await swap_start(callback, session)
     try:
         eid = int(callback.data.split("_")[2])
     except Exception:
         return
-    entry = session.get(QueueEntry, eid)
+    entry = await session.get(QueueEntry, eid)
     if not entry:
         return await callback.answer("Не найдено.", show_alert=True)
 
-    chars = session.query(Character).filter_by(user_id=entry.user_id).all()
+    result_chars = await session.execute(select(Character).filter_by(user_id=entry.user_id))
+    chars = result_chars.scalars().all()
     if len(chars) < 2:
         return await callback.answer("Нет других персонажей.", show_alert=True)
 
@@ -920,23 +994,33 @@ async def swap_start(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("do_swap_"))
-async def do_swap_finish(callback: types.CallbackQuery):
+async def do_swap_finish(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await do_swap_finish(callback, session)
     parts = callback.data.split("_")
     eid, cid = int(parts[2]), int(parts[3])
-    entry = session.get(QueueEntry, eid)
-    new_char = session.get(Character, cid)
+    entry = await session.get(QueueEntry, eid)
+    new_char = await session.get(Character, cid)
 
     if entry and new_char:
         old_nick = entry.character_name
         entry.character_name = new_char.nickname
-        session.commit()
+        await session.commit()
 
-        user = session.get(User, entry.user_id)
-        main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
+        user = await session.get(User, entry.user_id)
+        result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
+        main_char = result_main.scalar_one_or_none()
         main_nick = main_char.nickname if main_char else new_char.nickname
+        
+        # Load queue name
+        result_q = await session.execute(select(QueueType).filter_by(id=entry.queue_type_id))
+        q_name = result_q.scalar_one().name
+
         asyncio.create_task(
             log_reward_to_sheet(
-                queue_name=entry.queue.name,
+                queue_name=q_name,
                 main_nick=main_nick,
                 char_nick=new_char.nickname,
                 manager_name=user.username,
@@ -945,17 +1029,21 @@ async def do_swap_finish(callback: types.CallbackQuery):
         )
 
         await callback.answer(f"✅ {old_nick} -> {new_char.nickname}")
-        await show_my_active_queues(callback)
+        await show_my_active_queues(callback, session)
     else:
-        await show_my_active_queues(callback)
+        await show_my_active_queues(callback, session)
 
 
 @router.callback_query(F.data == "menu_history")
-async def my_history(callback: types.CallbackQuery):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
-    hist = (
-        session.query(RewardHistory).filter_by(user_id=user.id).order_by(RewardHistory.timestamp.desc()).limit(10).all()
-    )
+async def my_history(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await my_history(callback, session)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
+    stmt = select(RewardHistory).filter_by(user_id=user.id).order_by(RewardHistory.timestamp.desc()).limit(10)
+    result = await session.execute(stmt)
+    hist = result.scalars().all()
     text = "📜 <b>История наград:</b>\n" + ("<i>Пусто</i>" if not hist else "")
     for h in hist:
         text += f"🔹 {h.timestamp.strftime('%d.%m')} — {h.queue_name} ({h.character_name})\n"
@@ -963,8 +1051,13 @@ async def my_history(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "menu_info")
-async def info_queues(callback: types.CallbackQuery):
-    queues = session.query(QueueType).filter_by(is_active=True).all()
+async def info_queues(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await info_queues(callback, session)
+    result = await session.execute(select(QueueType).filter_by(is_active=True))
+    queues = result.scalars().all()
 
     # Sort queues
     def get_q_index(q):
@@ -988,9 +1081,13 @@ async def info_queues(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "menu_afk")
-async def afk_menu(callback: types.CallbackQuery, state: FSMContext):
+async def afk_menu(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await afk_menu(callback, state, session)
     await state.clear()
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
 
     text = "🛌 <b>Режим AFK</b>\n\n"
     if user.afk_start and user.afk_end:
@@ -1009,14 +1106,18 @@ async def afk_menu(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "afk_clear")
-async def afk_clear(callback: types.CallbackQuery):
-    user = ensure_user(callback.from_user.id, callback.from_user.username)
+async def afk_clear(callback: types.CallbackQuery, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await afk_clear(callback, session)
+    user = await ensure_user(session, callback.from_user.id, callback.from_user.username)
     user.afk_start = None
     user.afk_end = None
     user.afk_reason = None
-    session.commit()
+    await session.commit()
     await callback.answer("Режим AFK отключен.")
-    await afk_menu(callback, None)  # Passing None as state is safe here or we can just ignore it if we don't use it
+    await afk_menu(callback, None, session)
 
 
 @router.callback_query(F.data == "afk_set")
@@ -1064,6 +1165,7 @@ async def afk_start_quick(callback: types.CallbackQuery, state: FSMContext):
         dt = now + timedelta(days=1)
 
     await state.update_data(start_date=dt)
+    await callback.answer()
     await ask_afk_end(callback.message, state)
 
 
@@ -1120,6 +1222,7 @@ async def afk_end_quick(callback: types.CallbackQuery, state: FSMContext):
         end_dt = start_dt + timedelta(days=days)
 
     await state.update_data(end_date=end_dt)
+    await callback.answer()
     
     # Ask for Reason (Optional)
     await callback.message.edit_text(
@@ -1133,12 +1236,17 @@ async def afk_end_quick(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(AFKState.waiting_for_reason, F.data == "afk_reason_skip")
-async def afk_reason_skip_callback(callback: types.CallbackQuery, state: FSMContext):
+async def afk_reason_skip_callback(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await afk_reason_skip_callback(callback, state, session)
     data = await state.get_data()
     start_dt = data.get("start_date")
     end_dt = data.get("end_date")
     
-    await finish_afk_setup(callback, state, start_dt, end_dt, reason=None)
+    await callback.answer()
+    await finish_afk_setup(callback, state, start_dt, end_dt, reason=None, session=session)
 
 
 @router.message(AFKState.waiting_for_end)
@@ -1169,19 +1277,23 @@ async def afk_end_manual(message: types.Message, state: FSMContext):
     await state.set_state(AFKState.waiting_for_reason)
 
 
-async def finish_afk_setup(callback_or_message, state: FSMContext, start_dt, end_dt, reason=None):
+async def finish_afk_setup(callback_or_message, state: FSMContext, start_dt=None, end_dt=None, reason=None, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await finish_afk_setup(callback_or_message, state, start_dt, end_dt, reason, session)
     # Handle both CallbackQuery and Message
     user_id = callback_or_message.from_user.id
     username = callback_or_message.from_user.username
     
-    user = ensure_user(user_id, username)
+    user = await ensure_user(session, user_id, username)
     user.afk_start = start_dt
     user.afk_end = end_dt
     user.afk_reason = reason
 
     # History
     session.add(AFKHistory(user_id=user.id, start_date=start_dt, end_date=end_dt, reason=reason))
-    session.commit()
+    await session.commit()
     
     reason_text = f"\n📝 Причина: {reason}" if reason else ""
 
@@ -1196,7 +1308,11 @@ async def finish_afk_setup(callback_or_message, state: FSMContext, start_dt, end
 
 
 @router.message(AFKState.waiting_for_reason)
-async def afk_reason_input(message: types.Message, state: FSMContext):
+async def afk_reason_input(message: types.Message, state: FSMContext, session: AsyncSession = None):
+    if not session:
+        from database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            return await afk_reason_input(message, state, session)
     data = await state.get_data()
     start_dt = data.get("start_date")
     end_dt = data.get("end_date")
@@ -1207,4 +1323,4 @@ async def afk_reason_input(message: types.Message, state: FSMContext):
     if text != "➡️ Пропустить":
         reason = text
 
-    await finish_afk_setup(message, state, start_dt, end_dt, reason)
+    await finish_afk_setup(message, state, start_dt, end_dt, reason, session=session)

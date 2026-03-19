@@ -3,39 +3,40 @@ from datetime import datetime, timedelta
 import aiosqlite
 import pytest
 
+from database import Player, Event
 from web_database import get_data_from_db
 
 
 @pytest.mark.asyncio
-async def test_get_data_from_db(test_db_session):
-    # test_db_session is the path to the temp DB (yielded from fixture)
-    db_path = test_db_session
-
+async def test_get_data_from_db(async_test_session):
     # 1. Insert Mock Data
-    async with aiosqlite.connect(db_path) as conn:
-        # Create Player
-        await conn.execute(
-            "INSERT INTO players (role_id, nickname, in_clan, class_id) VALUES (?, ?, ?, ?)", (101, "TestPlayer", 1, 1)
-        )
+    player = Player(role_id=101, nickname="TestPlayer", in_clan=1, class_id=1)
+    async_test_session.add(player)
+    
+    # Create Events
+    # Timestamp needed for logic
+    now = datetime.now()
+    ts = int(now.timestamp())
+    today_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Create Events
-        today_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Timestamp needed for logic
-        ts = int(datetime.now().timestamp())
-
-        # Event type 1 (Valor), Value 100
-        await conn.execute(
-            "INSERT INTO events (role_id, timestamp, event_date, event_type, value) VALUES (?, ?, ?, ?, ?)",
-            (101, ts, today_str, 1, 100),
-        )
-
-        await conn.commit()
+    # Event type 1 (Valor), Value 100
+    event = Event(role_id=101, timestamp=ts, event_date=today_str, event_type=1, value=100)
+    async_test_session.add(event)
+    
+    await async_test_session.commit()
 
     # 2. Run functionality
-    today = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    today = now.strftime("%Y-%m-%d")
+    start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
 
     data, s, e, intervals = await get_data_from_db(start, today)
+    
+    print(f"DEBUG: Data length: {len(data)}")
+    if data:
+        print(f"DEBUG: First row: {data[0]}")
+    
+    assert len(data) > 0
+    assert data[0]["role_id"] == 101
 
     # 3. Assertions
     assert len(data) == 1

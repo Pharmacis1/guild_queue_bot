@@ -3,11 +3,11 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-import aiosqlite
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
-
-from web_database import DB_NAME
+from database import AsyncSessionLocal, ObserverCache, get_msk_now, get_session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 router = APIRouter()
 
@@ -68,7 +68,7 @@ async def get_stats():
 
 
 @router.get("/api/observer/{role_id}")
-async def get_player_equipment(role_id: int, server: str = "capella"):
+async def get_player_equipment(role_id: int, server: str = "capella", session: AsyncSession = Depends(get_session)):
     """
     Returns the HTML snippet for the player's equipment.
     Uses caching to avoid spamming PWOBS.
@@ -77,26 +77,13 @@ async def get_player_equipment(role_id: int, server: str = "capella"):
         raise HTTPException(status_code=400, detail="Missing role_id")
 
     # 1. Check Cache
-    async with aiosqlite.connect(DB_NAME) as conn:
-        async with conn.execute(
-            "SELECT html_content, updated_at FROM observer_cache WHERE role_id = ?", (role_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                html, updated_at_str = row
-                # Check validity (sqlite datetime is weird string sometimes)
-                # Assuming standard format "YYYY-MM-DD HH:MM:SS.ssssss"
-                try:
-                    if "." in updated_at_str:
-                        updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S.%f")
-                    else:
-                        updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
-
-                    if datetime.utcnow() - updated_at < timedelta(hours=CACHE_TTL_HOURS):
-                        logging.info(f"Cache HIT for {role_id}")
-                        return {"status": "ok", "html": html, "source": "cache"}
-                except Exception as e:
-                    logging.warning(f"Cache date parse error: {e}, ignoring cache.")
+    result = await session.execute(select(ObserverCache).filter_by(role_id=role_id))
+    cache_entry = result.scalar_one_or_none()
+    
+    if cache_entry:
+        if get_msk_now() - cache_entry.updated_at < timedelta(hours=CACHE_TTL_HOURS):
+            logging.info(f"Cache HIT for {role_id}")
+            return {"status": "ok", "html": cache_entry.html_content, "source": "cache"}
 
     # 2. Scrape (Protected by Lock to avoid crashing browser with parallel tabs if resource constrained)
     # PWOBS prevents too many requests? We can parallelize carefully.
@@ -225,15 +212,17 @@ async def get_player_equipment(role_id: int, server: str = "capella"):
         full_html += html_content
 
         # 3. Save to Cache
-        async with aiosqlite.connect(DB_NAME) as conn:
-            await conn.execute(
-                """
-                INSERT OR REPLACE INTO observer_cache (role_id, html_content, updated_at) 
-                VALUES (?, ?, ?)
-            """,
-                (role_id, full_html, datetime.utcnow()),
-            )
-            await conn.commit()
+        # Refresh cache_entry to ensure we're not using a stale one if multiple scrapes happen (unlikely with Lock)
+        # But we already have session from Depends, so let's just use it
+        result = await session.execute(select(ObserverCache).filter_by(role_id=role_id))
+        cache_entry = result.scalar_one_or_none()
+        if not cache_entry:
+            cache_entry = ObserverCache(role_id=role_id)
+            session.add(cache_entry)
+        
+        cache_entry.html_content = full_html
+        cache_entry.updated_at = get_msk_now()
+        await session.commit()
 
         return {"status": "ok", "html": full_html, "source": "live"}
 

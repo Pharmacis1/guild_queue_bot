@@ -1,118 +1,112 @@
-import aiosqlite
 import pytest
-
+from sqlalchemy import select
+from database import Player, User, Character
 from logic.player_manager import update_player_logic
 
 
-# Helper to seed DB
-async def seed_player(db_path, role_id, nick):
-    async with aiosqlite.connect(db_path) as conn:
-        await conn.execute("INSERT INTO players (role_id, nickname, in_clan) VALUES (?, ?, 1)", (role_id, nick))
-        await conn.commit()
-
-
-async def seed_user(db_path, telegram_id, username):
-    async with aiosqlite.connect(db_path) as conn:
-        await conn.execute("INSERT INTO users (telegram_id, username) VALUES (?, ?)", (telegram_id, username))
-        await conn.commit()  # Fix: Ensure committed
-        async with conn.execute("SELECT last_insert_rowid()") as cursor:
-            return (await cursor.fetchone())[0]
-
-
 @pytest.mark.asyncio
-async def test_update_basic_info(test_db_session):
-    db_path = test_db_session  # This string path is the DB
+async def test_update_basic_info(async_test_session):
+    session = async_test_session
 
     # Seed
-    await seed_player(db_path, 101, "OldNick")
+    p = Player(role_id=101, nickname="OldNick", in_clan=1)
+    session.add(p)
+    await session.commit()
 
     # Update
     result = await update_player_logic(
+        session,
         101,
         {
             "nickname": "NewNick",
             "class_id": 5,  # Assassin
             "in_clan": False,
-        },
-        db_path=db_path,
+        }
     )
 
     assert result["status"] == "ok"
 
     # Verify
-    async with aiosqlite.connect(db_path) as conn:
-        async with conn.execute("SELECT nickname, class_id, in_clan FROM players WHERE role_id=101") as cursor:
-            row = await cursor.fetchone()
-            assert row[0] == "NewNick"
-            assert row[1] == 5
-            assert row[2] == 0
+    await session.refresh(p)
+    assert p.nickname == "NewNick"
+    assert p.class_id == 5
+    assert p.in_clan == 0
 
 
 @pytest.mark.asyncio
-async def test_link_user_and_fail_invalid_tg(test_db_session):
-    db_path = test_db_session
-    await seed_player(db_path, 102, "LinkMe")
+async def test_link_user_and_fail_invalid_tg(async_test_session):
+    session = async_test_session
+    p = Player(role_id=102, nickname="LinkMe", in_clan=1)
+    session.add(p)
+    await session.commit()
 
     # 1. Provide an unknown TG ID - code should now create a STUB user
-    res = await update_player_logic(102, {"telegram_id": 999999}, db_path=db_path)
+    res = await update_player_logic(session, 102, {"telegram_id": 999999})
     assert res["status"] == "ok"
     
-    async with aiosqlite.connect(db_path) as conn:
-        async with conn.execute("SELECT id FROM users WHERE telegram_id = 999999") as cursor:
-            row = await cursor.fetchone()
-            assert row is not None
-            uid_stub = row[0]
-            
-        async with conn.execute("SELECT user_id FROM players WHERE role_id=102") as cursor:
-            assert (await cursor.fetchone())[0] == uid_stub
+    result = await session.execute(select(User).filter_by(telegram_id=999999))
+    stub_user = result.scalar_one_or_none()
+    assert stub_user is not None
+    
+    await session.refresh(p)
+    assert p.user_id == stub_user.id
 
-    # 2. Seed User
-    uid = await seed_user(db_path, 12345, "testuser")
+    # 2. Seed Real User
+    real_user = User(telegram_id=12345, username="testuser")
+    session.add(real_user)
+    await session.commit()
 
     # 3. Link Success
-    res = await update_player_logic(102, {"telegram_id": 12345}, db_path=db_path)
+    res = await update_player_logic(session, 102, {"telegram_id": 12345})
     assert res["status"] == "ok"
 
     # Verify Player has User ID
-    async with aiosqlite.connect(db_path) as conn:
-        async with conn.execute("SELECT user_id FROM players WHERE role_id=102") as cursor:
-            assert (await cursor.fetchone())[0] == uid
+    await session.refresh(p)
+    assert p.user_id == real_user.id
 
 
 @pytest.mark.asyncio
-async def test_bot_sync_is_main(test_db_session):
+async def test_bot_sync_is_main(async_test_session):
     """
     Test that linking a user + setting is_alt=False makes them MAIN in 'characters' table.
     """
-    db_path = test_db_session
-    uid = await seed_user(db_path, 22222, "master")
-    await seed_player(db_path, 103, "MyChar")
+    session = async_test_session
+    u = User(telegram_id=22222, username="master")
+    session.add(u)
+    p = Player(role_id=103, nickname="MyChar", in_clan=1)
+    session.add(p)
+    await session.commit()
 
     # Update: Link user, set as MAIN (is_alt=False)
-    await update_player_logic(103, {"telegram_id": 22222, "is_alt": False}, db_path=db_path)
+    await update_player_logic(session, 103, {"telegram_id": 22222, "is_alt": False})
 
-    async with aiosqlite.connect(db_path) as conn:
-        # Check 'characters' (Bot Table)
-        async with conn.execute("SELECT is_main, user_id FROM characters WHERE nickname='MyChar'") as cursor:
-            row = await cursor.fetchone()
-            assert row is not None
-            assert row[0] == 1  # is_main
-            assert row[1] == uid
+    # Check 'characters' (Bot Table)
+    result = await session.execute(select(Character).filter_by(nickname='MyChar'))
+    char = result.scalar_one_or_none()
+    assert char is not None
+    assert char.is_main == 1
+    assert char.user_id == u.id
 
 
 @pytest.mark.asyncio
-async def test_afk_dates_update(test_db_session):
-    db_path = test_db_session
-    uid = await seed_user(db_path, 33333, "vacationer")
-    await seed_player(db_path, 104, "AfkPlayer")
+async def test_afk_dates_update(async_test_session):
+    session = async_test_session
+    u = User(telegram_id=33333, username="vacationer")
+    session.add(u)
+    p = Player(role_id=104, nickname="AfkPlayer", in_clan=1)
+    session.add(p)
+    await session.commit()
 
     # Provide ISO dates
     await update_player_logic(
-        104, {"telegram_id": 33333, "afk_start": "2025-01-01T10:00", "afk_end": "2025-01-10T10:00"}, db_path=db_path
+        session,
+        104,
+        {"telegram_id": 33333, "afk_start": "2025-01-01T10:00", "afk_end": "2025-01-10T10:00"}
     )
 
-    async with aiosqlite.connect(db_path) as conn:
-        async with conn.execute("SELECT afk_start, afk_end FROM users WHERE id=?", (uid,)) as cursor:
-            row = await cursor.fetchone()
-            # It should preserve format or close to it
-            assert "2025-01-01 10:00:00" == row[0]
+    await session.refresh(u)
+    # It should be a datetime object now in the DB
+    assert u.afk_start.year == 2025
+    assert u.afk_start.month == 1
+    assert u.afk_start.day == 1
+    assert u.afk_start.hour == 10

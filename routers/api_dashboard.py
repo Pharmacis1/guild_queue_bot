@@ -2,11 +2,14 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Any
 import os
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload
 
 from consts import CLASSES
-from database import User, session
+from database import User, AsyncSessionLocal, Player, get_session
+from sqlalchemy.ext.asyncio import AsyncSession
 from web_database import get_last_update_time
 from logic.dashboard import get_kh_table_data, get_history_data, get_money_table_data
 
@@ -143,7 +146,11 @@ async def get_current_user(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return None
-    return session.query(User).filter_by(telegram_id=user_id).first()
+    async with AsyncSessionLocal() as db_session:
+        result = await db_session.execute(
+            select(User).options(selectinload(User.characters)).filter_by(telegram_id=user_id)
+        )
+        return result.scalar_one_or_none()
 
 # --- Endpoints ---
 
@@ -153,13 +160,9 @@ async def get_init_data(request: Request):
     last_upd = await get_last_update_time()
     
     # Fetch active queue types
-    import aiosqlite
-    import web_database
-    async with aiosqlite.connect(web_database.DB_NAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute("SELECT id, name FROM queue_types WHERE is_active = 1") as cursor:
-            q_rows = await cursor.fetchall()
-            queue_types = [dict(r) for r in q_rows]
+    async with AsyncSessionLocal() as db_session:
+        result = await db_session.execute(text("SELECT id, name FROM queue_types WHERE is_active = TRUE"))
+        queue_types = [dict(r) for r in result.mappings().all()]
 
     user_data = None
     if user:
@@ -255,10 +258,10 @@ async def get_history_endpoint(
     return rows
 
 @router.get("/profile/{role_id}", response_model=ProfileResponse)
-async def get_profile_endpoint(role_id: int):
+async def get_profile_endpoint(role_id: int, session: AsyncSession = Depends(get_session)):
     # Dynamic import to avoid circular dependency if any (though logic modules usually okay)
     from logic.player_manager import get_player_profile
-    data = await get_player_profile(role_id)
+    data = await get_player_profile(session, role_id)
     if not data:
          # Return empty or error? Better 404 but for now valid empty struct
          # Actually let's return 404 if not found
@@ -272,7 +275,7 @@ async def get_profile_endpoint(role_id: int):
     return data
 
 @router.post("/profile/{role_id}")
-async def update_profile_endpoint(role_id: int, request: Request):
+async def update_profile_endpoint(role_id: int, request: Request, session: AsyncSession = Depends(get_session)):
     user = await get_current_user(request)
     if not user:
          from fastapi import HTTPException
@@ -282,20 +285,26 @@ async def update_profile_endpoint(role_id: int, request: Request):
     can_edit = user.is_master
     if not can_edit:
         # Check ownership
-        from database import Player
-        player = session.query(Player).filter_by(role_id=role_id, user_id=user.id).first()
-        if player:
-            can_edit = True
+        # Now check if the current user owns a character with this player's nickname
+        from database import Player, Character
+        player_result = await session.execute(select(Player).filter_by(role_id=role_id))
+        player_row = player_result.scalar_one_or_none()
+
+        if player_row:
+            char_row = await session.execute(select(Character).filter_by(user_id=user.id, nickname=player_row.nickname))
+            char = char_row.scalar_one_or_none()
+            if char:
+                can_edit = True
 
     if not can_edit:
          from fastapi import HTTPException
-         raise HTTPException(status_code=403, detail="Access denied")
+         raise HTTPException(status_code=403, detail="Permission denied")
 
     body = await request.json()
     from logic.player_manager import update_player_logic
     
     try:
-        result = await update_player_logic(role_id, body)
+        result = await update_player_logic(session, role_id, body)
         return result
     except Exception as e:
         from fastapi import HTTPException

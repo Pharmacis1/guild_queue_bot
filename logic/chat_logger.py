@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
-from database import session, MessageLog, SummaryState, get_msk_now
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import MessageLog, SummaryState, get_msk_now
 
-def log_message(chat_id, thread_id, user_id, user_name, text):
+async def log_message(session: AsyncSession, chat_id, thread_id, user_id, user_name, text):
     """
     Logs a message to the database.
     """
@@ -19,51 +21,52 @@ def log_message(chat_id, thread_id, user_id, user_name, text):
             timestamp=get_msk_now()
         )
         session.add(msg)
-        session.commit()
+        await session.commit()
     except Exception as e:
         print(f"Error logging message: {e}")
-        session.rollback()
+        await session.rollback()
 
-def get_new_messages(chat_id, thread_id, limit=50):
+async def get_new_messages(session: AsyncSession, chat_id, thread_id, limit=50):
     """
     Retrieves messages for a specific chat/thread that haven't been summarized yet.
     """
     # 1. Get last summary time
-    state = session.query(SummaryState).filter_by(chat_id=chat_id, thread_id=thread_id).first()
+    stmt_state = select(SummaryState).filter_by(chat_id=chat_id, thread_id=thread_id)
+    result_state = await session.execute(stmt_state)
+    state = result_state.scalar_one_or_none()
     last_time = state.last_summary_time if state else None
     
-    query = session.query(MessageLog).filter(
+    stmt = select(MessageLog).filter(
         MessageLog.chat_id == chat_id,
         MessageLog.thread_id == thread_id
     )
     
     if last_time:
-        query = query.filter(MessageLog.timestamp > last_time)
+        stmt = stmt.filter(MessageLog.timestamp > last_time)
     else:
-        # If no previous summary, maybe limit to last 24h or last N messages?
-        # User implies "messages I haven't seen". If never seen, show recent history.
-        # But if we just started logging, history is empty.
-        # If we have history but no SummaryState, it means first summary.
-        # Summary shouldn't be infinite.
-        # Let's limit to last 24 hours if no state.
+        # If no previous summary, limit to last 24 hours if no state.
         yesterday = get_msk_now() - timedelta(hours=24)
-        query = query.filter(MessageLog.timestamp > yesterday)
+        stmt = stmt.filter(MessageLog.timestamp > yesterday)
 
     # Order by timestamp ASC (oldest first)
-    msgs = query.order_by(MessageLog.timestamp.asc()).limit(limit).all()
+    stmt = stmt.order_by(MessageLog.timestamp.asc()).limit(limit)
+    result = await session.execute(stmt)
+    msgs = result.scalars().all()
     
     return msgs
 
-def mark_summary_done(chat_id, thread_id):
+async def mark_summary_done(session: AsyncSession, chat_id, thread_id):
     """
     Updates the cursor (last_summary_time) to the current time.
     """
     now = get_msk_now()
     
-    state = session.query(SummaryState).filter_by(chat_id=chat_id, thread_id=thread_id).first()
+    stmt = select(SummaryState).filter_by(chat_id=chat_id, thread_id=thread_id)
+    result = await session.execute(stmt)
+    state = result.scalar_one_or_none()
     if not state:
         state = SummaryState(chat_id=chat_id, thread_id=thread_id)
         session.add(state)
     
     state.last_summary_time = now
-    session.commit()
+    await session.commit()

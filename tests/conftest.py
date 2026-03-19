@@ -2,6 +2,9 @@ import asyncio
 import os
 import sys
 
+# Force SQLite for tests to avoid asyncpg dependency if not installed
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+
 import pytest
 
 import sys
@@ -38,47 +41,107 @@ def test_db_path(tmp_path):
 @pytest.fixture
 def test_db_session(test_db_path, monkeypatch):
     """
-    Initialize a test database, create schema, and override the global string variables.
-    Returns: The temporary DB path.
+    Initialize a test database, create schema.
+    Returns: The temporary DB path (for legacy sync tests).
     """
-    # Override configured DB paths
-    monkeypatch.setattr("web_database.DB_NAME", test_db_path)
-    # Note: database.py specific engine creation might need patching.
-    # Standard monkeypatching might be too late if already imported.
-    # However, for tests importing 'database', we can try to re-bind or patch the session/engine if possible.
-
-    # 1. Create Schema using SQLAlchemy
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
+    # [IMPORTANT] Ensure all models are registered with Base.metadata
     from database import Base
-
+    import database # ensures all models in database.py are loaded
+    
+    from sqlalchemy import create_engine
     engine = create_engine(f"sqlite:///{test_db_path}")
     Base.metadata.create_all(engine)
+    engine.dispose()
 
-    # 2. Monkeypatch 'database.engine' and 'database.session'?
-    # This is tricky because `database.py` creates `session = Session()` at module level.
-    # Any code doing `from database import session` already has the old object.
+    monkeypatch.setattr("web_database.DB_NAME", test_db_path)
+    
+    # [IMPORTANT] Ensure any code using AsyncSessionLocal uses the test database
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    import database
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{test_db_path}")
+    test_async_session_factory = async_sessionmaker(bind=async_engine, expire_on_commit=False)
+    
+    # Monkeypatch the factories in modules that use them
+    for module_name in [
+        "database", "web_database", "logic.dashboard", "logic.party_manager", 
+        "logic.player_manager", "logic.queue_ops", "logic.queue_manager", 
+        "logic.reward_ops", "logic.ai_helper", "handlers.user", "handlers.ai_user",
+        "routers.api", "routers.api_dashboard", "routers.admin_browser", "routers.auth", "routers.observer", "routers.views"
+    ]:
+        try:
+            import importlib
+            mod = importlib.import_module(module_name)
+            if hasattr(mod, "AsyncSessionLocal"):
+                monkeypatch.setattr(f"{module_name}.AsyncSessionLocal", test_async_session_factory)
+        except ImportError:
+            pass
 
-    # Better approach for integration tests code that imports `database`:
-    # We should probably refactor `database.py` to allow overriding, but for now let's try to patch.
-
-    # Init new session factory for test DB
-    TestSession = sessionmaker(bind=engine)
-    test_session = TestSession()
-
-    # Patch the module-level 'session' object if possible.
-    # But 'from database import session' makes this hard to update universally
-    # unless we patch where it is used.
-    # HOWEVER, web_database uses `aiosqlite.connect(DB_NAME)`, which we patched via monkeypatch.
-    # So `web_database` logic is SAFE.
-
-    # The `database.py` synchronous partial logic (for bot handlers) uses `session`.
-    # Let's verify if `test_database.py` tests `web_database` (async) or `database` (sync).
-    # It tests `web_database`. So patching `DB_NAME` is enough for `web_database`.
-
+    # We yield the path because legacy tests do: create_engine(f"sqlite:///{test_db_session}")
     yield test_db_path
 
-    # Cleanup
-    test_session.close()
-    # tmp_path is auto-cleaned
+
+@pytest.fixture(autouse=True)
+def patch_async_session(monkeypatch, tmp_path_factory):
+    """
+    Globally patch AsyncSessionLocal for ALL tests to use an in-memory or temp SQLite DB.
+    This prevents accidental PostgreSQL connections.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from database import Base
+    import database
+    
+    # Create a session-wide temp DB path if not already created
+    # For simplicity, we can use a unique path per test if needed, 
+    # but autouse=True at function level is safer for isolation.
+    test_db = tmp_path_factory.mktemp("data") / "test.db"
+    
+    # Create tables synchronously first
+    from sqlalchemy import create_engine
+    sync_engine = create_engine(f"sqlite:///{test_db}")
+    Base.metadata.create_all(sync_engine)
+    sync_engine.dispose()
+    
+    engine = create_async_engine(f"sqlite+aiosqlite:///{test_db}")
+    AsyncTestSession = async_sessionmaker(bind=engine, expire_on_commit=False)
+    
+    modules_to_patch = [
+        "database", "web_database", "logic.dashboard", "logic.player_manager", 
+        "logic.party_manager", "logic.queue_ops", "logic.queue_manager", 
+        "logic.reward_ops", "logic.ai_helper", "handlers.user", "handlers.ai_user",
+        "handlers.admin", "handlers.ai_admin",
+        "routers.api", "routers.api_dashboard", "routers.admin_browser", "routers.auth", "routers.observer", "routers.views"
+    ]
+    
+    for module_name in modules_to_patch:
+        try:
+            import importlib
+            mod = importlib.import_module(module_name)
+            if hasattr(mod, "AsyncSessionLocal"):
+                monkeypatch.setattr(f"{module_name}.AsyncSessionLocal", AsyncTestSession)
+        except (ImportError, AttributeError):
+            pass
+            
+    # Also patch the global engine in database.py
+    monkeypatch.setattr("database.engine", engine)
+    
+    return AsyncTestSession
+
+@pytest.fixture
+async def async_test_session(patch_async_session, test_db_path):
+    """
+    Provides a clean session for async tests.
+    """
+    from database import Base
+    AsyncTestSession = patch_async_session
+    engine = AsyncTestSession.kw['bind']
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncTestSession() as session:
+        yield session
+    
+    # Engine is shared by autouse fixture, so don't dispose here if you want it to persist 
+    # for the duration of the function. Actually, since patch_async_session is function-scoped,
+    # disposing is fine here if it was the last thing. 
+    # But usually engine disposal is handled by the fixture that created it.

@@ -1,50 +1,37 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+from sqlalchemy import select, update, delete, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
-import aiosqlite
-
-import web_database  # Access web_database.DB_NAME at runtime
+from database import User, Player, Character, AFKHistory, AsyncSessionLocal, ConstantParty, PartyMember, QueueEntry, QueueType
 from consts import CLASSES
 
-
 # Helper to parse dates safely
-def parse_date_safe(date_str: str) -> Optional[str]:
+def parse_date_safe(date_str: str) -> Optional[datetime]:
     if not date_str:
         return None
     try:
         # Try ISO format (YYYY-MM-DDTHH:MM:SS)
-        dt = datetime.fromisoformat(date_str)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.fromisoformat(date_str)
     except ValueError:
         # Fallback for simple date YYYY-MM-DD
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
+            return datetime.strptime(date_str, "%Y-%m-%d")
         except Exception:
             try:
                 # Last resort: dateutil if available (for other formats)
                 from dateutil.parser import parse
-
-                dt = parse(date_str)
-                return dt.strftime("%Y-%m-%d %H:%M:%S")
+                return parse(date_str)
             except Exception as e:
                 logging.error(f"Date parse error: {e}")
                 return None
 
 
-async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path: str = None) -> Dict[str, Any]:
+async def update_player_logic(session: AsyncSession, role_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Core logic for updating a player's profile.
-    Handles:
-    - Player fields (nick, class, in_clan, is_alt)
-    - User Linking (via Telegram ID)
-    - Bot Character Sync (characters table)
-    - AFK History updates (users table)
+    Core logic for updating a player's profile using AsyncSession.
     """
-
-    if db_path is None:
-        db_path = web_database.DB_NAME
 
     nickname = update_data.get("nickname")
     class_id = update_data.get("class_id")
@@ -55,16 +42,18 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
     afk_end_str = update_data.get("afk_end")
     afk_reason = update_data.get("afk_reason")
 
-    logging.info(f"Logic update_player: {role_id} nick={nickname} tg={telegram_id_input} DB={db_path}")
+    logging.info(f"Logic update_player: {role_id} nick={nickname} tg={telegram_id_input}")
 
-    async with aiosqlite.connect(db_path) as conn:
+    try:
         # 1. Current State
-        async with conn.execute("SELECT user_id, nickname FROM players WHERE role_id = ?", (role_id,)) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                raise ValueError("Player not found")
-            current_user_id, current_nickname = row
-
+        stmt_player = select(Player).where(Player.role_id == role_id)
+        result_player = await session.execute(stmt_player)
+        player = result_player.scalar_one_or_none()
+        if not player:
+            raise ValueError("Player not found")
+        
+        current_user_id = player.user_id
+        current_nickname = player.nickname
         new_user_id = current_user_id
 
         # 2. Handle User Linking
@@ -76,304 +65,270 @@ async def update_player_logic(role_id: int, update_data: Dict[str, Any], db_path
                 if s_tg.startswith("@"):
                     # Search by username (case-insensitive)
                     username = s_tg[1:] # Remove @
-                    async with conn.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (username,)) as cursor:
-                        u_row = await cursor.fetchone()
-                        if u_row:
-                            new_user_id = u_row[0]
-                        else:
-                            # Create stub user
-                            async with conn.execute("INSERT INTO users (username) VALUES (?)", (username,)) as cursor:
-                                new_user_id = cursor.lastrowid
+                    stmt_user = select(User.id).where(func.lower(User.username) == func.lower(username))
+                    result_user = await session.execute(stmt_user)
+                    u_row = result_user.first()
+                    if u_row:
+                        new_user_id = u_row.id
+                    else:
+                        # Create stub user
+                        new_user = User(username=username)
+                        session.add(new_user)
+                        await session.flush()
+                        new_user_id = new_user.id
                 else:
                     # Search by telegram_id (must be numeric)
                     try:
                         tg_id = int(s_tg)
-                        async with conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,)) as cursor:
-                            u_row = await cursor.fetchone()
-                            if u_row:
-                                new_user_id = u_row[0]
-                            else:
-                                # Create stub user with telegram_id
-                                async with conn.execute("INSERT INTO users (telegram_id) VALUES (?)", (tg_id,)) as cursor:
-                                    new_user_id = cursor.lastrowid
+                        stmt_user = select(User.id).where(User.telegram_id == tg_id)
+                        result_user = await session.execute(stmt_user)
+                        u_row = result_user.first()
+                        if u_row:
+                            new_user_id = u_row.id
+                        else:
+                            # Create stub user with telegram_id
+                            new_user = User(telegram_id=tg_id)
+                            session.add(new_user)
+                            await session.flush()
+                            new_user_id = new_user.id
                     except ValueError:
                         # NOT a number and NOT @ -> Virtual Group (treat as username)
-                        async with conn.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", (s_tg,)) as cursor:
-                            u_row = await cursor.fetchone()
-                            if u_row:
-                                new_user_id = u_row[0]
-                            else:
-                                # Create virtual user record
-                                async with conn.execute("INSERT INTO users (username) VALUES (?)", (s_tg,)) as cursor:
-                                    new_user_id = cursor.lastrowid
+                        stmt_user = select(User.id).where(func.lower(User.username) == func.lower(s_tg))
+                        result_user = await session.execute(stmt_user)
+                        u_row = result_user.first()
+                        if u_row:
+                            new_user_id = u_row.id
+                        else:
+                            # Create virtual user record
+                            new_user = User(username=s_tg)
+                            session.add(new_user)
+                            await session.flush()
+                            new_user_id = new_user.id
 
-        # 3. Prepare Updates for Players Table
-        updates = []
-        params = []
-
+        # 3. Update Players Table
         if nickname is not None:
-            cleaned_nick = nickname.strip() if nickname else None
-            updates.append("nickname = ?")
-            params.append(cleaned_nick)
+            player.nickname = nickname.strip() if nickname else None
 
         if class_id is not None:
             if class_id not in CLASSES and class_id != -1:
                 raise ValueError(f"Invalid Class ID: {class_id}")
-            updates.append("class_id = ?")
-            params.append(class_id)
+            player.class_id = class_id
 
         if in_clan is not None:
-            updates.append("in_clan = ?")
-            params.append(1 if in_clan else 0)
+            player.in_clan = 1 if in_clan else 0
 
         if is_alt is not None:
-            updates.append("is_alt = ?")
-            params.append(1 if is_alt else 0)
+            player.is_alt = 1 if is_alt else 0
 
-        # Always update user_id (might be unchanged, or set to None/New)
-        updates.append("user_id = ?")
-        params.append(new_user_id)
-
-        if updates:
-            sql = f"UPDATE players SET {', '.join(updates)} WHERE role_id = ?"
-            params.append(role_id)
-            await conn.execute(sql, tuple(params))
+        player.user_id = new_user_id
 
         # 4. SYNC TO BOT TABLES ("characters")
-        # Ensure 'characters' table reflects this player if linked to a User
-
-        # Determine target nickname (if changed use new, else old)
         target_nick = nickname.strip() if nickname else current_nickname
 
         if new_user_id and target_nick:
-            # Check existence
-            async with conn.execute("SELECT id FROM characters WHERE nickname = ?", (target_nick,)) as cursor:
-                char_row = await cursor.fetchone()
+            # Check existence in characters table
+            stmt_char = select(Character).where(Character.nickname == target_nick)
+            result_char = await session.execute(stmt_char)
+            char_obj = result_char.scalar_one_or_none()
 
-            # Logic: If Player says is_alt=True (1), then characters.is_main=False (0)
-            # If Player is_alt=False (0) [implies Main], then characters.is_main=True (1)
-            # BUT we only have 'is_alt' from update_data if it was passed.
-            # If is_alt was NOT passed, we should check DB? Or assume no change?
-            # Existing code only updated if passed.
-            # But here we need `is_main_val` for the UPDATE command below.
+            is_main_val = 0 if player.is_alt else 1
 
-            # We need the final state of is_alt.
-            final_is_alt = is_alt
-            if final_is_alt is None:
-                # Fetch current
-                async with conn.execute("SELECT is_alt FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                    r = await cursor.fetchone()
-                    final_is_alt = bool(r[0]) if r else False
-
-            is_main_val = 0 if final_is_alt else 1
-
-            if char_row:
-                await conn.execute(
-                    "UPDATE characters SET user_id = ?, is_main = ? WHERE nickname = ?",
-                    (new_user_id, is_main_val, target_nick),
-                )
+            if char_obj:
+                char_obj.user_id = new_user_id
+                char_obj.is_main = bool(is_main_val)
             else:
-                await conn.execute(
-                    "INSERT INTO characters (user_id, nickname, is_main) VALUES (?, ?, ?)",
-                    (new_user_id, target_nick, is_main_val),
-                )
+                new_char = Character(user_id=new_user_id, nickname=target_nick, is_main=bool(is_main_val))
+                session.add(new_char)
 
             # 5. Demotion Logic: If this char is now MAIN, set all other chars of this user to NOT MAIN
             if is_main_val:
-                await conn.execute(
-                    "UPDATE characters SET is_main = 0 WHERE user_id = ? AND nickname != ?", (new_user_id, target_nick)
+                await session.execute(
+                    update(Character)
+                    .where(and_(Character.user_id == new_user_id, Character.nickname != target_nick))
+                    .values(is_main=False)
                 )
 
         # 6. REFLECT AFK DATES
-        logging.info(f"Update Logic: role_id={role_id}, afk_start={afk_start_str}")
-        if new_user_id:
-            # Only update if the key is explicitly present in the data payload (handles None/null correctly to clear AFK)
-            if "afk_start" in update_data:
-                start_val = parse_date_safe(update_data.get("afk_start"))
-                logging.info(f"Parsed Start: {start_val}")  # Uses global logger if defined or logging
-                # Note: `afk_end` is coupled in the UI usually.
-                end_val = parse_date_safe(update_data.get("afk_end"))
-                new_reason = update_data.get("afk_reason")
+        if "afk_start" in update_data:
+            start_val = parse_date_safe(update_data.get("afk_start"))
+            end_val = parse_date_safe(update_data.get("afk_end"))
+            new_reason = update_data.get("afk_reason")
 
-                # 1. Update Current Status in Users table (if linked)
-                if new_user_id:
-                    await conn.execute(
-                        "UPDATE users SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE id = ?", 
-                        (start_val, end_val, new_reason if new_reason is not None else None, new_user_id)
-                    )
-
-                # 2. Update Current Status in Players table (always, for unlinked chars)
-                await conn.execute(
-                    "UPDATE players SET afk_start = ?, afk_end = ?, afk_reason = ? WHERE role_id = ?",
-                    (start_val, end_val, new_reason if new_reason is not None else None, role_id)
-                )
-                
-                # 3. Also log to history table (MSK Time)
-                now_msk = datetime.utcnow() + timedelta(hours=3)
-                now_str = now_msk.strftime("%Y-%m-%d %H:%M:%S")
-                await conn.execute(
-                    "INSERT INTO afk_history (user_id, role_id, start_date, end_date, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                    (new_user_id, role_id, start_val, end_val, new_reason, now_str)
+            # Update Current Status in Users table (if linked)
+            if new_user_id:
+                await session.execute(
+                    update(User)
+                    .where(User.id == new_user_id)
+                    .values(afk_start=start_val, afk_end=end_val, afk_reason=new_reason)
                 )
 
-
-        await conn.commit()
-        return {"status": "ok", "message": "Saved & Synced"}
-
-
-async def get_player_profile(role_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Fetches full profile data for the modal.
-    """
-    async with aiosqlite.connect(web_database.DB_NAME) as conn:
-        conn.row_factory = aiosqlite.Row
-
-        # 1. Basic Player & User Info
-        sql = """
-            SELECT p.role_id, p.nickname, p.class_id, p.in_clan, p.is_alt, 
-                   u.id as user_id, u.telegram_id, u.username, u.afk_start, u.afk_end, u.afk_reason
-            FROM players p
-            LEFT JOIN users u ON p.user_id = u.id
-            WHERE p.role_id = ?
-        """
-        async with conn.execute(sql, (role_id,)) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                return None
+            # Update Current Status in Players table (always, for unlinked chars)
+            player.afk_start = start_val
+            player.afk_end = end_val
+            player.afk_reason = new_reason
             
-            data = dict(row)
+            # Log to history table (MSK Time - simple offset for now)
+            now_msk = datetime.utcnow() + timedelta(hours=3)
+            new_history = AFKHistory(
+                user_id=new_user_id,
+                role_id=role_id,
+                start_date=start_val,
+                end_date=end_val,
+                reason=new_reason,
+                timestamp=now_msk
+            )
+            session.add(new_history)
+
+        await session.commit()
+        return {"status": "ok", "message": "Saved & Synced"}
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error in update_player_logic: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Fetches full profile data for the modal using AsyncSession.
+    """
+    try:
+        # 1. Basic Player & User Info
+        stmt = (
+            select(
+                Player.role_id, Player.nickname, Player.class_id, Player.in_clan, Player.is_alt,
+                User.id.label("user_id"), User.telegram_id, User.username, 
+                User.afk_start, User.afk_end, User.afk_reason
+            )
+            .join(User, Player.user_id == User.id, isouter=True)
+            .where(Player.role_id == role_id)
+        )
+        result = await session.execute(stmt)
+        row = result.first()
+        if not row:
+            return None
+        
+        data = {
+            "role_id": row.role_id,
+            "nickname": row.nickname,
+            "class_id": row.class_id,
+            "in_clan": row.in_clan,
+            "is_alt": row.is_alt,
+            "user_id": row.user_id,
+            "telegram_id": row.telegram_id,
+            "username": row.username,
+            "afk_start": row.afk_start,
+            "afk_end": row.afk_end,
+            "afk_reason": row.afk_reason
+        }
 
         user_id = data["user_id"]
 
         # Fallback: if user_id is missing in players, look it up in characters table
         if not user_id and data["nickname"]:
-            cursor = await conn.execute("SELECT user_id FROM characters WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (data["nickname"],))
-            c_row = await cursor.fetchone()
-            if c_row and c_row["user_id"]:
-                user_id = c_row["user_id"]
+            stmt_c = select(Character.user_id).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(data["nickname"])))
+            res_c = await session.execute(stmt_c)
+            c_row = res_c.first()
+            if c_row and c_row.user_id:
+                user_id = c_row.user_id
                 data["user_id"] = user_id
 
         data["afk_history"] = []
         data["queues"] = []
         data["linked_chars"] = []
-        data["party"] = None
+        data["parties"] = []
 
         # 2. AFK History
         if user_id:
-            h_sql = "SELECT id, start_date, end_date, reason FROM afk_history WHERE user_id = ? ORDER BY start_date DESC LIMIT 5"
-            h_params = (user_id,)
+            h_stmt = select(AFKHistory).where(AFKHistory.user_id == user_id).order_by(AFKHistory.start_date.desc()).limit(5)
         else:
-            h_sql = "SELECT id, start_date, end_date, reason FROM afk_history WHERE role_id = ? ORDER BY start_date DESC LIMIT 5"
-            h_params = (role_id,)
+            h_stmt = select(AFKHistory).where(AFKHistory.role_id == role_id).order_by(AFKHistory.start_date.desc()).limit(5)
 
-        async with conn.execute(h_sql, h_params) as cursor:
-            h_rows = await cursor.fetchall()
-            for hr in h_rows:
-                data["afk_history"].append({
-                    "id": hr["id"],
-                    "start": str(hr["start_date"]).replace(" ", "T"), 
-                    "end": str(hr["end_date"]).replace(" ", "T"),
-                    "reason": hr["reason"]
-                })
-
-        # 2.1 Fetch Events History (Last 50)
-        e_sql = """
-            SELECT timestamp, event_date, event_type, value, raw_desc 
-            FROM events 
-            WHERE role_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT 50
-        """
-        data["events"] = []
-        async with conn.execute(e_sql, (role_id,)) as cursor:
-            e_rows = await cursor.fetchall()
-            for er in e_rows:
-                data["events"].append({
-                    "timestamp": er["timestamp"],
-                    "date": er["event_date"],
-                    "type": er["event_type"],
-                    "value": er["value"],
-                    "description": er["raw_desc"]
-                })
+        h_result = await session.execute(h_stmt)
+        for hr in h_result.scalars():
+            data["afk_history"].append({
+                "id": hr.id,
+                "start": hr.start_date.isoformat() if hr.start_date else None,
+                "end": hr.end_date.isoformat() if hr.end_date else None,
+                "reason": hr.reason
+            })
 
         # 3. Active Queues
         if user_id:
-            q_sql = """
-                SELECT qe.id, qt.name, qe.auto_requeue, qe.character_name
-                FROM queue_entries qe
-                JOIN queue_types qt ON qe.queue_type_id = qt.id
-                WHERE qe.user_id = ?
-            """
-            async with conn.execute(q_sql, (user_id,)) as cursor:
-                q_rows = await cursor.fetchall()
-                data["queues"] = [dict(qr) for qr in q_rows]
+            q_stmt = (
+                select(QueueEntry.id, QueueType.name, QueueEntry.auto_requeue, QueueEntry.character_name)
+                .join(QueueType, QueueEntry.queue_type_id == QueueType.id)
+                .where(QueueEntry.user_id == user_id)
+            )
+            q_result = await session.execute(q_stmt)
+            for qid, qname, auto, cname in q_result.all():
+                data["queues"].append({
+                    "id": qid,
+                    "name": qname,
+                    "auto_requeue": auto,
+                    "character_name": cname
+                })
 
         # 4. Linked Characters (Twins)
         if user_id:
-            c_sql = """
-                SELECT c.nickname, c.is_main, MAX(p.class_id) as class_id 
-                FROM characters c
-                LEFT JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
-                WHERE c.user_id = ?
-                GROUP BY c.nickname, c.is_main
-            """
-            async with conn.execute(c_sql, (user_id,)) as cursor:
-                c_rows = await cursor.fetchall()
-                for cr in c_rows:
-                    data["linked_chars"].append({
-                        "nickname": cr["nickname"],
-                        "is_main": bool(cr["is_main"]),
-                        "class_id": cr["class_id"]
-                    })
-        
-        # Integrity check: ensure current player nickname is in the list
-        if data["nickname"]:
-            nicks = {c["nickname"] for c in data["linked_chars"]}
-            if data["nickname"] not in nicks:
-                pass
+            c_stmt = (
+                select(Character.nickname, Character.is_main, func.max(Player.class_id).label("class_id"))
+                .join(Player, func.lower(func.trim(Character.nickname)) == func.lower(func.trim(Player.nickname)), isouter=True)
+                .where(Character.user_id == user_id)
+                .group_by(Character.nickname, Character.is_main)
+            )
+            c_result = await session.execute(c_stmt)
+            for cn, ism, cid in c_result.all():
+                data["linked_chars"].append({
+                    "nickname": cn,
+                    "is_main": bool(ism),
+                    "class_id": cid
+                })
 
         # 5. Constant Parties (CP)
         if user_id:
-            p_sql = """
-                SELECT DISTINCT cp.id, cp.name, cp.color, pm.is_leader 
-                FROM party_members pm
-                JOIN constant_parties cp ON pm.party_id = cp.id
-                WHERE pm.player_role_id IN (
-                    SELECT role_id FROM players WHERE user_id = ?
-                )
-            """
-            cp_params = (user_id,)
+            p_stmt = (
+                select(ConstantParty.id, ConstantParty.name, ConstantParty.color, PartyMember.is_leader)
+                .distinct()
+                .join(PartyMember, ConstantParty.id == PartyMember.party_id)
+                .where(PartyMember.player_role_id.in_(
+                    select(Player.role_id).where(Player.user_id == user_id)
+                ))
+            )
         else:
-            p_sql = """
-                SELECT cp.id, cp.name, cp.color, pm.is_leader 
-                FROM party_members pm
-                JOIN constant_parties cp ON pm.party_id = cp.id
-                WHERE pm.player_role_id = ?
-            """
-            cp_params = (role_id,)
+            p_stmt = (
+                select(ConstantParty.id, ConstantParty.name, ConstantParty.color, PartyMember.is_leader)
+                .join(PartyMember, ConstantParty.id == PartyMember.party_id)
+                .where(PartyMember.player_role_id == role_id)
+            )
+        
+        p_result = await session.execute(p_stmt)
+        for pid, pname, pcolor, is_lead in p_result.all():
+            party_data = {
+                "id": pid,
+                "name": pname,
+                "color": pcolor,
+                "is_leader": is_lead,
+                "members": []
+            }
+            # Fetch members
+            m_stmt = (
+                select(Player.nickname, PartyMember.is_leader, Player.class_id, Player.role_id)
+                .join(PartyMember, Player.role_id == PartyMember.player_role_id)
+                .where(PartyMember.party_id == pid)
+            )
+            m_result = await session.execute(m_stmt)
+            for m_nick, m_lead, m_class, m_role in m_result.all():
+                party_data["members"].append({
+                    "nickname": m_nick,
+                    "is_leader": m_lead,
+                    "class_id": m_class,
+                    "role_id": m_role
+                })
+            data["parties"].append(party_data)
 
-        async with conn.execute(p_sql, cp_params) as cursor:
-            p_rows = await cursor.fetchall()
-            data["parties"] = []
-            
-            for pr in p_rows:
-                party_data = dict(pr)
-                party_id = party_data["id"]
-                
-                # Fetch members for this party
-                m_sql = """
-                    SELECT p.nickname, pm.is_leader, p.class_id, p.role_id
-                    FROM party_members pm
-                    JOIN players p ON pm.player_role_id = p.role_id
-                    WHERE pm.party_id = ?
-                """
-                async with conn.execute(m_sql, (party_id,)) as m_cursor:
-                    m_rows = await m_cursor.fetchall()
-                    party_data["members"] = [dict(mr) for mr in m_rows]
-                
-                data["parties"].append(party_data)
-
-        # For backwards compatibility
         data["party"] = data["parties"][0] if data["parties"] else None
-
         return data
+
+    except Exception as e:
+        logging.error(f"Error in get_player_profile: {e}", exc_info=True)
+        return None

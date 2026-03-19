@@ -3,13 +3,11 @@ import logging
 import os
 import shutil
 from datetime import datetime
-
-import aiosqlite
 import pytz
+
 from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
-import web_database
 from consts import CLASSES
 
 # Try to import dependencies
@@ -25,7 +23,7 @@ from logic import log_importer, party_manager, queue_manager
 from logic.player_manager import update_player_logic, get_player_profile
 from logic import reward_ops
 from sqlalchemy import func
-from database import session, QueueType, RewardHistory, User, Character, Settings, AFKHistory, get_setting, set_setting, get_msk_now, QueueEntry
+from database import AsyncSessionLocal, select, delete, update, QueueType, RewardHistory, User, Character, Settings, AFKHistory, get_setting, set_setting, get_msk_now, QueueEntry, Player
 
 router = APIRouter(prefix="/api")
 
@@ -34,7 +32,12 @@ async def get_current_user(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         return None
-    return session.query(User).filter_by(telegram_id=user_id).first()
+    from sqlalchemy.orm import selectinload
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).options(selectinload(User.characters)).filter_by(telegram_id=user_id)
+        )
+        return result.scalar_one_or_none()
 
 
 @router.get("/download/watcher")
@@ -87,36 +90,31 @@ async def upload_log(background_tasks: BackgroundTasks, file: UploadFile = File(
 
 @router.post("/get_player")
 async def get_player(request: Request):
-    """
-    Get detailed player info including:
-    - Base Player data
-    - Linked User data (Telegram, AFK dates)
-    - AFK History (last 5 records)
-    - Linked Characters (from Bot's Character table)
-    - Active Queues
-    - Available Queue Types (for dropdown)
-    """
     try:
         data = await request.json()
         role_id = data.get("role_id")
-
         if not role_id:
             return {"status": "error", "message": "role_id is required"}
 
-        # Use shared logic from player_manager
-        response_data = await get_player_profile(role_id)
-        
-        if not response_data:
-             return {"status": "error", "message": "Player not found"}
+        async with AsyncSessionLocal() as session:
+            # Use shared logic from player_manager
+            response_data = await get_player_profile(session, int(role_id))
+            
+            if not response_data:
+                 return {"status": "error", "message": "Player not found"}
 
-        # Add "all_queues" for the dropdown (context)
-        # We can keep this local or move to manager too, but keeping here is fine for now
-        # (Refactoring complete: Logic moved to player_manager)
+            # Add "queue_types" for the dropdown
+            result_qt = await session.execute(select(QueueType).order_by(QueueType.name))
+            qt_rows = result_qt.scalars().all()
+            response_data["queue_types"] = [{"id": r.id, "name": r.name} for r in qt_rows]
 
-        return {"status": "ok", "player": response_data}
+            # Add "verification_code"
+            response_data["verification_code"] = await get_setting(session, "verification_code", "")
+
+            return {"status": "ok", "player": response_data}
 
     except Exception as e:
-        logging.error(f"Error in get_player: {e}", exc_info=True)
+        logging.error(f"Error in API get_player: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
@@ -128,17 +126,21 @@ async def get_player(request: Request):
 async def master_get_queues():
     """Get list of active queues for Master Panel."""
     try:
-        queues = session.query(QueueType).filter_by(is_active=True).all()
-        result = []
-        for q in queues:
-            # Need queue details including count. The admin.py handles logic.queue_ops.get_admin_queue_count.
-            # We import here to avoid circular or too early imports, or reuse if already available.
+        async with AsyncSessionLocal() as session:
+            result_qt = await session.execute(select(QueueType).filter_by(is_active=True))
+            queues = result_qt.scalars().all()
+            result = []
             from logic.queue_ops import get_admin_queue_count
-            count = get_admin_queue_count(session, q.id)
-            result.append({"id": q.id, "name": q.name, "count": count, "is_locked": q.is_locked, "description": q.description})
-            
-        pending_count = session.query(RewardHistory).filter_by(is_notified=False).count()
-        return {"status": "ok", "queues": result, "pending_notifications": pending_count}
+            for q in queues:
+                count = await get_admin_queue_count(session, q.id)
+                result.append({"id": q.id, "name": q.name, "count": count, "is_locked": q.is_locked, "description": q.description})
+                
+            result_rh = await session.execute(select(func.count(RewardHistory.id)).filter_by(is_notified=False))
+            pending_count = result_rh.scalar() or 0
+            return {"status": "ok", "queues": result, "pending_notifications": pending_count}
+    except Exception as e:
+        logging.error(f"Error in master_get_queues: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
     except Exception as e:
         logging.error(f"Error in master_get_queues: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -154,43 +156,49 @@ async def master_get_queue_entries(request: Request):
             
         from logic.queue_ops import get_admin_queue_entries
         from handlers.admin import get_weekly_valor_map
-        from database import get_msk_now
+        from database import get_msk_now, Player
         
-        entries = get_admin_queue_entries(session, queue_id)
-        
-        nicks = [e.character_name for e in entries]
-        valor_map = get_weekly_valor_map(nicks)
-        
-        # Get class IDs for these nicks
-        from database import Player
-        # SQLite's LOWER() doesn't work for Cyrillic. 
-        # We fetch exact matches and then build map in Python for normalized lookup.
-        players = session.query(Player).filter(Player.nickname.in_(nicks)).all()
-        player_map = {p.nickname.lower(): p.class_id for p in players}
-        
-        now = get_msk_now()
-        
-        result_entries = []
-        for e in entries:
-            val = valor_map.get(e.character_name, -1)
-            class_id = player_map.get(e.character_name.lower(), -1)
+        async with AsyncSessionLocal() as session:
+            entries = await get_admin_queue_entries(session, queue_id)
             
-            is_afk = False
-            u = e.user
-            if u and u.afk_start and u.afk_end:
-                if u.afk_start <= now <= u.afk_end.replace(hour=23, minute=59, second=59):
-                    is_afk = True
-                    
-            result_entries.append({
-                "id": e.id,
-                "character_name": e.character_name,
-                "valor": val,
-                "is_afk": is_afk,
-                "auto_requeue": e.auto_requeue,
-                "class_id": class_id
-            })
+            nicks = [e.character_name for e in entries]
+            valor_map = await get_weekly_valor_map(session, nicks)
             
-        return {"status": "ok", "entries": result_entries}
+            # Get class IDs for these nicks
+            players_stmt = select(Player).filter(Player.nickname.in_(nicks))
+            result_players = await session.execute(players_stmt)
+            players = result_players.scalars().all()
+            player_map = {p.nickname.lower(): p.class_id for p in players}
+            
+            now = get_msk_now()
+            
+            result_entries = []
+            for e in entries:
+                val = valor_map.get(e.character_name, -1)
+                class_id = player_map.get(e.character_name.lower(), -1)
+                
+                is_afk = False
+                # Ensure user is loaded (might need selectinload in get_admin_queue_entries or manual fetch)
+                # But get_admin_queue_entries returns scalars, we might need to load user
+                from sqlalchemy.orm import selectinload
+                # re-fetch entries with user if needed, or get_admin_queue_entries should have selectinload
+                # Let's assume e.user is available if get_admin_queue_entries uses selectinload
+                
+                u = e.user
+                if u and u.afk_start and u.afk_end:
+                    if u.afk_start <= now <= u.afk_end.replace(hour=23, minute=59, second=59):
+                        is_afk = True
+                        
+                result_entries.append({
+                    "id": e.id,
+                    "character_name": e.character_name,
+                    "valor": val,
+                    "is_afk": is_afk,
+                    "auto_requeue": e.auto_requeue,
+                    "class_id": class_id
+                })
+                
+            return {"status": "ok", "entries": result_entries}
     except Exception as e:
         logging.error(f"Error in master_get_queue_entries: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -205,77 +213,83 @@ async def get_master_users(request: Request):
             return {"status": "error", "message": "Unauthorized"}
 
         from database import Player
-        users = session.query(User).all()
-
-        # Pre-fetch all players to map nicknames to role_ids
-        players = session.query(Player).all()
-        nick_to_role = {p.nickname.lower().strip(): p.role_id for p in players if p.nickname}
-
-        total_users = 0
-        active_clan_users = 0
-        total_chars = 0
-        chars_in_clan = 0
+        from sqlalchemy.orm import selectinload
         
-        # total_clan_players: all unique players in Player table with in_clan=1
-        total_clan_players = session.query(Player).filter_by(in_clan=1).count()
+        async with AsyncSessionLocal() as session:
+            stmt_users = select(User).options(selectinload(User.characters))
+            result_users = await session.execute(stmt_users)
+            users_list = result_users.scalars().all()
 
-        result = []
-        for u in users:
-            is_phantom = u.telegram_id is None or (u.telegram_id > 0 and u.telegram_id < 10000)
+            stmt_players = select(Player)
+            result_players = await session.execute(stmt_players)
+            players = result_players.scalars().all()
             
-            main_char = next((c for c in u.characters if c.is_main), None)
-            alts = [c.nickname for c in u.characters if not c.is_main]
-            
-            is_in_clan = False
-            char_nicks = [c.nickname.lower().strip() for c in u.characters if c.nickname]
-            
-            user_players = [p for p in players if p.nickname and p.nickname.lower().strip() in char_nicks]
-            
-            card_chars_in_clan = 0
-            for p in user_players:
-                if p.in_clan == 1:
-                    card_chars_in_clan += 1
+            nick_to_role = {p.nickname.lower().strip(): p.role_id for p in players if p.nickname}
 
-            if any(p.in_clan == 1 for p in user_players):
-                is_in_clan = True
+            total_users = 0
+            active_clan_users = 0
+            total_chars = 0
+            chars_in_clan = 0
             
-            # Update global stats
-            total_users += 1
-            if is_in_clan:
-                active_clan_users += 1
+            total_clan_players = len([p for p in players if p.in_clan == 1])
 
-            if not is_phantom:
-                total_chars += len(char_nicks)
-                chars_in_clan += card_chars_in_clan
+            result = []
+            for u in users_list:
+                is_phantom = u.telegram_id is None or (u.telegram_id > 0 and u.telegram_id < 10000)
+                
+                main_char = next((c for c in u.characters if c.is_main), None)
+                alts = [c.nickname for c in u.characters if not c.is_main]
+                
+                is_in_clan = False
+                char_nicks = [c.nickname.lower().strip() for c in u.characters if c.nickname]
+                
+                user_players = [p for p in players if p.nickname and p.nickname.lower().strip() in char_nicks]
+                
+                card_chars_in_clan = 0
+                for p in user_players:
+                    if p.in_clan == 1:
+                        card_chars_in_clan += 1
 
-            # Detailed character info
-            all_chars_info = []
-            for c in u.characters:
-                char_in_clan = any(p.nickname and p.nickname.lower().strip() == c.nickname.lower().strip() and p.in_clan == 1 for p in players)
-                all_chars_info.append({
-                    "nickname": c.nickname,
-                    "is_main": c.is_main,
-                    "is_in_clan": char_in_clan
+                if any(p.in_clan == 1 for p in user_players):
+                    is_in_clan = True
+                
+                # Update global stats
+                total_users += 1
+                if is_in_clan and not is_phantom:
+                    active_clan_users += 1
+
+                if not is_phantom:
+                    total_chars += len(char_nicks)
+                    chars_in_clan += card_chars_in_clan
+
+                # Detailed character info
+                all_chars_info = []
+                for c in u.characters:
+                    char_in_clan = any(p.nickname and p.nickname.lower().strip() == c.nickname.lower().strip() and p.in_clan == 1 for p in players)
+                    all_chars_info.append({
+                        "nickname": c.nickname,
+                        "is_main": c.is_main,
+                        "is_in_clan": char_in_clan
+                    })
+
+                main_role_id = None
+                if main_char:
+                    main_role_id = nick_to_role.get(main_char.nickname.lower().strip())
+
+                result.append({
+                    "id": u.id,
+                    "telegram_id": u.telegram_id,
+                    "username": u.username,
+                    "main_nickname": main_char.nickname if main_char else None,
+                    "main_role_id": main_role_id,
+                    "characters": all_chars_info,
+                    "is_master": u.is_master,
+                    "is_banned": u.is_banned,
+                    "is_in_clan": is_in_clan,
+                    "is_phantom": is_phantom,
+                    "afk_start": u.afk_start.strftime("%Y-%m-%d") if u.afk_start else None,
+                    "afk_end": u.afk_end.strftime("%Y-%m-%d") if u.afk_end else None,
                 })
-
-            main_role_id = None
-            if main_char:
-                main_role_id = nick_to_role.get(main_char.nickname.lower().strip())
-
-            result.append({
-                "id": u.id,
-                "telegram_id": u.telegram_id,
-                "username": u.username,
-                "main_nickname": main_char.nickname if main_char else None,
-                "main_role_id": main_role_id,
-                "characters": all_chars_info,
-                "is_master": u.is_master,
-                "is_banned": u.is_banned,
-                "is_in_clan": is_in_clan,
-                "is_phantom": is_phantom,
-                "afk_start": u.afk_start.strftime("%Y-%m-%d") if u.afk_start else None,
-                "afk_end": u.afk_end.strftime("%Y-%m-%d") if u.afk_end else None,
-            })
         return {
             "status": "ok", 
             "users": result,
@@ -300,20 +314,22 @@ async def toggle_ban(request: Request):
 
         data = await request.json()
         target_id = data.get("user_id")
-        target = session.query(User).filter_by(id=target_id).first()
-        if not target:
-            return {"status": "error", "message": "User not found"}
+        
+        async with AsyncSessionLocal() as session:
+            target = await session.get(User, target_id)
+            if not target:
+                return {"status": "error", "message": "User not found"}
 
-        if target.id == user.id:
-            return {"status": "error", "message": "Cannot ban yourself"}
+            if target.id == user.id:
+                return {"status": "error", "message": "Cannot ban yourself"}
 
-        target.is_banned = not target.is_banned
-        if target.is_banned:
-            # Clear queues
-            session.query(QueueEntry).filter_by(user_id=target.id).delete()
+            target.is_banned = not target.is_banned
+            if target.is_banned:
+                # Clear queues
+                await session.execute(delete(QueueEntry).where(QueueEntry.user_id == target.id))
 
-        session.commit()
-        return {"status": "ok", "is_banned": target.is_banned}
+            await session.commit()
+            return {"status": "ok", "is_banned": target.is_banned}
     except Exception as e:
         logging.error(f"Error in toggle_ban: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -329,21 +345,23 @@ async def delete_user(request: Request):
 
         data = await request.json()
         target_id = data.get("user_id")
-        target = session.query(User).filter_by(id=target_id).first()
-        if not target:
-            return {"status": "error", "message": "User not found"}
+        
+        async with AsyncSessionLocal() as session:
+            target = await session.get(User, target_id)
+            if not target:
+                return {"status": "error", "message": "User not found"}
 
-        if target.id == user.id:
-            return {"status": "error", "message": "Cannot delete yourself"}
+            if target.id == user.id:
+                return {"status": "error", "message": "Cannot delete yourself"}
 
-        # Delete associated characters (cascaded if defined, but let's be safe)
-        session.query(Character).filter_by(user_id=target.id).delete()
-        # Delete queue entries
-        session.query(QueueEntry).filter_by(user_id=target.id).delete()
-        # Delete user
-        session.delete(target)
-        session.commit()
-        return {"status": "ok"}
+            # Delete associated characters
+            await session.execute(delete(Character).where(Character.user_id == target.id))
+            # Delete queue entries
+            await session.execute(delete(QueueEntry).where(QueueEntry.user_id == target.id))
+            # Delete user
+            await session.delete(target)
+            await session.commit()
+            return {"status": "ok"}
     except Exception as e:
         logging.error(f"Error in delete_user: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -359,16 +377,18 @@ async def toggle_master(request: Request):
 
         data = await request.json()
         target_id = data.get("user_id")
-        target = session.query(User).filter_by(id=target_id).first()
-        if not target:
-            return {"status": "error", "message": "User not found"}
+        
+        async with AsyncSessionLocal() as session:
+            target = await session.get(User, target_id)
+            if not target:
+                return {"status": "error", "message": "User not found"}
 
-        if target.id == user.id:
-            return {"status": "error", "message": "Cannot change your own master status"}
+            if target.id == user.id:
+                return {"status": "error", "message": "Cannot change your own master status"}
 
-        target.is_master = not target.is_master
-        session.commit()
-        return {"status": "ok", "is_master": target.is_master}
+            target.is_master = not target.is_master
+            await session.commit()
+            return {"status": "ok", "is_master": target.is_master}
     except Exception as e:
         logging.error(f"Error in toggle_master: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -382,8 +402,9 @@ async def get_verification_code_endpoint(request: Request):
         if not user or not user.is_master:
             return {"status": "error", "message": "Unauthorized"}
 
-        code = get_setting("verification_code", "")
-        return {"status": "ok", "code": code}
+        async with AsyncSessionLocal() as session:
+            code = await get_setting(session, "verification_code", "")
+            return {"status": "ok", "code": code}
     except Exception as e:
         logging.error(f"Error in get_verification_code: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -399,8 +420,9 @@ async def set_verification_code_endpoint(request: Request):
 
         data = await request.json()
         code = data.get("code")
-        set_setting("verification_code", code)
-        return {"status": "ok"}
+        async with AsyncSessionLocal() as session:
+            await set_setting(session, "verification_code", code)
+            return {"status": "ok"}
     except Exception as e:
         logging.error(f"Error in set_verification_code: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -415,61 +437,78 @@ async def get_master_afk(request: Request):
             return {"status": "error", "message": "Unauthorized"}
 
         now = get_msk_now()
-        # Find all active AFK: from User table OR Players table
         from database import Player
-        afk_users = session.query(User).filter(User.afk_start.isnot(None), User.afk_end.isnot(None)).all()
-        afk_players = session.query(Player).filter(Player.afk_start.isnot(None), Player.afk_end.isnot(None)).all()
+        from sqlalchemy.orm import selectinload
         
-        result = []
-        seen_user_ids = set()
+        async with AsyncSessionLocal() as session:
+            stmt_users = select(User).filter(User.afk_start.isnot(None), User.afk_end.isnot(None)).options(selectinload(User.characters))
+            result_users = await session.execute(stmt_users)
+            afk_users = result_users.scalars().all()
 
-        # Process Users (Linked)
-        for u in afk_users:
-            s_date = u.afk_start
-            e_date = u.afk_end
-            if isinstance(s_date, str):
-                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
-                except: continue
-            if isinstance(e_date, str):
-                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
-                except: continue
+            stmt_players = select(Player).filter(Player.afk_start.isnot(None), Player.afk_end.isnot(None))
+            result_players = await session.execute(stmt_players)
+            afk_players = result_players.scalars().all()
+            
+            result = []
+            seen_user_ids = set()
 
-            if s_date <= now <= e_date.replace(hour=23, minute=59, second=59):
-                main_char = next((c for c in u.characters if c.is_main), None)
-                result.append({
-                    "id": u.id,
-                    "nickname": main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}"),
-                    "start": s_date.strftime("%Y-%m-%d"),
-                    "end": e_date.strftime("%Y-%m-%d"),
-                    "reason": u.afk_reason
-                })
-                seen_user_ids.add(u.id)
+            # Process Users (Linked)
+            for u in afk_users:
+                s_date = u.afk_start
+                e_date = u.afk_end
+                
+                # In PostgreSQL/SQLAlchemy 2.0 async, these might be datetime or date objects
+                if hasattr(s_date, "date"): s_date = s_date.date()
+                elif isinstance(s_date, str):
+                    try: s_date = datetime.fromisoformat(s_date.replace(" ", "T")).date()
+                    except: continue
+                    
+                if hasattr(e_date, "date"): e_date = e_date.date()
+                elif isinstance(e_date, str):
+                    try: e_date = datetime.fromisoformat(e_date.replace(" ", "T")).date()
+                    except: continue
 
-        # Process Players (might be unlinked)
-        for p in afk_players:
-            # If already added via User record, skip
-            if p.user_id and p.user_id in seen_user_ids:
-                continue
+                # Comparison logic
+                if s_date <= now.date() <= e_date:
+                    main_char = next((c for c in u.characters if c.is_main), None)
+                    result.append({
+                        "id": u.id,
+                        "nickname": main_char.nickname if main_char else (u.username or f"ID {u.telegram_id}"),
+                        "role_id": None,
+                        "start": s_date.strftime("%Y-%m-%d") if hasattr(s_date, "strftime") else str(s_date),
+                        "end": e_date.strftime("%Y-%m-%d") if hasattr(e_date, "strftime") else str(e_date),
+                        "reason": u.afk_reason
+                    })
+                    seen_user_ids.add(u.id)
 
-            s_date = p.afk_start
-            e_date = p.afk_end
-            if isinstance(s_date, str):
-                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
-                except: continue
-            if isinstance(e_date, str):
-                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
-                except: continue
-
-            if s_date <= now <= e_date.replace(hour=23, minute=59, second=59):
-                result.append({
-                    "id": None, # Signal it's player-only or use role_id? Master UI uses user.id but can handle it
-                    "role_id": p.role_id,
-                    "nickname": p.nickname,
-                    "start": s_date.strftime("%Y-%m-%d"),
-                    "end": e_date.strftime("%Y-%m-%d"),
-                    "reason": p.afk_reason
-                })
-        return {"status": "ok", "afk_players": result}
+            # Process Players (Unlinked or Overlap)
+            for p in afk_players:
+                if p.user_id and p.user_id in seen_user_ids:
+                    continue
+                
+                s_date = p.afk_start
+                e_date = p.afk_end
+                # In PostgreSQL/SQLAlchemy 2.0 async, these might be datetime or date objects
+                if hasattr(s_date, "date"): s_date = s_date.date()
+                elif isinstance(s_date, str):
+                    try: s_date = datetime.fromisoformat(s_date.replace(" ", "T")).date()
+                    except: continue
+                    
+                if hasattr(e_date, "date"): e_date = e_date.date()
+                elif isinstance(e_date, str):
+                    try: e_date = datetime.fromisoformat(e_date.replace(" ", "T")).date()
+                    except: continue
+                
+                if s_date <= now.date() <= e_date:
+                    result.append({
+                        "id": p.user_id,
+                        "nickname": p.nickname,
+                        "role_id": p.role_id,
+                        "start": s_date.strftime("%Y-%m-%d") if hasattr(s_date, "strftime") else str(s_date),
+                        "end": e_date.strftime("%Y-%m-%d") if hasattr(e_date, "strftime") else str(e_date),
+                        "reason": p.afk_reason
+                    })
+            return {"status": "ok", "afk_players": result}
     except Exception as e:
         logging.error(f"Error in get_master_afk: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -482,44 +521,50 @@ async def get_master_afk_history(request: Request):
         if not user or not user.is_master:
             return {"status": "error", "message": "Unauthorized"}
 
-        from database import AFKHistory, User, Character
+        from database import AFKHistory, User, Character, Player
+        from sqlalchemy.orm import selectinload
         
-        # Fetch records joined with user (outerjoin to not lose orphaned records)
-        records = session.query(AFKHistory).outerjoin(User, AFKHistory.user_id == User.id).order_by(AFKHistory.timestamp.desc()).all()
-        
-        result = []
-        for r in records:
-            nickname = "Неизвестно"
-            s_date = r.start_date
-            e_date = r.end_date
-            if isinstance(s_date, str):
-                try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
-                except: pass
-            if isinstance(e_date, str):
-                try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
-                except: pass
-
-            if r.user:
-                main_char = next((c for c in r.user.characters if c.is_main), None)
-                nickname = main_char.nickname if main_char else (r.user.username or f"ID {r.user.telegram_id}")
-            elif hasattr(r, 'role_id') and r.role_id:
-                # Try to get nickname from Player table if User is missing
-                from database import Player
-                p_row = session.query(Player).filter_by(role_id=r.role_id).first()
-                if p_row: nickname = p_row.nickname
-
-            result.append({
-                "id": r.id,
-                "user_id": r.user_id,
-                "nickname": nickname,
-                "start": s_date.strftime("%Y-%m-%d") if hasattr(s_date, 'strftime') else "-",
-                "end": e_date.strftime("%Y-%m-%d") if hasattr(e_date, 'strftime') else "-",
-                "reason": r.reason or "",
-                "timestamp": r.timestamp.strftime("%d.%m %H:%M") if r.timestamp else "-",
-                "is_active_record": r.is_active_record
-            })
+        async with AsyncSessionLocal() as session:
+            # Fetch records joined with user
+            stmt = select(AFKHistory).outerjoin(User, AFKHistory.user_id == User.id).options(selectinload(AFKHistory.user).selectinload(User.characters)).order_by(AFKHistory.timestamp.desc())
+            result_recs = await session.execute(stmt)
+            records = result_recs.scalars().all()
             
-        return {"status": "ok", "history": result}
+            result = []
+            for r in records:
+                nickname = "Неизвестно"
+                s_date = r.start_date
+                e_date = r.end_date
+                
+                if isinstance(s_date, str):
+                    try: s_date = datetime.fromisoformat(s_date.replace(" ", "T"))
+                    except: pass
+                if isinstance(e_date, str):
+                    try: e_date = datetime.fromisoformat(e_date.replace(" ", "T"))
+                    except: pass
+
+                if r.user:
+                    main_char = next((c for c in r.user.characters if c.is_main), None)
+                    nickname = main_char.nickname if main_char else (r.user.username or f"ID {r.user.telegram_id}")
+                elif hasattr(r, 'role_id') and r.role_id:
+                    # Try to get nickname from Player table if User is missing
+                    p_stmt = select(Player).filter_by(role_id=r.role_id)
+                    p_result = await session.execute(p_stmt)
+                    p_row = p_result.scalar_one_or_none()
+                    if p_row: nickname = p_row.nickname
+
+                result.append({
+                    "id": r.id,
+                    "user_id": r.user_id,
+                    "nickname": nickname,
+                    "start": s_date.strftime("%Y-%m-%d") if hasattr(s_date, 'strftime') else "-",
+                    "end": e_date.strftime("%Y-%m-%d") if hasattr(e_date, 'strftime') else "-",
+                    "reason": r.reason or "",
+                    "timestamp": r.timestamp.strftime("%d.%m %H:%M") if r.timestamp else "-",
+                    "is_active_record": r.is_active_record
+                })
+                
+            return {"status": "ok", "history": result}
     except Exception as e:
         logging.error(f"Error in get_master_afk_history: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -546,61 +591,70 @@ async def save_master_afk(request: Request):
         start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
         end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
         
-        from database import User, Player, AFKHistory, get_msk_now
+        from database import User, Player, AFKHistory, get_msk_now, Character
         
-        if target_user_id:
-            target_user = session.get(User, target_user_id)
-            if not target_user:
-                return {"status": "error", "message": "User not found"}
+        async with AsyncSessionLocal() as session:
+            if target_user_id:
+                target_user = await session.get(User, target_user_id)
+                if not target_user:
+                    return {"status": "error", "message": "User not found"}
+                    
+                target_user.afk_start = start_date
+                target_user.afk_end = end_date
+                target_user.afk_reason = reason
                 
-            target_user.afk_start = start_date
-            target_user.afk_end = end_date
-            target_user.afk_reason = reason
-            
-            # Update characters
-            session.query(Player).filter_by(user_id=target_user_id).update({
-                "afk_start": start_date,
-                "afk_end": end_date,
-                "afk_reason": reason
-            })
+                # Update characters
+                await session.execute(
+                    update(Player).filter_by(user_id=target_user_id).values(
+                        afk_start=start_date,
+                        afk_end=end_date,
+                        afk_reason=reason
+                    )
+                )
 
-            # Main character for history role_id
-            main_char = next((c for c in target_user.characters if c.is_main), None)
-            if main_char and not role_id:
-                p_row = session.query(Player).filter_by(nickname=main_char.nickname).first()
-                if p_row: role_id = p_row.role_id
-        elif role_id:
-            player = session.get(Player, role_id)
-            if not player:
-                return {"status": "error", "message": "Player not found"}
+                # Main character for history role_id
+                if not role_id:
+                    stmt_chars = select(Character).filter_by(user_id=target_user_id)
+                    res_chars = await session.execute(stmt_chars)
+                    user_chars = res_chars.scalars().all()
+                    main_char = next((c for c in user_chars if c.is_main), None)
+                    if main_char:
+                        p_stmt = select(Player).filter_by(nickname=main_char.nickname)
+                        p_res = await session.execute(p_stmt)
+                        p_row = p_res.scalar_one_or_none()
+                        if p_row: role_id = p_row.role_id
+            elif role_id:
+                player = await session.get(Player, role_id)
+                if not player:
+                    return {"status": "error", "message": "Player not found"}
+                
+                player.afk_start = start_date
+                player.afk_end = end_date
+                player.afk_reason = reason
+                
+                # If player is linked to user, update user too
+                if player.user_id:
+                    target_user_id = player.user_id
+                    t_user = await session.get(User, target_user_id)
+                    if t_user:
+                        t_user.afk_start = start_date
+                        t_user.afk_end = end_date
+                        t_user.afk_reason = reason
             
-            player.afk_start = start_date
-            player.afk_end = end_date
-            player.afk_reason = reason
+            # Log to history
+            new_hist = AFKHistory(
+                user_id=target_user_id,
+                role_id=role_id,
+                start_date=start_date,
+                end_date=end_date,
+                reason=reason,
+                is_active_record=True,
+                timestamp=get_msk_now()
+            )
+            session.add(new_hist)
+            await session.commit()
             
-            # If player is linked to user, update user too
-            if player.user_id:
-                target_user_id = player.user_id
-                target_user = session.get(User, target_user_id)
-                if target_user:
-                    target_user.afk_start = start_date
-                    target_user.afk_end = end_date
-                    target_user.afk_reason = reason
-        
-        # Log to history
-        new_hist = AFKHistory(
-            user_id=target_user_id,
-            role_id=role_id,
-            start_date=start_date,
-            end_date=end_date,
-            reason=reason,
-            is_active_record=True,
-            timestamp=get_msk_now()
-        )
-        session.add(new_hist)
-        session.commit()
-        
-        return {"status": "ok", "message": "AFK статус обновлен"}
+            return {"status": "ok", "message": "AFK статус обновлен"}
     except Exception as e:
         logging.error(f"Error in save_master_afk: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -618,25 +672,28 @@ async def delete_master_afk(request: Request):
         if not target_user_id:
             return {"status": "error", "message": "user_id is required"}
             
-        from database import User
-        target_user = session.get(User, target_user_id)
-        if not target_user:
-            return {"status": "error", "message": "User not found"}
+        from database import User, Player
+        
+        async with AsyncSessionLocal() as session:
+            target_user = await session.get(User, target_user_id)
+            if not target_user:
+                return {"status": "error", "message": "User not found"}
+                
+            target_user.afk_start = None
+            target_user.afk_end = None
+            target_user.afk_reason = None
             
-        target_user.afk_start = None
-        target_user.afk_end = None
-        target_user.afk_reason = None
-        
-        # Also clear in players table
-        from database import Player
-        session.query(Player).filter_by(user_id=target_user_id).update({
-            "afk_start": None,
-            "afk_end": None,
-            "afk_reason": None
-        })
-        session.commit()
-        
-        return {"status": "ok", "message": "AFK статус удален"}
+            # Also clear in players table
+            await session.execute(
+                update(Player).filter_by(user_id=target_user_id).values(
+                    afk_start=None,
+                    afk_end=None,
+                    afk_reason=None
+                )
+            )
+            await session.commit()
+            
+            return {"status": "ok", "message": "AFK статус удален"}
     except Exception as e:
         logging.error(f"Error in delete_master_afk: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -652,44 +709,50 @@ async def master_issue_reward(request: Request):
         if not entry_id or not master_id:
             return {"status": "error", "message": "Missing entry_id or master_id"}
             
-        # Get master user info from role ID
-        master = session.query(User).filter_by(id=master_id).first()
-        if not master or not master.is_master:
-            # Let's fallback to checking if the ID given might be a role ID
-            async with aiosqlite.connect(web_database.DB_NAME) as conn:
-                async with conn.execute("SELECT user_id FROM players WHERE role_id = ?", (master_id,)) as cursor:
-                    m_row = await cursor.fetchone()
-                    if m_row and m_row[0]:
-                        master = session.query(User).filter_by(id=m_row[0]).first()
+        async with AsyncSessionLocal() as session:
+            # Get master user info
+            # 1. Try master_id as user.id
+            master = await session.get(User, master_id)
+            if not master or not master.is_master:
+                # 2. Try master_id as role_id from players table
+                p_stmt = select(Player).filter_by(role_id=master_id)
+                p_res = await session.execute(p_stmt)
+                m_row = p_res.scalar_one_or_none()
+                if m_row and m_row.user_id:
+                    master = await session.get(User, m_row.user_id)
+            
             if not master or not master.is_master:
                 return {"status": "error", "message": "Unauthorized or not found."}
                 
-        # To call issue_reward, we need original QueueEntry details before it's deleted
-        from database import QueueEntry
-        # Re-fetch entry to securely capture q_name, main_nick, char_nick
-        entry = session.get(QueueEntry, entry_id)
-        if not entry:
-            return {"status": "error", "message": "Уже выдано/удалено."}
+            # To call issue_reward, we need original QueueEntry details before it's deleted
+            from sqlalchemy.orm import selectinload
+            stmt_entry = select(QueueEntry).filter_by(id=entry_id).options(
+                selectinload(QueueEntry.queue),
+                selectinload(QueueEntry.user).selectinload(User.characters)
+            )
+            res_entry = await session.execute(stmt_entry)
+            entry = res_entry.scalar_one_or_none()
             
-        q_name = entry.queue.name
-        char_nick = entry.character_name
-        
-        main_nick = char_nick
-        user = entry.user
-        if user:
-            from database import Character
-            main_char = session.query(Character).filter_by(user_id=user.id, is_main=True).first()
-            if main_char:
-                main_nick = main_char.nickname
+            if not entry:
+                return {"status": "error", "message": "Уже выдано/удалено."}
                 
-        success, msg, hist = reward_ops.issue_reward(session, entry_id, master.username)
-        
-        if success:
-            from utils import log_reward_to_sheet
-            asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
-            return {"status": "ok", "message": msg}
-        else:
-            return {"status": "error", "message": msg}
+            q_name = entry.queue.name
+            char_nick = entry.character_name
+            
+            main_nick = char_nick
+            if entry.user:
+                main_char = next((c for c in entry.user.characters if c.is_main), None)
+                if main_char:
+                    main_nick = main_char.nickname
+                    
+            success, msg, hist = await reward_ops.issue_reward(session, entry_id, master.username)
+            
+            if success:
+                from utils import check_google_sheet, log_reward_to_sheet
+                asyncio.create_task(log_reward_to_sheet(q_name, main_nick, char_nick, master.username))
+                return {"status": "ok", "message": msg}
+            else:
+                return {"status": "error", "message": msg}
     except Exception as e:
         logging.error(f"Error in master_issue_reward: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -705,19 +768,21 @@ async def master_warn_user(request: Request):
         if not entry_id or not master_id:
             return {"status": "error", "message": "Missing entry_id or master_id"}
             
-        master = session.query(User).filter_by(id=master_id).first()
-        if not master or not master.is_master:
-            # Fallback handling
-            async with aiosqlite.connect(web_database.DB_NAME) as conn:
-                async with conn.execute("SELECT user_id FROM players WHERE role_id = ?", (master_id,)) as cursor:
-                    m_row = await cursor.fetchone()
-                    if m_row and m_row[0]:
-                        master = session.query(User).filter_by(id=m_row[0]).first()
+        async with AsyncSessionLocal() as session:
+            master = await session.get(User, master_id)
+            if not master or not master.is_master:
+                # Fallback handled similarly to issue_reward
+                p_stmt = select(Player).filter_by(role_id=master_id)
+                p_res = await session.execute(p_stmt)
+                m_row = p_res.scalar_one_or_none()
+                if m_row and m_row.user_id:
+                    master = await session.get(User, m_row.user_id)
+                    
             if not master or not master.is_master:
                 return {"status": "error", "message": "Unauthorized or not found."}
                 
-        success, msg, hist = reward_ops.warn_user(session, entry_id, master.username)
-        return {"status": "ok" if success else "error", "message": msg}
+            success, msg, hist = await reward_ops.warn_user(session, entry_id, master.username)
+            return {"status": "ok" if success else "error", "message": msg}
     except Exception as e:
         logging.error(f"Error in master_warn_user: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -728,60 +793,63 @@ async def master_send_notifications(request: Request):
     try:
         from loader import bot
         from aiogram import types
-        from keyboards import get_back_btn
-        from database import RewardHistory, User, session
+        from database import RewardHistory, User
         
-        pending = session.query(RewardHistory).filter_by(is_notified=False).all()
-        if not pending:
-            return {"status": "error", "message": "Нет уведомлений для отправки."}
+        async with AsyncSessionLocal() as session:
+            stmt = select(RewardHistory).filter_by(is_notified=False)
+            res = await session.execute(stmt)
+            pending = res.scalars().all()
             
-        user_map = {}
-        for item in pending:
-            if item.user_id not in user_map:
-                user_map[item.user_id] = []
-            user_map[item.user_id].append(item)
-            
-        count_users = 0
-        for uid, items in user_map.items():
-            user = session.get(User, uid)
-            if not user:
-                for i in items:
-                    i.is_notified = True
-                continue
+            if not pending:
+                return {"status": "error", "message": "Нет уведомлений для отправки."}
                 
-            rewards = [i for i in items if i.record_type != "warning"]
-            warnings = [i for i in items if i.record_type == "warning"]
-            
-            msg_text = ""
-            if rewards:
-                msg_text += "🎉 <b>Вам выданы награды!</b>\n\n"
-                for item in rewards:
-                    msg_text += f"🔹 <b>{item.queue_name}</b> ({item.character_name})\n"
-                    item.is_notified = True
-                msg_text += "\n⚠️ <i>Заберите награды из Клан листа в ближайшее время, пока не пропали.</i>\n\n"
+            user_map = {}
+            for item in pending:
+                if item.user_id not in user_map:
+                    user_map[item.user_id] = []
+                user_map[item.user_id].append(item)
                 
-            if warnings:
-                if rewards:
-                    msg_text += "───────────────\n\n"
-                msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
-                for item in warnings:
-                    msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
-                    item.is_notified = True
+            count_users = 0
+            for uid, items in user_map.items():
+                user = await session.get(User, uid)
+                if not user:
+                    for i in items:
+                        i.is_notified = True
+                    continue
                     
-            msg_text += "👇 <b>Выберите действие:</b>"
-            kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[
-                        types.InlineKeyboardButton(text="📋 Перейти к очередям", callback_data="menu_join"),
-                        types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"),
-            ]])
-            
-            try:
-                await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
-                count_users += 1
-            except Exception:
-                pass
+                rewards = [i for i in items if i.record_type != "warning"]
+                warnings = [i for i in items if i.record_type == "warning"]
                 
-        session.commit()
-        return {"status": "ok", "message": f"Уведомления отправлены ({count_users} игр.)"}
+                msg_text = ""
+                if rewards:
+                    msg_text += "🎉 <b>Вам выданы награды!</b>\n\n"
+                    for item in rewards:
+                        msg_text += f"🔹 <b>{item.queue_name}</b> ({item.character_name})\n"
+                        item.is_notified = True
+                    msg_text += "\n⚠️ <i>Заберите награды из Клан листа в ближайшее время, пока не пропали.</i>\n\n"
+                    
+                if warnings:
+                    if rewards:
+                        msg_text += "───────────────\n\n"
+                    msg_text += "⚠️ <b>Важные уведомления:</b>\n\n"
+                    for item in warnings:
+                        msg_text += f"🔸 <b>{item.queue_name}</b> ({item.character_name}):\n<i>Условия очереди не выполнены, награда не выдана.</i>\n\n"
+                        item.is_notified = True
+                        
+                msg_text += "👇 <b>Выберите действие:</b>"
+                kb_notify = types.InlineKeyboardMarkup(inline_keyboard=[[
+                            types.InlineKeyboardButton(text="📋 Перейти к очередям", callback_data="menu_join"),
+                            types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main"),
+                ]])
+                
+                try:
+                    await bot.send_message(user.telegram_id, msg_text, parse_mode="HTML", reply_markup=kb_notify)
+                    count_users += 1
+                except Exception:
+                    pass
+                    
+            await session.commit()
+            return {"status": "ok", "message": f"Уведомления отправлены ({count_users} игр.)"}
     except Exception as e:
         logging.error(f"Error sending notifications: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -797,12 +865,13 @@ async def master_reorder_queue(request: Request):
              return {"status": "error", "message": "No entries provided"}
         
         from database import QueueEntry
-        for idx, eid in enumerate(entry_ids):
-            entry = session.get(QueueEntry, eid)
-            if entry:
-                entry.position = idx
-        session.commit()
-        return {"status": "ok", "message": "Порядок обновлен"}
+        async with AsyncSessionLocal() as session:
+            for idx, eid in enumerate(entry_ids):
+                entry = await session.get(QueueEntry, eid)
+                if entry:
+                    entry.position = idx
+            await session.commit()
+            return {"status": "ok", "message": "Порядок обновлен"}
     except Exception as e:
         logging.error(f"Error in reorder_queue: {e}")
         return {"status": "error", "message": str(e)}
@@ -817,12 +886,13 @@ async def master_remove_from_queue(request: Request):
             return {"status": "error", "message": "entry_id is required"}
             
         from database import QueueEntry
-        entry = session.get(QueueEntry, entry_id)
-        if entry:
-            session.delete(entry)
-            session.commit()
-            return {"status": "ok", "message": "Игрок удален из очереди"}
-        return {"status": "error", "message": "Запись не найдена"}
+        async with AsyncSessionLocal() as session:
+            entry = await session.get(QueueEntry, entry_id)
+            if entry:
+                await session.delete(entry)
+                await session.commit()
+                return {"status": "ok", "message": "Игрок удален из очереди"}
+            return {"status": "error", "message": "Запись не найдена"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -831,34 +901,38 @@ async def master_search_players(request: Request):
     """Search for players by nickname and optional class_id."""
     try:
         data = await request.json()
-        query = data.get("query", "").strip().lower()
+        query_text = data.get("query", "").strip()
         class_id = data.get("class_id")
         
         from database import Player
-        db_query = session.query(Player)
         
-        if class_id is not None and class_id != -1:
-            db_query = db_query.filter(Player.class_id == class_id)
+        async with AsyncSessionLocal() as session:
+            stmt = select(Player)
             
-        # SQLite ILIKE is not case-insensitive for Cyrillic/Unicode characters.
-        # We fetch all (or filtered by class) and filter in Python.
-        players = db_query.all()
-        
-        result = []
-        for p in players:
-            nick = p.nickname if p.nickname else ""
-            if not query or query in nick.lower():
+            if class_id is not None and class_id != -1:
+                stmt = stmt.filter(Player.class_id == class_id)
+                
+            if query_text:
+                # Use ILIKE for Postgres
+                stmt = stmt.filter(Player.nickname.ilike(f"%{query_text}%"))
+                
+            result_proxy = await session.execute(stmt)
+            players = result_proxy.scalars().all()
+            
+            result = []
+            for p in players:
                 result.append({
-                    "nickname": nick,
+                    "nickname": p.nickname or "",
                     "class_id": p.class_id,
                     "has_telegram": p.user_id is not None,
                     "user_id": p.user_id,
                     "role_id": p.role_id
                 })
-        
-        result.sort(key=lambda x: x["nickname"])
-        return {"status": "ok", "players": result[:50]}
+            
+            result.sort(key=lambda x: x["nickname"])
+            return {"status": "ok", "players": result[:50]}
     except Exception as e:
+        logging.error(f"Error in master_search_players: {e}")
         return {"status": "error", "message": str(e)}
 
 @router.post("/master/add_to_queue")
@@ -874,81 +948,50 @@ async def master_add_to_queue(request: Request):
             return {"status": "error", "message": "queue_id and character_name are required"}
             
         from database import Player, User, Character, QueueEntry, QueueType
-        # Find player by nick
-        # 1. Try exact case-sensitive match (best for special/Cyrillic chars)
-        player = session.query(Player).filter(Player.nickname == char_name).first()
-        
-        if not player:
-            # 2. Try case-insensitive fallback (SQLite lower handles ASCII only, but we check Python side)
-            # Find all potential matches and check in Python
-            all_players = session.query(Player).all()
-            target_low = char_name.lower()
-            for p in all_players:
-                if p.nickname and p.nickname.lower() == target_low:
-                    player = p
-                    char_name = p.nickname # Use correct casing
-                    break
-        
-        user_id = None
-        if player:
-            user_id = player.user_id
-        else:
-            # Check characters table too (Exact match first)
-            char = session.query(Character).filter(Character.nickname == char_name).first()
-            if not char:
-                # Case-insensitive fallback for Character
-                all_chars = session.query(Character).all()
-                for c in all_chars:
-                    if c.nickname and c.nickname.lower() == char_name.lower():
-                        char = c
-                        char_name = c.nickname # Use correct casing
-                        break
-            
-            if char:
-                user_id = char.user_id
-            else:
-                return {"status": "error", "message": f"Игрок '{char_name}' не найден в базе гильдии."}
-        
-        # Check if already in queue (either specific nick or same user)
-        if user_id:
-            existing = session.query(QueueEntry).filter_by(queue_type_id=queue_id, user_id=user_id).first()
-            if existing:
-                return {"status": "error", "message": f"Основа или твин этого игрока ({existing.character_name}) уже в очереди."}
-        else:
-            existing = session.query(QueueEntry).filter_by(queue_type_id=queue_id, character_name=char_name).first()
-            if existing:
-                return {"status": "error", "message": f"Игрок '{char_name}' уже в очереди."}
-        
-        # Determine nickname from character table if exists, else use input
-        final_nick = char_name
-        char_row = session.query(Character).filter_by(nickname=char_name).first()
-        if not char_row:
-            # Try case-insensitive
-            all_c = session.query(Character).all()
-            for c in all_c:
-                if c.nickname and c.nickname.lower() == char_name.lower():
-                    char_row = c
-                    final_nick = c.nickname
-                    break
-
         from sqlalchemy import func
-        # Get max position
-        max_pos = session.query(func.max(QueueEntry.position)).filter_by(queue_type_id=queue_id).scalar() or 0
+        
+        async with AsyncSessionLocal() as session:
+            # 1. Try exact match
+            stmt = select(Player).filter(Player.nickname == char_name)
+            result = await session.execute(stmt)
+            player = result.scalar_one_or_none()
+            
+            if not player:
+                # 2. Try case-insensitive fallback
+                stmt = select(Player).filter(Player.nickname.ilike(char_name))
+                result = await session.execute(stmt)
+                player = result.scalar_one_or_none()
+                if player: char_name = player.nickname
+            
+            user_id = player.user_id if player else None
+            if not user_id:
+                stmt = select(Character).filter(Character.nickname.ilike(char_name))
+                result = await session.execute(stmt)
+                char = result.scalar_one_or_none()
+                if char:
+                    user_id = char.user_id
+                    char_name = char.nickname
+                else:
+                    return {"status": "error", "message": f"Игрок '{char_name}' не найден"}
+            
+            # Already in queue check
+            if user_id:
+                stmt = select(QueueEntry).filter_by(queue_type_id=queue_id, user_id=user_id)
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if existing: return {"status": "error", "message": "Уже в очереди"}
+            
+            max_pos_stmt = select(func.max(QueueEntry.position)).filter_by(queue_type_id=queue_id)
+            max_pos_res = await session.execute(max_pos_stmt)
+            max_pos = max_pos_res.scalar() or 0
 
-        new_entry = QueueEntry(
-            queue_type_id=queue_id,
-            user_id=user_id,
-            character_name=final_nick,
-            position=max_pos + 1,
-            auto_requeue=auto_requeue
-        )
-        session.add(new_entry)
-        session.commit()
-        return {"status": "ok", "message": f"Игрок {final_nick} добавлен"}
+            new_entry = QueueEntry(queue_type_id=queue_id, user_id=user_id, character_name=char_name, position=max_pos + 1, auto_requeue=auto_requeue)
+            session.add(new_entry)
+            await session.commit()
+            return {"status": "ok", "message": f"Игрок {char_name} добавлен"}
     except Exception as e:
-        session.rollback()
+        logging.error(f"Error in master_add_to_queue: {e}")
         return {"status": "error", "message": str(e)}
-
 @router.post("/master/toggle_auto_requeue")
 async def toggle_auto_requeue(request: Request):
     """Toggle auto_requeue flag for a queue entry."""
@@ -960,16 +1003,16 @@ async def toggle_auto_requeue(request: Request):
             return {"status": "error", "message": "entry_id is required"}
             
         from database import QueueEntry
-        entry = session.query(QueueEntry).filter_by(id=entry_id).first()
-        if not entry:
-            return {"status": "error", "message": "Запись не найдена"}
+        async with AsyncSessionLocal() as session:
+            entry = await session.get(QueueEntry, entry_id)
+            if not entry:
+                return {"status": "error", "message": "Запись не найдена"}
+                
+            entry.auto_requeue = not entry.auto_requeue
+            await session.commit()
             
-        entry.auto_requeue = not entry.auto_requeue
-        session.commit()
-        
-        return {"status": "ok", "auto_requeue": entry.auto_requeue}
+            return {"status": "ok", "auto_requeue": entry.auto_requeue}
     except Exception as e:
-        session.rollback()
         return {"status": "error", "message": str(e)}
 
 
@@ -978,8 +1021,9 @@ async def master_get_settings():
     """Get global master settings."""
     try:
         from database import get_setting
-        default_limit = get_setting("default_limit", "1")
-        return {"status": "ok", "settings": {"default_limit": default_limit}}
+        async with AsyncSessionLocal() as session:
+            default_limit = await get_setting(session, "default_limit", "1")
+            return {"status": "ok", "settings": {"default_limit": default_limit}}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -992,8 +1036,9 @@ async def master_update_settings(request: Request):
         default_limit = data.get("default_limit")
         if default_limit is not None:
             from database import set_setting
-            set_setting("default_limit", str(default_limit))
-            return {"status": "ok", "message": "Настройки обновлены"}
+            async with AsyncSessionLocal() as session:
+                await set_setting(session, "default_limit", str(default_limit))
+                return {"status": "ok", "message": "Настройки обновлены"}
         return {"status": "error", "message": "No settings to update"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1004,40 +1049,40 @@ async def master_update_user_limit(request: Request):
     """Set personal limit for a user (via user_id or role_id)."""
     try:
         data = await request.json()
-        user_id = data.get("user_id")
+        target_user_id = data.get("user_id")
         role_id = data.get("role_id")
         limit = data.get("limit")  # Can be None to clear
 
-        if user_id is None and role_id is None:
+        if target_user_id is None and role_id is None:
             return {"status": "error", "message": "user_id or role_id is required"}
 
         from database import Player, User, Character
 
-        user = None
-        if user_id is not None:
-            user = session.get(User, user_id)
-        
-        if not user and role_id is not None:
-            # Check if this player is already linked to a user
-            player = session.get(Player, role_id)
-            if player and player.user_id:
-                user = session.get(User, player.user_id)
-            elif player:
-                # Create a shadow user or just link if they register later?
-                # For now, let's create a User record if it doesn't exist to store the limit
-                user = User(username=player.nickname, is_master=False)
-                session.add(user)
-                session.flush() # Get id
-                player.user_id = user.id
-                
-        if not user:
-            return {"status": "error", "message": "Пользователь не найден"}
+        async with AsyncSessionLocal() as session:
+            user_obj = None
+            if target_user_id is not None:
+                user_obj = await session.get(User, target_user_id)
+            
+            if not user_obj and role_id is not None:
+                # Check if this player is already linked to a user
+                player = await session.get(Player, role_id)
+                if player and player.user_id:
+                    user_obj = await session.get(User, player.user_id)
+                elif player:
+                    # Create a shadow user
+                    user_obj = User(username=player.nickname, is_master=False)
+                    session.add(user_obj)
+                    await session.flush() 
+                    player.user_id = user_obj.id
+                    
+            if not user_obj:
+                return {"status": "error", "message": "Пользователь не найден"}
 
-        user.personal_limit = limit
-        session.commit()
-        return {"status": "ok", "message": "Лимит обновлен"}
+            user_obj.personal_limit = limit
+            await session.commit()
+            return {"status": "ok", "message": "Лимит обновлен"}
     except Exception as e:
-        session.rollback()
+        logging.error(f"Error in master_update_user_limit: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -1046,28 +1091,37 @@ async def master_get_user_limits():
     """Get list of users who have a personal limit set."""
     try:
         from database import User, Player, Character
-        users = session.query(User).filter(User.personal_limit.isnot(None)).all()
-        result = []
-        for u in users:
-            # Try to find a nickname from players table preferentially
-            player = session.query(Player).filter_by(user_id=u.id).first()
-            char_name = player.nickname if player else u.username
+        from sqlalchemy.orm import selectinload
+        
+        async with AsyncSessionLocal() as session:
+            stmt = select(User).filter(User.personal_limit.isnot(None)).options(selectinload(User.characters))
+            res = await session.execute(stmt)
+            users = res.scalars().all()
             
-            # Fallback to characters table
-            if not player:
-                main_char = session.query(Character).filter_by(user_id=u.id, is_main=True).first()
-                if main_char:
-                    char_name = main_char.nickname
-                elif u.characters:
-                    char_name = u.characters[0].nickname
+            result = []
+            for u in users:
+                # Try to find a nickname from players table preferentially
+                p_stmt = select(Player).filter_by(user_id=u.id)
+                p_res = await session.execute(p_stmt)
+                player = p_res.scalar_one_or_none()
                 
-            result.append({
-                "id": u.id,
-                "username": u.username,
-                "display_name": char_name,
-                "personal_limit": u.personal_limit
-            })
-        return {"status": "ok", "users": result}
+                char_name = player.nickname if player else u.username
+                
+                # Fallback to characters table
+                if not player:
+                    main_char = next((c for c in u.characters if c.is_main), None)
+                    if main_char:
+                        char_name = main_char.nickname
+                    elif u.characters:
+                        char_name = u.characters[0].nickname
+                    
+                result.append({
+                    "id": u.id,
+                    "username": u.username,
+                    "display_name": char_name,
+                    "personal_limit": u.personal_limit
+                })
+            return {"status": "ok", "users": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1083,13 +1137,14 @@ async def master_update_queue_description(request: Request):
         if not queue_id:
             return {"status": "error", "message": "queue_id is required"}
 
-        queue = session.get(QueueType, queue_id)
-        if not queue:
-            return {"status": "error", "message": "Очередь не найдена"}
+        async with AsyncSessionLocal() as session:
+            queue = await session.get(QueueType, queue_id)
+            if not queue:
+                return {"status": "error", "message": "Очередь не найдена"}
 
-        queue.description = description
-        session.commit()
-        return {"status": "ok", "message": "Описание обновлено"}
+            queue.description = description
+            await session.commit()
+            return {"status": "ok", "message": "Описание обновлено"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1105,13 +1160,14 @@ async def master_toggle_queue_lock(request: Request):
         if not queue_id:
             return {"status": "error", "message": "queue_id is required"}
 
-        queue = session.get(QueueType, queue_id)
-        if not queue:
-            return {"status": "error", "message": "Очередь не найдена"}
+        async with AsyncSessionLocal() as session:
+            queue = await session.get(QueueType, queue_id)
+            if not queue:
+                return {"status": "error", "message": "Очередь не найдена"}
 
-        queue.is_locked = bool(is_locked)
-        session.commit()
-        return {"status": "ok", "message": "Статус блокировки изменен"}
+            queue.is_locked = bool(is_locked)
+            await session.commit()
+            return {"status": "ok", "message": "Статус блокировки изменен"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1126,31 +1182,40 @@ async def master_get_reward_history(
 ):
     """Get reward history with filters."""
     try:
-        db_query = session.query(RewardHistory)
-        if queue_name:
-            db_query = db_query.filter(RewardHistory.queue_name.ilike(f"%{queue_name}%"))
-        if character_name:
-            db_query = db_query.filter(RewardHistory.character_name.ilike(f"%{character_name}%"))
-        if issued_by:
-            db_query = db_query.filter(RewardHistory.issued_by.ilike(f"%{issued_by}%"))
+        async with AsyncSessionLocal() as session:
+            stmt = select(RewardHistory)
+            if queue_name:
+                stmt = stmt.filter(RewardHistory.queue_name.ilike(f"%{queue_name}%"))
+            if character_name:
+                stmt = stmt.filter(RewardHistory.character_name.ilike(f"%{character_name}%"))
+            if issued_by:
+                stmt = stmt.filter(RewardHistory.issued_by.ilike(f"%{issued_by}%"))
+                
+            # Count total
+            from sqlalchemy import func
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            count_res = await session.execute(count_stmt)
+            total = count_res.scalar_one()
             
-        total = db_query.count()
-        records = db_query.order_by(RewardHistory.timestamp.desc()).limit(limit).offset(offset).all()
-        
-        result = []
-        for r in records:
-            result.append({
-                "id": r.id,
-                "user_id": r.user_id,
-                "character_name": r.character_name,
-                "queue_name": r.queue_name,
-                "issued_by": r.issued_by,
-                "is_notified": r.is_notified,
-                "record_type": r.record_type,
-                "timestamp": r.timestamp.isoformat() if r.timestamp else None
-            })
+            # Fetch records
+            stmt = stmt.order_by(RewardHistory.timestamp.desc()).limit(limit).offset(offset)
+            res = await session.execute(stmt)
+            records = res.scalars().all()
             
-        return {"status": "ok", "history": result, "total": total}
+            result = []
+            for r in records:
+                result.append({
+                    "id": r.id,
+                    "user_id": r.user_id,
+                    "character_name": r.character_name,
+                    "queue_name": r.queue_name,
+                    "issued_by": r.issued_by,
+                    "is_notified": r.is_notified,
+                    "record_type": r.record_type,
+                    "timestamp": r.timestamp.isoformat() if r.timestamp else None
+                })
+                
+            return {"status": "ok", "history": result, "total": total}
     except Exception as e:
         logging.error(f"Error in master_get_reward_history: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1160,16 +1225,21 @@ async def master_get_reward_history(
 async def master_history_suggestions():
     """Get unique values from History for autocomplete."""
     try:
-        queues = [r[0] for r in session.query(RewardHistory.queue_name).distinct().all() if r[0]]
-        characters = [r[0] for r in session.query(RewardHistory.character_name).distinct().all() if r[0]]
-        masters = [r[0] for r in session.query(RewardHistory.issued_by).distinct().all() if r[0]]
-        
-        return {
-            "status": "ok",
-            "queues": sorted(queues),
-            "characters": sorted(characters),
-            "masters": sorted(masters)
-        }
+        async with AsyncSessionLocal() as session:
+            q_stmt = select(RewardHistory.queue_name).distinct()
+            c_stmt = select(RewardHistory.character_name).distinct()
+            m_stmt = select(RewardHistory.issued_by).distinct()
+            
+            queues = (await session.execute(q_stmt)).scalars().all()
+            characters = (await session.execute(c_stmt)).scalars().all()
+            masters = (await session.execute(m_stmt)).scalars().all()
+            
+            return {
+                "status": "ok",
+                "queues": sorted([q for q in queues if q]),
+                "characters": sorted([c for c in characters if c]),
+                "masters": sorted([m for m in masters if m])
+            }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1178,13 +1248,14 @@ async def master_history_suggestions():
 async def master_delete_reward_history(record_id: int):
     """Delete a specific reward history record."""
     try:
-        record = session.get(RewardHistory, record_id)
-        if not record:
-            return {"status": "error", "message": "Запись не найдена"}
-            
-        session.delete(record)
-        session.commit()
-        return {"status": "ok", "message": "Запись удалена"}
+        async with AsyncSessionLocal() as session:
+            record = await session.get(RewardHistory, record_id)
+            if not record:
+                return {"status": "error", "message": "Запись не найдена"}
+                
+            await session.delete(record)
+            await session.commit()
+            return {"status": "ok", "message": "Запись удалена"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -1193,23 +1264,30 @@ async def master_delete_reward_history(record_id: int):
 async def afk_add(request: Request):
     try:
         data = await request.json()
-        user_id = data.get("user_id")
+        target_user_id = data.get("user_id")
         role_id = data.get("role_id")
         start = data.get("start")
         end = data.get("end")
         reason = data.get("reason", "").strip() or None
 
-        if (not user_id and not role_id) or not start or not end:
+        if (not target_user_id and not role_id) or not start or not end:
             return {"status": "error", "message": "Missing fields (user_id OR role_id required)"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            await conn.execute(
-                "INSERT INTO afk_history (user_id, role_id, start_date, end_date, reason, is_active_record) VALUES (?, ?, ?, ?, ?, 0)",
-                (user_id, role_id, start, end, reason),
+        from database import AFKHistory
+        async with AsyncSessionLocal() as session:
+            new_afk = AFKHistory(
+                user_id=target_user_id,
+                role_id=role_id,
+                start_date=datetime.strptime(start, "%Y-%m-%d") if isinstance(start, str) else start,
+                end_date=datetime.strptime(end, "%Y-%m-%d") if isinstance(end, str) else end,
+                reason=reason,
+                is_active_record=False
             )
-            await conn.commit()
+            session.add(new_afk)
+            await session.commit()
         return {"status": "ok"}
     except Exception as e:
+        logging.error(f"Error in afk_add: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
@@ -1222,9 +1300,13 @@ async def afk_delete(request: Request):
         logging.info(f"API afk_delete: afk_id={afk_id}")
         if not afk_id:
             return {"status": "error", "message": "Missing afk_id"}
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            await conn.execute("DELETE FROM afk_history WHERE id = ?", (afk_id,))
-            await conn.commit()
+            
+        from database import AFKHistory
+        async with AsyncSessionLocal() as session:
+            afk = await session.get(AFKHistory, afk_id)
+            if afk:
+                await session.delete(afk)
+                await session.commit()
         return {"status": "ok"}
     except Exception as e:
         logging.error(f"Error in afk_delete: {e}")
@@ -1263,30 +1345,29 @@ async def queue_leave(request: Request):
 async def char_link(request: Request):
     try:
         data = await request.json()
-        user_id = data.get("user_id")
+        target_user_id = data.get("user_id")
         nickname = data.get("nickname", "").strip()
-        if not user_id or not nickname:
+        if not target_user_id or not nickname:
             return {"status": "error", "message": "Missing fields"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Upsert into characters
+        async with AsyncSessionLocal() as session:
             # Check if exists (case-insensitive)
-            async with conn.execute("SELECT id, nickname FROM characters WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,)) as cursor:
-                row = await cursor.fetchone()
+            stmt = select(Character).filter(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(nickname)))
+            result = await session.execute(stmt)
+            char = result.scalar_one_or_none()
 
-            if row:
-                char_id, db_nick = row
-                await conn.execute("UPDATE characters SET user_id = ? WHERE id = ?", (user_id, char_id))
-                target_nick = db_nick # Use case from DB
+            if char:
+                char.user_id = target_user_id
+                target_nick = char.nickname
             else:
-                await conn.execute(
-                    "INSERT INTO characters (user_id, nickname, is_main) VALUES (?, ?, 0)", (user_id, nickname)
-                )
+                char = Character(user_id=target_user_id, nickname=nickname, is_main=False)
+                session.add(char)
                 target_nick = nickname
 
             # Sync to players
-            await conn.execute("UPDATE players SET user_id = ? WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (user_id, target_nick))
-            await conn.commit()
+            p_stmt = update(Player).where(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(target_nick))).values(user_id=target_user_id)
+            await session.execute(p_stmt)
+            await session.commit()
 
         return {"status": "ok"}
     except Exception as e:
@@ -1297,24 +1378,30 @@ async def char_link(request: Request):
 async def char_unlink(request: Request):
     try:
         data = await request.json()
-        role_id = data.get("role_id")  # If unlinking by Role ID via Web
-        nickname = data.get("nickname")  # If unlinking by Name
+        role_id = data.get("role_id")
+        nickname = data.get("nickname")
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+        async with AsyncSessionLocal() as session:
             if role_id:
-                await conn.execute("UPDATE players SET user_id = NULL WHERE role_id = ?", (role_id,))
-                # Also find name to unlink from characters
-                async with conn.execute("SELECT nickname FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                    r = await cursor.fetchone()
-                    if r:
-                        nickname = r[0]
+                p_stmt = update(Player).where(Player.role_id == role_id).values(user_id=None)
+                await session.execute(p_stmt)
+                
+                # Find nickname to delete from characters
+                player = await session.get(Player, role_id)
+                if player:
+                    nickname = player.nickname
 
             if nickname:
                 nickname = nickname.strip()
-                await conn.execute("DELETE FROM characters WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,))
-                await conn.execute("UPDATE players SET user_id = NULL WHERE LOWER(TRIM(nickname)) = LOWER(TRIM(?))", (nickname,))
+                # Delete from characters
+                c_stmt = delete(Character).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(nickname)))
+                await session.execute(c_stmt)
+                
+                # Unlink from players
+                p_stmt_io = update(Player).where(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(nickname))).values(user_id=None)
+                await session.execute(p_stmt_io)
 
-            await conn.commit()
+            await session.commit()
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -1330,12 +1417,10 @@ async def party_get(request: Request):
         data = await request.json()
         role_id = data.get("role_id")
         if not role_id:
-            return {"status": "error", "message": "role_id required"}
-
-        if not role_id:
-            return {"status": "error", "message": "role_id required"}
-
-        return await party_manager.get_party(role_id)
+             return {"status": "error", "message": "role_id required"}
+             
+        async with AsyncSessionLocal() as session:
+            return await party_manager.get_party(session, role_id)
     except Exception as e:
         logging.error(f"Error in party_get: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1353,31 +1438,28 @@ async def party_add_member(request: Request):
         if not party_id or not member_nickname:
             return {"status": "error", "message": "Missing fields"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
+        async with AsyncSessionLocal() as session:
+            from database import Player, PartyMember
             # Find new member by nickname
-            async with conn.execute("SELECT role_id FROM players WHERE nickname = ?", (member_nickname,)) as cursor:
-                member_row = await cursor.fetchone()
+            stmt_member = select(Player).filter_by(nickname=member_nickname)
+            res_member = await session.execute(stmt_member)
+            member_row = res_member.scalar_one_or_none()
 
             if not member_row:
                 return {"status": "error", "message": f"Игрок '{member_nickname}' не найден"}
 
-            member_role_id = member_row[0]
+            member_role_id = member_row.role_id
 
-            # Check if member already in THIS party (optional, but good to prevent duplicates)
-            async with conn.execute(
-                "SELECT 1 FROM party_members WHERE party_id = ? AND player_role_id = ?", (party_id, member_role_id)
-            ) as cursor:
-                if await cursor.fetchone():
-                    return {"status": "error", "message": "Игрок уже состоит в этой КП"}
+            # Check if member already in THIS party
+            stmt_pm = select(PartyMember).filter_by(party_id=party_id, player_role_id=member_role_id)
+            res_pm = await session.execute(stmt_pm)
+            if res_pm.scalar_one_or_none():
+                return {"status": "error", "message": "Игрок уже состоит в этой КП"}
             
-            # Removed restriction: "Игрок уже состоит в другой КП" - now allowed.
-
             # Add to party
-            await conn.execute(
-                "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 0)",
-                (party_id, member_role_id),
-            )
-            await conn.commit()
+            new_member = PartyMember(party_id=party_id, player_role_id=member_role_id, is_leader=False)
+            session.add(new_member)
+            await session.commit()
 
         return {"status": "ok", "message": f"Игрок {member_nickname} добавлен в КП"}
     except Exception as e:
@@ -1390,14 +1472,15 @@ async def party_add(request: Request):
     """Add a player to party. Creates party if needed."""
     try:
         data = await request.json()
-        leader_role_id = data.get("leader_role_id")  # Current player (who triggers add)
-        member_nickname = data.get("nickname")  # Nickname to add
+        leader_role_id = data.get("leader_role_id")
+        member_nickname = data.get("nickname")
         logging.info(f"API party_add: leader_role_id={leader_role_id}, nickname={member_nickname}")
 
         if not leader_role_id or not member_nickname:
             return {"status": "error", "message": "Missing fields"}
 
-        return await party_manager.add_to_party(leader_role_id, member_nickname)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.add_to_party(session, leader_role_id, member_nickname)
     except Exception as e:
         logging.error(f"Error in party_add: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1414,10 +1497,8 @@ async def party_remove(request: Request):
         if not member_role_id:
             return {"status": "error", "message": "member_role_id required"}
 
-        if not member_role_id:
-            return {"status": "error", "message": "member_role_id required"}
-
-        return await party_manager.remove_from_party(member_role_id)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.remove_from_party(session, member_role_id)
     except Exception as e:
         logging.error(f"Error in party_remove: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1429,12 +1510,13 @@ async def party_rename(request: Request):
     try:
         data = await request.json()
         party_id = data.get("party_id")
-        new_name = data.get("name", "").strip() or None  # Empty string = None
+        new_name = data.get("name", "").strip() or None
 
         if not party_id:
             return {"status": "error", "message": "party_id required"}
 
-        return await party_manager.rename_party(party_id, new_name)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.rename_party(session, party_id, new_name)
     except Exception as e:
         logging.error(f"Error in party_rename: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1451,7 +1533,8 @@ async def party_color(request: Request):
         if not party_id:
             return {"status": "error", "message": "party_id required"}
 
-        return await party_manager.update_party_color(party_id, color)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.update_party_color(session, party_id, color)
     except Exception as e:
         logging.error(f"Error in party_color: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1467,7 +1550,8 @@ async def party_kick(request: Request):
         if not member_role_id:
             return {"status": "error", "message": "member_role_id required"}
 
-        return await party_manager.remove_from_party(member_role_id)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.remove_from_party(session, member_role_id)
     except Exception as e:
         logging.error(f"Error in party_kick: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1484,7 +1568,8 @@ async def party_transfer_leadership(request: Request):
         if not party_id or not new_leader_role_id:
             return {"status": "error", "message": "Missing fields"}
 
-        return await party_manager.transfer_leadership(party_id, new_leader_role_id)
+        async with AsyncSessionLocal() as session:
+            return await party_manager.transfer_leadership(session, party_id, new_leader_role_id)
     except Exception as e:
         logging.error(f"Error in party_transfer_leadership: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1504,11 +1589,9 @@ async def update_player(request: Request):
         if not role_id:
             return {"status": "error", "message": "role_id required"}
 
-        # Delegate to shared logic
-        # logic handles DB connection and complex sync
-        result = await update_player_logic(role_id, data)
-        return result
-
+        async with AsyncSessionLocal() as session:
+            result = await update_player_logic(session, role_id, data)
+            return result
     except Exception as e:
         logging.error(f"Error in update_player: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
@@ -1525,16 +1608,13 @@ async def update_nickname(request: Request):
         if not role_id:
             return {"status": "error", "message": "role_id is required"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                if not await cursor.fetchone():
-                    return {"status": "error", "message": f"Player ID {role_id} not found"}
+        async with AsyncSessionLocal() as session:
+            player = await session.get(Player, role_id)
+            if not player:
+                return {"status": "error", "message": f"Player ID {role_id} not found"}
 
-            if nickname:
-                await conn.execute("UPDATE players SET nickname = ? WHERE role_id = ?", (nickname, role_id))
-            else:
-                await conn.execute("UPDATE players SET nickname = NULL WHERE role_id = ?", (role_id,))
-            await conn.commit()
+            player.nickname = nickname if nickname else None
+            await session.commit()
 
         return {"status": "ok", "message": f"Nickname updated for ID {role_id}"}
     except Exception as e:
@@ -1555,13 +1635,13 @@ async def update_class(request: Request):
         if class_id is not None and class_id not in CLASSES and class_id != -1:
             return {"status": "error", "message": f"Invalid class_id: {class_id}"}
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                if not await cursor.fetchone():
-                    return {"status": "error", "message": f"Player ID {role_id} not found"}
+        async with AsyncSessionLocal() as session:
+            player = await session.get(Player, role_id)
+            if not player:
+                return {"status": "error", "message": f"Player ID {role_id} not found"}
 
-            await conn.execute("UPDATE players SET class_id = ? WHERE role_id = ?", (class_id, role_id))
-            await conn.commit()
+            player.class_id = class_id
+            await session.commit()
 
         class_name = CLASSES.get(class_id, ("Неизвестно", "", ""))[0] if class_id in CLASSES else "Не указан"
         return {"status": "ok", "message": f"Class updated for ID {role_id} to {class_name}"}
@@ -1585,13 +1665,13 @@ async def update_status(request: Request):
         # Convert to int (0 or 1)
         in_clan_val = 1 if in_clan else 0
 
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                if not await cursor.fetchone():
-                    return {"status": "error", "message": f"Player ID {role_id} not found"}
+        async with AsyncSessionLocal() as session:
+            player = await session.get(Player, role_id)
+            if not player:
+                return {"status": "error", "message": f"Player ID {role_id} not found"}
 
-            await conn.execute("UPDATE players SET in_clan = ? WHERE role_id = ?", (in_clan_val, role_id))
-            await conn.commit()
+            player.in_clan = in_clan_val
+            await session.commit()
 
         return {"status": "ok", "message": f"Status updated for ID {role_id} to {in_clan_val}"}
     except Exception as e:
@@ -1600,69 +1680,21 @@ async def update_status(request: Request):
 
 @router.post("/update_event_date")
 async def update_event_date(request: Request):
-    """API endpoint to update event date"""
     try:
-        msk_tz = pytz.timezone("Europe/Moscow")
-
+        from database import Event
         data = await request.json()
         role_id = data.get("role_id")
-        # old_val = data.get("old_val")
-        # Events doesn't have a unique ID. Composite key: role_id, timestamp
-        # But user sends original string or timestamp?
-        # Let's use old_timestamp (int) + role_id to identify.
-        # Wait to int cast until we know it's not None
-        old_ts_raw = data.get("old_timestamp")
-        new_date_str = data.get("new_date_str")  # "YYYY-MM-DD HH:MM:SS"
-
-        if not role_id or not old_ts_raw or not new_date_str:
-            return {"status": "error", "message": "Missing params"}
-
-        try:
-            old_ts = int(old_ts_raw)
-        except ValueError:
-            return {"status": "error", "message": "Invalid old_timestamp"}
-
-        # Calculate new timestamp from string (assuming input is MSK)
-        # Parse logic:
-        try:
-            # Assume input format YYYY-MM-DD HH:MM:SS
-            dt_naive = datetime.strptime(new_date_str, "%Y-%m-%d %H:%M:%S")
-            dt_msk = msk_tz.localize(dt_naive)
-            new_ts = int(dt_msk.timestamp())
-        except Exception as date_e:
-            return {"status": "error", "message": f"Invalid date format: {date_e}"}
-
-        # Check against current time
-        current_msk = datetime.now(msk_tz)
-        if new_ts > int(current_msk.timestamp()):
-            return {"status": "error", "message": "Новая дата не может быть из будущего"}
-
-        logging.info(f"Updating event: {role_id} from {old_ts} to {new_ts} ({new_date_str})")
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # We match by role_id and specific timestamp (or approx if needed, but precise is better)
-            # Risk: duplicates. But LIMIT 1 helps.
-            async with conn.execute(
-                "SELECT 1 FROM events WHERE role_id = ? AND timestamp = ?", (role_id, old_ts)
-            ) as cursor:
-                if not await cursor.fetchone():
-                    return {"status": "error", "message": "Event not found"}
-
-            await conn.execute(
-                """
-                UPDATE events 
-                SET timestamp = ?, event_date = ? 
-                WHERE role_id = ? AND timestamp = ?
-            """,
-                (new_ts, new_date_str, role_id, old_ts),
-            )
-            await conn.commit()
-
-        return {"status": "ok", "message": "Date updated"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
+        old_ts = int(data.get("old_timestamp"))
+        new_date_str = data.get("new_date_str")
+        msk_tz = pytz.timezone("Europe/Moscow")
+        dt_naive = datetime.strptime(new_date_str, "%Y-%m-%d %H:%M:%S")
+        new_ts = int(msk_tz.localize(dt_naive).timestamp())
+        async with AsyncSessionLocal() as session:
+            stmt = update(Event).where(Event.role_id == role_id, Event.timestamp == old_ts).values(timestamp=new_ts, event_date=new_date_str)
+            await session.execute(stmt)
+            await session.commit()
+        return {"status": "ok"}
+    except Exception as e: return {"status": "error", "message": str(e)}
 # --- SCRAPER INTEGRATION ---
 
 
@@ -1730,173 +1762,43 @@ async def force_player_scan(background_tasks: BackgroundTasks):
 
 @router.post("/add_event")
 async def add_event(request: Request):
-    """
-    API endpoint to manually add an event (Valor)
-    """
     try:
-        msk_tz = pytz.timezone("Europe/Moscow")
-
+        from database import Event
         data = await request.json()
-        role_id = data.get("role_id")
-        event_date_str = data.get("date")  # "YYYY-MM-DD HH:MM:SS" (MSK)
-        value = data.get("value")
-        description = data.get("description", "")
-
-        if not role_id or not event_date_str or value is None:
-            return {"status": "error", "message": "Missing role_id, date, or value"}
-
-        try:
-            val_int = int(value)
-        except Exception:
-            return {"status": "error", "message": "Value must be an integer"}
-
-        # Parse Date
-        # Parse Date
-        try:
-            # Clean input if T exists (HTML5 datetime-local)
-            if "T" in event_date_str:
-                event_date_str = event_date_str.replace("T", " ")
-
-            # Ensure seconds exist
-            if len(event_date_str) == 16:  # 2023-01-01 12:00
-                event_date_str += ":00"
-
-            dt_naive = datetime.strptime(event_date_str, "%Y-%m-%d %H:%M:%S")
-            dt_msk = msk_tz.localize(dt_naive)
-            timestamp = int(dt_msk.timestamp())
-        except Exception as date_e:
-            return {"status": "error", "message": f"Invalid date format: {date_e}"}
-
-        # Check against current time
-        current_msk = datetime.now(msk_tz)
-        if timestamp > int(current_msk.timestamp()):
-            return {"status": "error", "message": "Событие не может быть из будущего"}
-
-        logging.info(f"Manual Event Add: {role_id}, val={val_int}, ts={timestamp} ({event_date_str})")
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Check player exists
-            async with conn.execute("SELECT 1 FROM players WHERE role_id = ?", (role_id,)) as cursor:
-                if not await cursor.fetchone():
-                    # Auto-create if not exists? Ideally yes for flexibility, but let's stick to existing
-                    return {"status": "error", "message": "Player not found"}
-
-            # Insert Event (Type 1 = Valor)
-            await conn.execute(
-                """
-                INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
-                VALUES (?, ?, ?, 1, ?, ?)
-            """,
-                (role_id, timestamp, event_date_str, val_int, description),
-            )
-
-            await conn.commit()
-
-        return {"status": "ok", "message": "Event added successfully"}
-
-    except Exception as e:
-        logging.error(f"Error in add_event: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-
-
+        role_id, d_str, val = data.get("role_id"), data.get("date"), data.get("value")
+        msk_tz = pytz.timezone("Europe/Moscow")
+        dt_naive = datetime.strptime(d_str.replace("T", " "), "%Y-%m-%d %H:%M:%S" if len(d_str)>16 else "%Y-%m-%d %H:%M")
+        ts = int(msk_tz.localize(dt_naive).timestamp())
+        async with AsyncSessionLocal() as session:
+            ev = Event(role_id=role_id, timestamp=ts, event_date=d_str, event_type=1, value=int(val), raw_desc=data.get("description", ""))
+            session.add(ev)
+            await session.commit()
+        return {"status": "ok"}
+    except Exception as e: return {"status": "error", "message": str(e)}
 @router.post("/add_event_bulk")
 async def add_event_bulk(request: Request):
-    """
-    API endpoint to manually add an event (Valor) to multiple players at once.
-    """
     try:
-        msk_tz = pytz.timezone("Europe/Moscow")
-
+        from database import Event
         data = await request.json()
-        role_ids = data.get("role_ids")
-        if not isinstance(role_ids, list) or not role_ids:
-            return {"status": "error", "message": "role_ids must be a non-empty list"}
-
-        event_date_str = data.get("date")  # "YYYY-MM-DD HH:MM:SS" (MSK)
-        value = data.get("value")
-        description = data.get("description", "")
-
-        if not event_date_str or value is None:
-            return {"status": "error", "message": "Missing date or value"}
-
-        try:
-            val_int = int(value)
-        except Exception:
-            return {"status": "error", "message": "Value must be an integer"}
-
-        # Parse Date
-        try:
-            # Clean input if T exists (HTML5 datetime-local)
-            if "T" in event_date_str:
-                event_date_str = event_date_str.replace("T", " ")
-
-            # Ensure seconds exist
-            if len(event_date_str) == 16:  # 2023-01-01 12:00
-                event_date_str += ":00"
-
-            dt_naive = datetime.strptime(event_date_str, "%Y-%m-%d %H:%M:%S")
-            dt_msk = msk_tz.localize(dt_naive)
-            timestamp = int(dt_msk.timestamp())
-        except Exception as date_e:
-            return {"status": "error", "message": f"Invalid date format: {date_e}"}
-
-        # Check against current time
-        current_msk = datetime.now(msk_tz)
-        if timestamp > int(current_msk.timestamp()):
-            return {"status": "error", "message": "Событие не может быть из будущего"}
-
-        logging.info(f"Bulk Event Add: {len(role_ids)} players, val={val_int}, ts={timestamp} ({event_date_str})")
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Prepare data
-            insert_data = [
-                (role_id, timestamp, event_date_str, 1, val_int, description)
-                for role_id in role_ids
-            ]
-
-            # We don't strictly assert every player ID exists here to speed up bulk insert, 
-            # foreign keys (if strict) or just raw insertion is fine for logging events 
-            # (especially since UI selects from existing profiles).
-            await conn.executemany(
-                """
-                INSERT INTO events (role_id, timestamp, event_date, event_type, value, raw_desc)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """,
-                insert_data,
-            )
-
-            await conn.commit()
-
-        return {"status": "ok", "message": f"Event added successfully to {len(role_ids)} players"}
-
-    except Exception as e:
-        logging.error(f"Error in add_event_bulk: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-
-
+        ids, d_str, val = data.get("role_ids"), data.get("date"), data.get("value")
+        msk_tz = pytz.timezone("Europe/Moscow")
+        dt_naive = datetime.strptime(d_str.replace("T", " "), "%Y-%m-%d %H:%M:%S" if len(d_str)>16 else "%Y-%m-%d %H:%M")
+        ts = int(msk_tz.localize(dt_naive).timestamp())
+        async with AsyncSessionLocal() as session:
+            for rid in ids:
+                ev = Event(role_id=rid, timestamp=ts, event_date=d_str, event_type=1, value=int(val), raw_desc=data.get("description", ""))
+                session.add(ev)
+            await session.commit()
+        return {"status": "ok"}
+    except Exception as e: return {"status": "error", "message": str(e)}
 @router.post("/delete_event")
 async def delete_event(request: Request):
-    """
-    API endpoint to delete an event (Admin only ideally, but we check logic in frontend/middleware usually)
-    """
     try:
+        from database import Event
         data = await request.json()
-        role_id = data.get("role_id")
-        timestamp = data.get("timestamp")
-
-        if not role_id or not timestamp:
-            return {"status": "error", "message": "Missing role_id or timestamp"}
-        
-        logging.info(f"Deleting event: role_id={role_id}, ts={timestamp}")
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            await conn.execute(
-                "DELETE FROM events WHERE role_id = ? AND timestamp = ?",
-                (role_id, timestamp)
-            )
-            await conn.commit()
-            
-        return {"status": "ok", "message": "Event deleted"}
-    except Exception as e:
-        logging.error(f"Error in delete_event: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
+        rid, ts = data.get("role_id"), data.get("timestamp")
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Event).where(Event.role_id == rid, Event.timestamp == ts))
+            await session.commit()
+        return {"status": "ok"}
+    except Exception as e: return {"status": "error", "message": str(e)}

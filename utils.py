@@ -1,9 +1,7 @@
 import logging
 
-import aiosqlite
-
-# Use the same DB as the rest of the app
-DB_NAME = "guild_bot.db"
+from sqlalchemy import func, select
+from database import AsyncSessionLocal, Player
 
 # --- NICKNAME VALIDATION ---
 
@@ -16,11 +14,11 @@ async def check_nickname_exists(nickname: str) -> bool:
     if not nickname:
         return False
 
-    async with aiosqlite.connect(DB_NAME) as conn:
-        # We check locally in the players table (populated by parser)
-        cursor = await conn.execute("SELECT 1 FROM players WHERE LOWER(nickname) = LOWER(?)", (nickname,))
-        row = await cursor.fetchone()
-        return row is not None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Player).filter(func.lower(Player.nickname) == nickname.lower())
+        )
+        return result.scalar_one_or_none() is not None
 
 
 # Alias for compatibility with existing code, but updated logic

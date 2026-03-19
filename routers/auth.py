@@ -2,15 +2,16 @@ import logging
 import os
 from typing import Optional
 
-import aiosqlite
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request, Response, Depends
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update
 
 from auth_helper import validate_init_data, validate_widget_auth
 from avatar_helper import get_telegram_avatar_url
-from web_database import DB_NAME
+from database import AsyncSessionLocal, User, Character
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -46,27 +47,20 @@ async def login_telegram_redirect(request: Request):
 
     try:
         validate_widget_auth(params.copy(), BOT_TOKEN)
-
         tg_id = int(params.get("id"))
 
-        # Check DB
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,))
-            user_row = await cursor.fetchone()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).filter_by(telegram_id=tg_id))
+            user = result.scalar_one_or_none()
 
-            if not user_row:
-                # Optional: Create user on fly? Or reject.
-                # Policy: Reject if not in DB (must start bot first)
-                # Actually, for better UX, maybe just show error page or redirect to index with error.
-                # For now, let's redirect to index and let index handle 'not authenticated' look but maybe flash a message?
-                # Since we use session, we just won't set the session.
+            if not user:
                 return RedirectResponse(url="/?error=not_registered")
 
             # Update Avatar
             avatar_url = params.get("photo_url")
             if avatar_url:
-                await conn.execute("UPDATE users SET avatar_url = ? WHERE telegram_id = ?", (avatar_url, tg_id))
-                await conn.commit()
+                user.avatar_url = avatar_url
+                await session.commit()
 
         request.session["user_id"] = tg_id
         logging.info(f"SETTING SESSION USER_ID: {tg_id}")
@@ -98,20 +92,18 @@ async def login(data: LoginRequest, request: Request, response: Response):
         tg_id = user_data["id"]
 
         # 2. Check Database
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,))
-            user_row = await cursor.fetchone()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).filter_by(telegram_id=tg_id))
+            user = result.scalar_one_or_none()
 
-            if not user_row:
+            if not user:
                 return JSONResponse(
                     status_code=403,
                     content={"status": "error", "message": "Вы не зарегистрированы в боте. Нажмите /start в боте."},
                 )
 
-            user_db_id = user_row[0]
-
-            cursor = await conn.execute("SELECT count(*) FROM characters WHERE user_id = ?", (user_db_id,))
-            char_count = (await cursor.fetchone())[0]
+            result = await session.execute(select(func.count(Character.id)).filter_by(user_id=user.id))
+            char_count = result.scalar()
 
             if char_count == 0:
                 return JSONResponse(
@@ -121,8 +113,8 @@ async def login(data: LoginRequest, request: Request, response: Response):
             # Fetch and update avatar
             avatar_url = await get_telegram_avatar_url(tg_id, BOT_TOKEN)
             if avatar_url:
-                await conn.execute("UPDATE users SET avatar_url = ? WHERE telegram_id = ?", (avatar_url, tg_id))
-                await conn.commit()
+                user.avatar_url = avatar_url
+                await session.commit()
 
         # 3. Success
         request.session["user_id"] = tg_id
@@ -143,27 +135,18 @@ async def login_widget(data: WidgetLoginRequest, request: Request):
         return JSONResponse(status_code=500, content={"status": "error", "message": "Server Config Error"})
 
     try:
-        # Convert Pydantic model to dict, excluding None defaults if they weren't in original payload?
-        # Actually validation needs exact payload. Pydantic might add defaults.
-        # But for receiving data, we just need to ensure we validate what we received.
-        # Let's trust that the frontend sends exactly what the widget gave.
-        # The validation function expects a dict.
-
         data_dict = data.model_dump(exclude_none=True)
-        # Note: 'id' might be int, validation needs to handle it or convert to string for string construction?
-        # The validation string construction `f"{key}={value}"` handles int->str conversion correctly.
-
         validate_widget_auth(data_dict.copy(), BOT_TOKEN)
 
         tg_id = data.id
         logging.info(f"Widget auth valid for ID: {tg_id}")
 
-        # Check specific user requirements (optional, but good for consistency)
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,))
-            user_row = await cursor.fetchone()
+        # Check specific user requirements
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).filter_by(telegram_id=tg_id))
+            user = result.scalar_one_or_none()
 
-            if not user_row:
+            if not user:
                 return JSONResponse(
                     status_code=403,
                     content={"status": "error", "message": "Вы не зарегистрированы в боте. Нажмите /start в боте."},
@@ -175,8 +158,8 @@ async def login_widget(data: WidgetLoginRequest, request: Request):
                 avatar_url = await get_telegram_avatar_url(tg_id, BOT_TOKEN)
 
             if avatar_url:
-                await conn.execute("UPDATE users SET avatar_url = ? WHERE telegram_id = ?", (avatar_url, tg_id))
-                await conn.commit()
+                user.avatar_url = avatar_url
+                await session.commit()
 
         request.session["user_id"] = tg_id
         return {"status": "ok", "message": "Logged in"}

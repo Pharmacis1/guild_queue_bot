@@ -36,7 +36,7 @@ async def test_update_status_integration(client, test_db_session):
     # 3. Assert Response
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "ok"
+    assert data["status"] == "ok", f"API Error: {data.get('message')}"
 
     # 4. Verify Database Update
     async with aiosqlite.connect(web_database.DB_NAME) as conn:

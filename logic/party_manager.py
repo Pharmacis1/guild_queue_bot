@@ -1,222 +1,183 @@
 import logging
 from typing import Any, Dict
+from sqlalchemy import select, delete, update, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
-import aiosqlite
+from database import Player, ConstantParty, PartyMember, AsyncSessionLocal
 
-import web_database
-
-
-async def get_party(role_id: int) -> Dict[str, Any]:
+async def get_party(session: AsyncSession, role_id: int) -> Dict[str, Any]:
     """Get party members for a player."""
     try:
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Find party membership for this player
-            async with conn.execute(
-                """
-                SELECT pm.party_id, pm.is_leader
-                FROM party_members pm
-                WHERE pm.player_role_id = ?
-            """,
-                (role_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
+        # Find party membership for this player
+        stmt = select(PartyMember.party_id, PartyMember.is_leader).where(PartyMember.player_role_id == role_id)
+        result = await session.execute(stmt)
+        row = result.first()
 
-            if not row:
-                return {"status": "ok", "party": None, "members": []}
+        if not row:
+            return {"status": "ok", "party": None, "members": []}
 
-            party_id, is_leader = row
+        party_id, is_leader = row.party_id, row.is_leader
 
-            # Get party name and color
-            async with conn.execute("SELECT name, color FROM constant_parties WHERE id = ?", (party_id,)) as cursor:
-                party_row = await cursor.fetchone()
-                party_name = party_row[0] if party_row and party_row[0] else None
-                party_color = party_row[1] if party_row and party_row[1] else None
+        # Get party name and color
+        stmt_party = select(ConstantParty.name, ConstantParty.color).where(ConstantParty.id == party_id)
+        result_party = await session.execute(stmt_party)
+        party_row = result_party.first()
+        party_name = party_row.name if party_row else None
+        party_color = party_row.color if party_row else None
 
-            # Get all party members
-            members = []
-            async with conn.execute(
-                """
-                SELECT pm.player_role_id, pm.is_leader, p.nickname, p.class_id
-                FROM party_members pm
-                LEFT JOIN players p ON pm.player_role_id = p.role_id
-                WHERE pm.party_id = ?
-                ORDER BY pm.is_leader DESC, p.nickname
-            """,
-                (party_id,),
-            ) as cursor:
-                rows = await cursor.fetchall()
-                for m_role_id, m_is_leader, m_nick, m_class_id in rows:
-                    members.append(
-                        {
-                            "role_id": m_role_id,
-                            "nickname": m_nick or f"ID {m_role_id}",
-                            "class_id": m_class_id or -1,
-                            "is_leader": bool(m_is_leader),
-                        }
-                    )
+        # Get all party members
+        stmt_members = (
+            select(PartyMember.player_role_id, PartyMember.is_leader, Player.nickname, Player.class_id)
+            .join(Player, PartyMember.player_role_id == Player.role_id, isouter=True)
+            .where(PartyMember.party_id == party_id)
+            .order_by(PartyMember.is_leader.desc(), Player.nickname)
+        )
+        result_members = await session.execute(stmt_members)
+        rows = result_members.all()
+        
+        members = []
+        for m_role_id, m_is_leader, m_nick, m_class_id in rows:
+            members.append(
+                {
+                    "role_id": m_role_id,
+                    "nickname": m_nick or f"ID {m_role_id}",
+                    "class_id": m_class_id or -1,
+                    "is_leader": bool(m_is_leader),
+                }
+            )
 
-            return {
-                "status": "ok",
-                "party": {"id": party_id, "name": party_name, "color": party_color, "is_leader": bool(is_leader)},
-                "members": members,
-            }
+        return {
+            "status": "ok",
+            "party": {"id": party_id, "name": party_name, "color": party_color, "is_leader": bool(is_leader)},
+            "members": members,
+        }
     except Exception as e:
         logging.error(f"Error in party_get logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
-async def add_to_party(leader_role_id: int, member_nickname: str) -> Dict[str, Any]:
+async def add_to_party(session: AsyncSession, leader_role_id: int, member_nickname: str) -> Dict[str, Any]:
     """Add a player to party. Creates party if needed."""
     try:
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Find new member by nickname
-            async with conn.execute("SELECT role_id FROM players WHERE nickname = ?", (member_nickname,)) as cursor:
-                member_row = await cursor.fetchone()
+        # Find new member by nickname
+        stmt_member = select(Player.role_id).where(Player.nickname == member_nickname)
+        result_member = await session.execute(stmt_member)
+        member_row = result_member.first()
 
-            if not member_row:
-                return {"status": "error", "message": f"Игрок '{member_nickname}' не найден"}
+        if not member_row:
+            return {"status": "error", "message": f"Игрок '{member_nickname}' не найден"}
 
-            member_role_id = member_row[0]
+        member_role_id = member_row.role_id
 
-            # Check if member already in THIS party?
-            # We don't have party_id yet, we are creating or finding leader's party.
-            # But wait, if leader has a party, we add to it.
-            # We should check if member is already in THAT party later.
+        # Find or create party for leader
+        stmt_leader = select(PartyMember.party_id).where(PartyMember.player_role_id == leader_role_id)
+        result_leader = await session.execute(stmt_leader)
+        leader_party = result_leader.first()
+
+        if leader_party:
+            party_id = leader_party.party_id
+        else:
+            # Create new party
+            new_party = ConstantParty(name=None)
+            session.add(new_party)
+            await session.flush()
+            party_id = new_party.id
             
-            # Removed restriction: "Игрок уже состоит в другой КП"
+            # Add leader as first member
+            leader_member = PartyMember(party_id=party_id, player_role_id=leader_role_id, is_leader=True)
+            session.add(leader_member)
 
-            # Find or create party for leader
-            async with conn.execute(
-                "SELECT party_id FROM party_members WHERE player_role_id = ?", (leader_role_id,)
-            ) as cursor:
-                leader_party = await cursor.fetchone()
-
-            if leader_party:
-                party_id = leader_party[0]
-            else:
-                # Create new party with leader
-                await conn.execute("INSERT INTO constant_parties (name) VALUES (NULL)")
-                async with conn.execute("SELECT last_insert_rowid()") as cursor:
-                    party_id = (await cursor.fetchone())[0]
-                # Add leader as first member
-                await conn.execute(
-                    "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 1)",
-                    (party_id, leader_role_id),
-                )
-
-            # Add new member
-            await conn.execute(
-                "INSERT INTO party_members (party_id, player_role_id, is_leader) VALUES (?, ?, 0)",
-                (party_id, member_role_id),
-            )
-            await conn.commit()
+        # Add new member
+        new_member = PartyMember(party_id=party_id, player_role_id=member_role_id, is_leader=False)
+        session.add(new_member)
+        await session.commit()
 
         return {"status": "ok", "message": f"Игрок {member_nickname} добавлен в КП"}
     except Exception as e:
+        await session.rollback()
         logging.error(f"Error in party_add logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
-async def remove_from_party(member_role_id: int) -> Dict[str, Any]:
+async def remove_from_party(session: AsyncSession, member_role_id: int) -> Dict[str, Any]:
     """Remove a player from party."""
     try:
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Get party id before delete
-            async with conn.execute(
-                "SELECT party_id FROM party_members WHERE player_role_id = ?", (member_role_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
+        # Get party id before delete
+        stmt = select(PartyMember.party_id).where(PartyMember.player_role_id == member_role_id)
+        result = await session.execute(stmt)
+        row = result.first()
 
-            if not row:
-                return {"status": "error", "message": "Игрок не состоит в КП"}
+        if not row:
+            return {"status": "error", "message": "Игрок не состоит в КП"}
 
-            party_id = row[0]
+        party_id = row.party_id
 
-            # Remove member
-            await conn.execute("DELETE FROM party_members WHERE player_role_id = ?", (member_role_id,))
+        # Remove member
+        await session.execute(delete(PartyMember).where(PartyMember.player_role_id == member_role_id))
 
-            # Check if party is empty or has only 1 member left - delete party
-            # Wait, original logic logic:
-            # "Check if party is empty or has only 1 member left" -> wait, if 1 member left, it's just the leader alone?
-            # Original code:
-            # async with conn.execute("SELECT COUNT(*) FROM party_members WHERE party_id = ?", (party_id,)) as cursor:
-            #     count = (await cursor.fetchone())[0]
-            # if count == 0: await conn.execute("DELETE FROM constant_parties WHERE id = ?", (party_id,))
+        # Check if party is empty
+        stmt_count = select(func.count()).select_from(PartyMember).where(PartyMember.party_id == party_id)
+        result_count = await session.execute(stmt_count)
+        count = result_count.scalar()
 
-            # Wait, if I delete the member, count will decrease.
-            # If count becomes 0, delete party.
-            # If count becomes 1, do we delete? Original code ONLY checked `if count == 0`.
-            # But the comment said "or has only 1 member left".
-            # Let's stick to the CODE behavior: `if count == 0`.
+        if count == 0:
+            await session.execute(delete(ConstantParty).where(ConstantParty.id == party_id))
 
-            async with conn.execute("SELECT COUNT(*) FROM party_members WHERE party_id = ?", (party_id,)) as cursor:
-                count = (await cursor.fetchone())[0]
-
-            if count == 0:
-                await conn.execute("DELETE FROM constant_parties WHERE id = ?", (party_id,))
-
-            await conn.commit()
-
+        await session.commit()
         return {"status": "ok"}
     except Exception as e:
+        await session.rollback()
         logging.error(f"Error in party_remove logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
-
-async def rename_party(party_id: int, new_name: str) -> Dict[str, Any]:
+async def rename_party(session: AsyncSession, party_id: int, new_name: str) -> Dict[str, Any]:
     """Rename a party."""
     try:
         processed_name = new_name.strip() or None
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            await conn.execute("UPDATE constant_parties SET name = ? WHERE id = ?", (processed_name, party_id))
-            await conn.commit()
-
+        await session.execute(update(ConstantParty).where(ConstantParty.id == party_id).values(name=processed_name))
+        await session.commit()
         return {"status": "ok"}
     except Exception as e:
+        await session.rollback()
         logging.error(f"Error in party_rename logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
-async def update_party_color(party_id: int, color: str) -> Dict[str, Any]:
+async def update_party_color(session: AsyncSession, party_id: int, color: str) -> Dict[str, Any]:
     """Update party color."""
     try:
-        processed_color = color.strip() if color else None
-
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            await conn.execute("UPDATE constant_parties SET color = ? WHERE id = ?", (processed_color, party_id))
-            await conn.commit()
-
+        processed_color = color.strip() or None
+        await session.execute(update(ConstantParty).where(ConstantParty.id == party_id).values(color=processed_color))
+        await session.commit()
         return {"status": "ok"}
     except Exception as e:
+        await session.rollback()
         logging.error(f"Error in update_party_color logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
 
-async def transfer_leadership(party_id: int, new_leader_role_id: int) -> Dict[str, Any]:
+async def transfer_leadership(session: AsyncSession, party_id: int, new_leader_role_id: int) -> Dict[str, Any]:
     """Transfer party leadership to another member."""
     try:
-        async with aiosqlite.connect(web_database.DB_NAME) as conn:
-            # Check if new leader is in the party
-            async with conn.execute(
-                "SELECT 1 FROM party_members WHERE party_id = ? AND player_role_id = ?",
-                (party_id, new_leader_role_id),
-            ) as cursor:
-                if not await cursor.fetchone():
-                    return {"status": "error", "message": "Игрок не состоит в этой КП"}
+        # Check if new leader is in the party
+        stmt = select(PartyMember).where(and_(PartyMember.party_id == party_id, PartyMember.player_role_id == new_leader_role_id))
+        result = await session.execute(stmt)
+        if not result.first():
+            return {"status": "error", "message": "Игрок не состоит в этой КП"}
 
-            # Reset current leader(s)
-            await conn.execute("UPDATE party_members SET is_leader = 0 WHERE party_id = ?", (party_id,))
-            
-            # Set new leader
-            await conn.execute(
-                "UPDATE party_members SET is_leader = 1 WHERE party_id = ? AND player_role_id = ?",
-                (party_id, new_leader_role_id),
-            )
-            await conn.commit()
-
+        # Reset current leader(s)
+        await session.execute(update(PartyMember).where(PartyMember.party_id == party_id).values(is_leader=False))
+        
+        # Set new leader
+        await session.execute(
+            update(PartyMember)
+            .where(and_(PartyMember.party_id == party_id, PartyMember.player_role_id == new_leader_role_id))
+            .values(is_leader=True)
+        )
+        await session.commit()
         return {"status": "ok", "message": "Лидерство передано"}
     except Exception as e:
+        await session.rollback()
         logging.error(f"Error in transfer_leadership logic: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}

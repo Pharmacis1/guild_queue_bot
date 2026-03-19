@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, date
 from typing import List, Optional, Tuple, Dict, Any
-import aiosqlite
+from sqlalchemy import select, func, and_, or_, String
 
 from consts import CLASSES
-from database import User, session
-from web_database import DB_NAME, get_data_from_db, get_last_update_time
+from database import User, Player, Character, AsyncSessionLocal, Event, ConstantParty, PartyMember, AFKHistory, Item
 from logic.analytics import calculate_gold_thresholds, calculate_thresholds, get_gold_tier, get_valor_tier
 from logic.helpers import is_newcomer
+from web_database import get_data_from_db
 
 # --- SHARED HELPERS ---
 
@@ -18,20 +18,20 @@ async def get_join_dates() -> Tuple[Dict[int, str], Dict[int, int]]:
        Enriched with character linkage so all linked chars
        (main + twins) share the same user_id for AFK spreading.
     """
-    async with aiosqlite.connect(DB_NAME) as conn:
-        cursor = await conn.execute("SELECT role_id, first_seen, user_id FROM players WHERE in_clan = 1")
-        join_data = await cursor.fetchall()
+    async with AsyncSessionLocal() as session:
+        # 1. Get initial data from players
+        stmt_players = select(Player.role_id, Player.first_seen, Player.user_id).where(Player.in_clan == 1)
+        result_players = await session.execute(stmt_players)
+        join_data = result_players.all()
 
-        # Enrich role_user_map with character linkage
-        # This ensures twins (alts) linked via the characters table
-        # inherit the same user_id for AFK status spreading
-        cursor = await conn.execute("""
-            SELECT c.user_id, p.role_id
-            FROM characters c
-            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
-            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
-        """)
-        char_links = await cursor.fetchall()
+        # 2. Enrich role_user_map with character linkage
+        stmt_links = (
+            select(Character.user_id, Player.role_id)
+            .join(Player, func.lower(func.trim(Character.nickname)) == func.lower(func.trim(Player.nickname)))
+            .where(and_(Character.user_id.isnot(None), Player.in_clan == 1))
+        )
+        result_links = await session.execute(stmt_links)
+        char_links = result_links.all()
 
     join_dates = {role_id: first_seen for role_id, first_seen, _ in join_data if first_seen}
     role_user_map = {role_id: user_id for role_id, _, user_id in join_data if user_id}
@@ -43,35 +43,40 @@ async def get_join_dates() -> Tuple[Dict[int, str], Dict[int, int]]:
 
     return join_dates, role_user_map
 
-async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime]]]:
+async def get_afk_map() -> Dict[int, List[Tuple[datetime, datetime, str]]]:
     """
-    Returns: {key: [(start_dt, end_dt), ...]}
+    Returns: {key: [(start_dt, end_dt, reason), ...]}
     Keys are user_id (positive) for linked players,
     or -role_id (negative) for unlinked players with role_id-only AFK entries.
     """
-    async with aiosqlite.connect(DB_NAME) as conn:
+    async with AsyncSessionLocal() as session:
         # 1. Current AFK (from users table)
-        cursor = await conn.execute("SELECT id, afk_start, afk_end, afk_reason FROM users WHERE afk_start IS NOT NULL")
-        afk_rows = await cursor.fetchall()
+        stmt_users = select(User.id, User.afk_start, User.afk_end, User.afk_reason).where(User.afk_start.isnot(None))
+        result_users = await session.execute(stmt_users)
+        afk_rows = result_users.all()
 
-        # 2. History AFK (includes user_id and role_id)
-        cursor = await conn.execute("SELECT user_id, role_id, start_date, end_date, reason FROM afk_history")
-        afk_history_rows = await cursor.fetchall()
+        # 2. History AFK
+        stmt_history = select(AFKHistory.user_id, AFKHistory.role_id, AFKHistory.start_date, AFKHistory.end_date, AFKHistory.reason)
+        result_history = await session.execute(stmt_history)
+        afk_history_rows = result_history.all()
 
-        # 3. Character linkage: role_id -> user_id (for promoting role-only AFK to user)
-        cursor = await conn.execute("""
-            SELECT p.role_id, c.user_id
-            FROM characters c
-            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
-            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
-        """)
-        role_to_user = {r[0]: r[1] for r in await cursor.fetchall()}
+        # 3. Character linkage: role_id -> user_id
+        stmt_links = (
+            select(Player.role_id, Character.user_id)
+            .join(Player, func.lower(func.trim(Character.nickname)) == func.lower(func.trim(Player.nickname)))
+            .where(and_(Character.user_id.isnot(None), Player.in_clan == 1))
+        )
+        result_links = await session.execute(stmt_links)
+        role_to_user = {r[0]: r[1] for r in result_links.all()}
 
-    afk_map: Dict[int, List[Tuple[datetime, datetime]]] = {}
+    afk_map: Dict[int, List[Tuple[datetime, datetime, str]]] = {}
 
     def parse_date(date_val):
         if not date_val: return None
-        if isinstance(date_val, datetime): return date_val
+        if isinstance(date_val, (datetime, date)):
+             if isinstance(date_val, date) and not isinstance(date_val, datetime):
+                 return datetime.combine(date_val, datetime.min.time())
+             return date_val
         try:
             s_val = str(date_val)
             if "." in s_val: return datetime.strptime(s_val, "%Y-%m-%d %H:%M:%S.%f")
@@ -144,76 +149,68 @@ def get_afk_display_info(role_id: int, role_user_map: Dict[int, int], afk_map: D
 
 async def get_party_map() -> Dict[int, List[Dict[str, str]]]:
     """Returns {role_id: [{'name': str, 'color': str}, ...]}"""
-    async with aiosqlite.connect(DB_NAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        sql = """
-            SELECT pm.player_role_id, cp.name, cp.color
-            FROM party_members pm
-            JOIN constant_parties cp ON pm.party_id = cp.id
-        """
-        cursor = await conn.execute(sql)
-        rows = await cursor.fetchall()
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(PartyMember.player_role_id, ConstantParty.name, ConstantParty.color)
+            .join(ConstantParty, PartyMember.party_id == ConstantParty.id)
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
         
     party_map = {}
-    for r in rows:
-        rid = r["player_role_id"]
+    for r_role_id, r_name, r_color in rows:
+        rid = r_role_id
         if rid not in party_map: party_map[rid] = []
-        party_map[rid].append({"name": r["name"] or "Без названия", "color": r["color"] or "#888888"})
+        party_map[rid].append({"name": r_name or "Без названия", "color": r_color or "#888888"})
     return party_map
 
 async def get_main_nick_map() -> Dict[int, str]:
     """Returns {role_id: main_nickname} for characters that are alts."""
-    async with aiosqlite.connect(DB_NAME) as conn:
-        conn.row_factory = aiosqlite.Row
+    async with AsyncSessionLocal() as session:
         # 1. Get all clan members from players
-        cursor = await conn.execute("SELECT role_id, user_id, nickname, is_alt FROM players WHERE in_clan = 1")
-        player_rows = await cursor.fetchall()
+        stmt_players = select(Player.role_id, Player.user_id, Player.nickname, Player.is_alt).where(Player.in_clan == 1)
+        result_players = await session.execute(stmt_players)
+        player_rows = result_players.all()
         
         # 2. Get character linkage (much more reliable for twins)
-        cursor = await conn.execute("""
-            SELECT c.user_id, p.role_id, c.nickname, c.is_main
-            FROM characters c
-            JOIN players p ON LOWER(TRIM(c.nickname)) = LOWER(TRIM(p.nickname))
-            WHERE c.user_id IS NOT NULL AND p.in_clan = 1
-        """)
-        char_links = await cursor.fetchall()
+        stmt_links = (
+            select(Character.user_id, Player.role_id, Character.nickname, Character.is_main)
+            .join(Player, func.lower(func.trim(Character.nickname)) == func.lower(func.trim(Player.nickname)))
+            .where(and_(Character.user_id.isnot(None), Player.in_clan == 1))
+        )
+        result_links = await session.execute(stmt_links)
+        char_links = result_links.all()
 
-    # Build role -> user mapping and track is_main status from characters table
+    # Build role -> user mapping and track is_main status
     role_to_user = {}
     is_main_status = {} # {role_id: bool}
     
     # First: from players table
-    for r in player_rows:
-        rid = r["role_id"]
-        if r["user_id"]:
-            role_to_user[rid] = r["user_id"]
+    for rid, uid, nick, is_alt_val in player_rows:
+        if uid:
+            role_to_user[rid] = uid
         # Default is_main status if we don't find it in characters table
-        is_main_status[rid] = (r["is_alt"] == 0)
+        is_main_status[rid] = (is_alt_val == 0)
 
-    # Second: enrich/override from characters table (more reliable)
-    for r in char_links:
-        rid = r["role_id"]
-        uid = r["user_id"]
+    # Second: enrich/override from characters table
+    for uid, rid, nick, is_main_val in char_links:
         role_to_user[rid] = uid
-        is_main_status[rid] = bool(r["is_main"])
+        is_main_status[rid] = bool(is_main_val)
 
     # Group characters by user_id and find the "true" main for each user
     user_to_main_nick = {}
-    for r in player_rows:
-        rid = r["role_id"]
-        uid = role_to_user.get(rid)
-        if uid and is_main_status.get(rid):
-            user_to_main_nick[uid] = r["nickname"]
+    for rid, uid, nick, is_alt_val in player_rows:
+        u_id = role_to_user.get(rid)
+        if u_id and is_main_status.get(rid):
+            user_to_main_nick[u_id] = nick
     
-    # Map alts to their main's nickname. 
-    # An alt is any character that is NOT the main.
+    # Map alts to their main's nickname.
     mapping = {}
-    for r in player_rows:
-        rid = r["role_id"]
-        uid = role_to_user.get(rid)
-        if uid and uid in user_to_main_nick:
-            main_nick = user_to_main_nick[uid]
-            if r["nickname"] != main_nick:
+    for rid, uid, nick, is_alt_val in player_rows:
+        u_id = role_to_user.get(rid)
+        if u_id and u_id in user_to_main_nick:
+            main_nick = user_to_main_nick[u_id]
+            if nick != main_nick:
                 mapping[rid] = main_nick
                 
     return mapping
@@ -279,12 +276,21 @@ async def get_kh_table_data(
         jd_str = ""
         jd_diff = 0
         if role_id in join_dates:
-            raw_jd = join_dates[role_id].split()[0]
-            jd_str = raw_jd
-            try:
-                jd_dt = datetime.strptime(raw_jd, "%Y-%m-%d")
+            raw_jd = join_dates[role_id]
+            if isinstance(raw_jd, (datetime, date)):
+                jd_dt = raw_jd
+                jd_str = jd_dt.strftime("%Y-%m-%d")
+            else:
+                jd_str = str(raw_jd).split()[0]
+                try:
+                    jd_dt = datetime.strptime(jd_str, "%Y-%m-%d")
+                except:
+                    jd_dt = None
+            
+            if jd_dt:
+                if isinstance(jd_dt, date) and not isinstance(jd_dt, datetime):
+                    jd_dt = datetime.combine(jd_dt, datetime.min.time())
                 jd_diff = (today - jd_dt).days
-            except: pass
 
         # AFK
         is_afk, afk_text, afk_reason = get_afk_display_info(role_id, role_user_map, afk_map, d1, d2)
@@ -404,12 +410,23 @@ async def get_money_table_data(
         
         # Join Date
         if role_id in join_dates:
-            raw_jd = join_dates[role_id].split()[0]
-            row["join_date"] = raw_jd
-            try:
-                jd_dt = datetime.strptime(raw_jd, "%Y-%m-%d")
+            raw_jd = join_dates[role_id]
+            if isinstance(raw_jd, (datetime, date)):
+                jd_dt = raw_jd
+                row["join_date"] = jd_dt.strftime("%Y-%m-%d")
+            else:
+                row["join_date"] = str(raw_jd).split()[0]
+                try:
+                    jd_dt = datetime.strptime(row["join_date"], "%Y-%m-%d")
+                except:
+                    jd_dt = None
+            
+            if jd_dt:
+                if isinstance(jd_dt, date) and not isinstance(jd_dt, datetime):
+                    jd_dt = datetime.combine(jd_dt, datetime.min.time())
                 row["join_days_ago"] = (today - jd_dt).days
-            except: row["join_days_ago"] = 0
+            else:
+                row["join_days_ago"] = 0
         else:
             row["join_date"] = ""
             row["join_days_ago"] = 0
@@ -474,55 +491,57 @@ async def get_history_data(
     event_types: Optional[List[str]],
     my_nicks: set
 ):
-    sql = """
-        SELECT e.event_date, COALESCE(p.nickname, 'ID '||e.role_id), p.class_id, e.raw_desc, e.event_type, e.role_id, i.name, e.timestamp 
-        FROM events e 
-        LEFT JOIN players p ON e.role_id = p.role_id 
-        LEFT JOIN items i ON (e.event_type = 0 AND e.value = i.id)
-        WHERE 1=1
-    """
-    params = []
-    
-    if start:
-        if len(start) > 10:
-            sql += " AND substr(e.event_date, 1, 16) >= ?"
-        else:
-            sql += " AND substr(e.event_date, 1, 10) >= ?"
-        params.append(start)
-    if end:
-        if len(end) > 10:
-            sql += " AND substr(e.event_date, 1, 16) <= ?"
-        else:
-            sql += " AND substr(e.event_date, 1, 10) <= ?"
-        params.append(end)
+    async with AsyncSessionLocal() as session:
+        # 1. Base query using SQLAlchemy
+        stmt = (
+            select(
+                Event.event_date,
+                func.coalesce(Player.nickname, "ID " + func.cast(Event.role_id, String)).label("nickname"),
+                Player.class_id,
+                Event.raw_desc,
+                Event.event_type,
+                Event.role_id,
+                Item.name.label("item_name"),
+                Event.timestamp
+            )
+            .join(Player, Event.role_id == Player.role_id, isouter=True)
+            .join(Item, and_(Event.event_type == 0, Event.value == Item.id), isouter=True)
+        )
         
-    if class_list:
-        placeholders = ",".join("?" for _ in class_list)
-        sql += f" AND p.class_id IN ({placeholders})"
-        params.extend(class_list)
+        if start:
+            if len(start) > 10:
+                stmt = stmt.where(func.substr(Event.event_date, 1, 16) >= start)
+            else:
+                stmt = stmt.where(func.substr(Event.event_date, 1, 10) >= start)
+        if end:
+            if len(end) > 10:
+                stmt = stmt.where(func.substr(Event.event_date, 1, 16) <= end)
+            else:
+                stmt = stmt.where(func.substr(Event.event_date, 1, 10) <= end)
+                
+        if class_list:
+            stmt = stmt.where(Player.class_id.in_(class_list))
 
-    if event_types:
-        allowed = []
-        for t in event_types:
-            if t == "valor": allowed.append(1)
-            elif t == "gold": allowed.append(2)
-            elif t == "items": allowed.append(0)
-            elif t == "roster": allowed.extend([5, 6, 7, 8, 9, 10])
-        
-        if allowed:
-            placeholders = ",".join("?" for _ in allowed)
-            sql += f" AND e.event_type IN ({placeholders})"
-            params.extend(allowed)
+        if event_types:
+            allowed = []
+            for t in event_types:
+                if t == "valor": allowed.append(1)
+                elif t == "gold": allowed.append(2)
+                elif t == "items": allowed.append(0)
+                elif t == "roster": allowed.extend([5, 6, 7, 8, 9, 10])
+            
+            if allowed:
+                stmt = stmt.where(Event.event_type.in_(allowed))
 
-    sql += " ORDER BY e.timestamp DESC LIMIT 500"
+        stmt = stmt.order_by(Event.timestamp.desc()).limit(500)
 
-    async with aiosqlite.connect(DB_NAME) as conn:
-        cursor = await conn.execute(sql, tuple(params))
-        raw = await cursor.fetchall()
+        result_stmt = await session.execute(stmt)
+        raw = result_stmt.all()
 
         # [FIX] Pre-fetch all nicknames for dynamic ID resolution in descriptions
-        cursor = await conn.execute("SELECT role_id, nickname FROM players WHERE nickname IS NOT NULL")
-        id_to_nick = {r[0]: r[1] for r in await cursor.fetchall()}
+        stmt_nicks = select(Player.role_id, Player.nickname).where(Player.nickname.isnot(None))
+        result_nicks = await session.execute(stmt_nicks)
+        id_to_nick = {r[0]: r[1] for r in result_nicks.all()}
     
     # Context Data
     join_dates, role_user_map = await get_join_dates()
@@ -552,12 +571,21 @@ async def get_history_data(
         jd_str = ""
         jd_diff = 0
         if role_id in join_dates:
-            raw_jd = join_dates[role_id].split()[0]
-            jd_str = raw_jd
-            try:
-                jd_dt = datetime.strptime(raw_jd, "%Y-%m-%d")
+            raw_jd = join_dates[role_id]
+            if isinstance(raw_jd, (datetime, date)):
+                jd_dt = raw_jd
+                jd_str = jd_dt.strftime("%Y-%m-%d")
+            else:
+                jd_str = str(raw_jd).split()[0]
+                try:
+                    jd_dt = datetime.strptime(jd_str, "%Y-%m-%d")
+                except:
+                    jd_dt = None
+            
+            if jd_dt:
+                if isinstance(jd_dt, date) and not isinstance(jd_dt, datetime):
+                    jd_dt = datetime.combine(jd_dt, datetime.min.time())
                 jd_diff = (today - jd_dt).days
-            except: pass
             
         # AFK logic
         try:

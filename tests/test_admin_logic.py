@@ -1,23 +1,14 @@
 import pytest
 
+from sqlalchemy import select, func
 from database import Player, QueueEntry, QueueType, User
 from logic.queue_ops import get_admin_queue_count, get_admin_queue_entries, join_queue, leave_queue
 from logic.reward_ops import issue_reward, warn_user
 
 
 @pytest.fixture
-def sync_test_session(test_db_session):
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    engine = create_engine(f"sqlite:///{test_db_session}")
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-
-
-def setup_admin_data(session):
+async def async_admin_data(async_test_session):
+    session = async_test_session
     # Master
     master = User(telegram_id=999, username="master_user", is_master=True)
     session.add(master)
@@ -30,20 +21,21 @@ def setup_admin_data(session):
     q = QueueType(name="AdminQ", is_active=True)
     session.add(q)
 
-    session.commit()
+    await session.commit()
     return master, user, q
 
 
-def test_issue_reward_normal(sync_test_session):
-    session = sync_test_session
-    master, user, q = setup_admin_data(session)
+@pytest.mark.asyncio
+async def test_issue_reward_normal(async_test_session, async_admin_data):
+    session = async_test_session
+    master, user, q = async_admin_data
 
     # Entry (Manual)
     entry = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P1", auto_requeue=False)
     session.add(entry)
-    session.commit()
+    await session.commit()
 
-    success, msg, hist = issue_reward(session, entry.id, master.username)
+    success, msg, hist = await issue_reward(session, entry.id, master.username)
 
     assert success is True
     assert "Ушел" in msg
@@ -51,45 +43,51 @@ def test_issue_reward_normal(sync_test_session):
     assert hist.issued_by == "master_user"
 
     # Check Entry Gone
-    assert session.query(QueueEntry).filter_by(id=entry.id).first() is None
+    result = await session.execute(select(QueueEntry).filter_by(id=entry.id))
+    assert result.scalar_one_or_none() is None
     # Check No Requeue
-    assert session.query(QueueEntry).filter_by(user_id=user.id, queue_type_id=q.id).count() == 0
+    result = await session.execute(select(func.count(QueueEntry.id)).filter_by(user_id=user.id, queue_type_id=q.id))
+    assert result.scalar() == 0
 
 
-def test_issue_reward_auto(sync_test_session):
-    session = sync_test_session
-    master, user, q = setup_admin_data(session)
+@pytest.mark.asyncio
+async def test_issue_reward_auto(async_test_session, async_admin_data):
+    session = async_test_session
+    master, user, q = async_admin_data
 
     # Entry (Auto)
     entry = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P2", auto_requeue=True)
     session.add(entry)
-    session.commit()
+    await session.commit()
 
     original_id = entry.id
-    success, msg, hist = issue_reward(session, original_id, master.username)
+    success, msg, hist = await issue_reward(session, original_id, master.username)
 
     assert success is True
     assert "Перезаписан" in msg
 
     # Check Old Entry Gone
-    assert session.query(QueueEntry).filter_by(id=original_id).first() is None
+    result = await session.execute(select(QueueEntry).filter_by(id=original_id))
+    assert result.scalar_one_or_none() is None
 
     # Check New Entry Exists
-    new_entry = session.query(QueueEntry).filter_by(user_id=user.id, queue_type_id=q.id).first()
+    result = await session.execute(select(QueueEntry).filter_by(user_id=user.id, queue_type_id=q.id))
+    new_entry = result.scalar_one_or_none()
     assert new_entry is not None
     assert new_entry.id != original_id
     assert new_entry.auto_requeue is True
 
 
-def test_warn_user(sync_test_session):
-    session = sync_test_session
-    master, user, q = setup_admin_data(session)
+@pytest.mark.asyncio
+async def test_warn_user(async_test_session, async_admin_data):
+    session = async_test_session
+    master, user, q = async_admin_data
 
     entry = QueueEntry(user_id=user.id, queue_type_id=q.id, character_name="P3")
     session.add(entry)
-    session.commit()
+    await session.commit()
 
-    success, msg, hist = warn_user(session, entry.id, master.username)
+    success, msg, hist = await warn_user(session, entry.id, master.username)
 
     assert success is True
     assert "Предупреждение" in msg
@@ -97,12 +95,14 @@ def test_warn_user(sync_test_session):
     assert hist.user_id == user.id
 
     # Entry should REMAIN (Warn doesn't remove)
-    assert session.query(QueueEntry).filter_by(id=entry.id).first() is not None
+    result = await session.execute(select(QueueEntry).filter_by(id=entry.id))
+    assert result.scalar_one_or_none() is not None
 
 
-def test_get_admin_queue_logic(sync_test_session):
-    session = sync_test_session
-    master, user, q = setup_admin_data(session)
+@pytest.mark.asyncio
+async def test_get_admin_queue_logic(async_test_session, async_admin_data):
+    session = async_test_session
+    master, user, q = async_admin_data
 
     # 1. Add 3 entries
     # - P1: Not in Player table (should be visible)
@@ -118,14 +118,14 @@ def test_get_admin_queue_logic(sync_test_session):
     p3 = Player(nickname="P3", in_clan=0)
     session.add_all([p2, p3])
     
-    session.commit()
+    await session.commit()
 
     # 2. Test Count
-    count = get_admin_queue_count(session, q.id)
+    count = await get_admin_queue_count(session, q.id)
     assert count == 2  # P1 and P2, but not P3
 
     # 3. Test Entries
-    entries = get_admin_queue_entries(session, q.id)
+    entries = await get_admin_queue_entries(session, q.id)
     assert len(entries) == 2
     nicks = [e.character_name for e in entries]
     assert "P1" in nicks

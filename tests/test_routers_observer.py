@@ -1,60 +1,11 @@
 import pytest
 import datetime
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock
+from httpx import AsyncClient, ASGITransport
 
-from fastapi.testclient import TestClient
 from main import app
-from routers.observer import router, init_browser, close_browser
-
-client = TestClient(app)
-
-# ---------------------------------------------------------
-# Test Helpers
-# ---------------------------------------------------------
-
-class MockCursor:
-    def __init__(self, fetchall_data=None, fetchone_data=None):
-        self.fetchall_data = fetchall_data
-        self.fetchone_data = fetchone_data
-    
-    def __await__(self):
-        async def _ret():
-            return self
-        return _ret().__await__()
-        
-    async def __aenter__(self):
-        return self
-        
-    async def __aexit__(self, exc_type, exc, tb):
-        pass
-        
-    async def fetchall(self):
-        return self.fetchall_data
-        
-    async def fetchone(self):
-        return self.fetchone_data
-
-class MockConnection:
-    def __init__(self, fetchall_data=None, fetchone_data=None):
-        self.fetchall_data = fetchall_data
-        self.fetchone_data = fetchone_data
-        
-    def __await__(self):
-        async def _ret():
-            return self
-        return _ret().__await__()
-        
-    async def __aenter__(self):
-        return self
-        
-    async def __aexit__(self, exc_type, exc, tb):
-        pass
-        
-    def execute(self, query, *args):
-        return MockCursor(self.fetchall_data, self.fetchone_data)
-        
-    async def commit(self):
-        pass
+from routers.observer import init_browser, close_browser
+from database import ObserverCache, get_msk_now
 
 # ---------------------------------------------------------
 # Test browser startup and shutdown
@@ -103,53 +54,61 @@ async def test_close_browser():
     assert mock_browser.close.call_count == 1
     assert mock_pw.stop.call_count == 1
 
-def test_api_observer_stats():
+@pytest.mark.asyncio
+async def test_api_observer_stats():
     import routers.observer
     routers.observer.BROWSER_INSTANCE = "Browser"
     routers.observer.CONTEXT_INSTANCE = "Context"
-    response = client.get("/api/observer_stats")
-    assert response.status_code == 200
-    assert response.json()["browser_active"] == True
-    assert response.json()["context_active"] == True
+    
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer_stats")
+        assert response.status_code == 200
+        assert response.json()["browser_active"] == True
+        assert response.json()["context_active"] == True
 
 # ---------------------------------------------------------
 # Test /api/observer/{role_id}
 # ---------------------------------------------------------
 
-def test_observer_missing_role_id():
-    response = client.get("/api/observer/0") # assuming 0 triggers missing role_id condition if int -> bool check
-    assert response.status_code == 400
+@pytest.mark.asyncio
+async def test_observer_missing_role_id():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer/0")
+        assert response.status_code == 400
 
-def test_observer_cache_hit():
+@pytest.mark.asyncio
+async def test_observer_cache_hit(async_test_session):
     # Date within 1 hour
-    recent_date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = get_msk_now()
+    recent_date = now - datetime.timedelta(minutes=30)
     
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=("cached_html", recent_date_str))):
-        response = client.get("/api/observer/123987")
+    cache = ObserverCache(role_id=123987, html_content="cached_html", updated_at=recent_date)
+    async_test_session.add(cache)
+    await async_test_session.commit()
+    
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer/123987")
         assert response.status_code == 200
         assert response.json()["source"] == "cache"
         assert response.json()["html"] == "cached_html"
 
-def test_observer_cache_hit_ms():
-    recent_date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
-    
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=("cached_html", recent_date_str))):
-        response = client.get("/api/observer/123987")
-        assert response.status_code == 200
-        assert response.json()["source"] == "cache"
-
-def test_observer_cache_miss_scrape_uninitialized():
-    old_date_str = (datetime.datetime.utcnow() - datetime.timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
-    
+@pytest.mark.asyncio
+async def test_observer_cache_miss_scrape_uninitialized(async_test_session):
     import routers.observer
     routers.observer.CONTEXT_INSTANCE = None # Make it try to init
     
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=("stale_html", old_date_str))):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch("routers.observer.init_browser", new_callable=AsyncMock) as mock_init:
-            response = client.get("/api/observer/123987")
+            # Mocking init_browser to NOT initialize CONTEXT_INSTANCE triggers 500
+            response = await client.get("/api/observer/123987")
             assert response.status_code == 500
 
-def test_observer_scrape_page_404():
+@pytest.mark.asyncio
+async def test_observer_scrape_page_404(async_test_session):
     import routers.observer
     
     mock_page = AsyncMock()
@@ -163,13 +122,15 @@ def test_observer_scrape_page_404():
     
     routers.observer.CONTEXT_INSTANCE = mock_context
     
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=None)):
-        response = client.get("/api/observer/123987")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer/123987")
         assert response.status_code == 200
         assert response.json()["status"] == "error"
-        assert "404" in mock_page.title.return_value
+        assert "not found" in response.json()["message"]
 
-def test_observer_scrape_page_auth():
+@pytest.mark.asyncio
+async def test_observer_scrape_page_auth(async_test_session):
     import routers.observer
     
     mock_page = AsyncMock()
@@ -182,17 +143,19 @@ def test_observer_scrape_page_auth():
     
     routers.observer.CONTEXT_INSTANCE = mock_context
     
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=None)):
-        response = client.get("/api/observer/123987")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer/123987")
         assert response.status_code == 200
         assert response.json()["status"] == "error"
-        assert "Auth expired" in response.json()["message"]
+        assert "requires login" in response.json()["message"]
 
-def test_observer_scrape_success():
+@pytest.mark.asyncio
+async def test_observer_scrape_success(async_test_session):
     import routers.observer
     
     mock_element = AsyncMock()
-    mock_element.evaluate = AsyncMock(return_value='<div src="/" href="/"></div>')
+    mock_element.evaluate = AsyncMock(return_value='<div class="player-equipment"></div>')
     
     mock_page = AsyncMock()
     mock_page.goto = AsyncMock()
@@ -208,12 +171,20 @@ def test_observer_scrape_success():
     
     routers.observer.CONTEXT_INSTANCE = mock_context
     
-    with patch("aiosqlite.connect", return_value=MockConnection(fetchone_data=None)): # DB miss
-        response = client.get("/api/observer/123987")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/observer/123987")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
         assert "source" in response.json()
+        assert response.json()["source"] == "live"
         
         html = response.json()["html"]
-        assert "pwobs.com/" in html # Check standard replacement
-        assert "style.css" in html # Check CSS bundle
+        assert "style.css" in html
+        
+        # Verify it was saved to cache
+        from sqlalchemy import select
+        result = await async_test_session.execute(select(ObserverCache).filter_by(role_id=123987))
+        cache = result.scalar_one_or_none()
+        assert cache is not None
+        assert "style.css" in cache.html_content

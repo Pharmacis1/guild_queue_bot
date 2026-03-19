@@ -2,14 +2,16 @@ import os
 from datetime import date, datetime, timedelta
 from typing import List
 
-import aiosqlite
 from fastapi import APIRouter, Query, Request
+from sqlalchemy import select, func, and_, text
+from sqlalchemy.orm import selectinload
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from consts import CLASSES
 from logic.analytics import calculate_gold_thresholds, calculate_thresholds, get_gold_tier, get_valor_tier
-from web_database import DB_NAME, get_data_from_db, get_last_update_time
+from web_database import get_data_from_db, get_last_update_time
+from database import AsyncSessionLocal, User, Player, Character, AFKHistory
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -46,49 +48,27 @@ async def read_root(
     history_types: List[str] = Query(None),
 ):
     try:
-        # --- AUTH CHECK RESTORED ---
-        from database import User, session
-
-        # Default values for public access (Guest Mode)
-        user_id = request.session.get("user_id")
-        import logging
-
-        logging.info(f"DEBUG VIEWS: Session Retrieved user_id: {user_id}")
-        u = None
-        my_nicks = set()
-        is_authenticated = False
-        is_admin = False
-        user_nickname = "Guest"
-        user_avatar = "/static/img/spider_arcane_ruby_transparent.png"
-
         if user_id:
-            # Check if user exists in DB
-            u = session.query(User).filter_by(telegram_id=user_id).first()
-            if u:
-                is_authenticated = True
-                user_nickname = u.username or f"User {user_id}"
-                user_avatar = u.avatar_url or user_avatar
-                is_admin = u.is_master  # Admin if is_master is True
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(User).options(selectinload(User.characters)).filter_by(telegram_id=user_id)
+                )
+                u = result.scalar_one_or_none()
+                if u:
+                    is_authenticated = True
+                    user_nickname = u.username or f"User {user_id}"
+                    user_avatar = u.avatar_url or user_avatar
+                    is_admin = u.is_master
 
-                # Debug Chars
-                import logging
-
-                logging.info(f"DEBUG AUTH: User {u.username} ({user_id}) - Chars: {[c.nickname for c in u.characters]}")
-
-                # Load characters for highlighting
-                my_nicks = {c.nickname.lower().strip() for c in u.characters if c.nickname}
-
-                # Find main character for display name
-                main_char = next((c for c in u.characters if c.is_main), None)
-                if main_char:
-                    user_nickname = main_char.nickname
-                elif u.characters:
-                    # Fallback to first character if no main is explicitly set but chars exist
-                    user_nickname = u.characters[0].nickname
-                # Else keep telegram username/id
-            else:
-                # Session exists but user not in DB (weird), treat as guest
-                request.session.pop("user_id", None)
+                    my_nicks = {c.nickname.lower().strip() for c in u.characters if c.nickname}
+                    main_char = next((c for c in u.characters if c.is_main), None)
+                    if main_char:
+                        user_nickname = main_char.nickname
+                    elif u.characters:
+                        user_nickname = u.characters[0].nickname
+                else:
+                    # Session exists but user not in DB (weird), treat as guest
+                    request.session.pop("user_id", None)
 
         # Auth OK (or Guest OK)
 
@@ -138,21 +118,17 @@ async def read_root(
             current_money_end = today.strftime("%Y-%m-%d")
 
         # --- HELPER: JOIN DATES (for Newcomers) ---
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.execute("SELECT role_id, first_seen, user_id FROM players WHERE in_clan = 1")
-            join_data = await cursor.fetchall()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Player.role_id, Player.first_seen, Player.user_id).filter_by(in_clan=1))
+            join_data = result.all()
             join_dates = {role_id: first_seen for role_id, first_seen, _ in join_data if first_seen}
-
-            # Map role_id to user_id for AFK check
             role_user_map = {role_id: user_id for role_id, _, user_id in join_data if user_id}
 
-            # Fetch AFK Users (current AFK from users table)
-            cursor = await conn.execute("SELECT id, afk_start, afk_end FROM users WHERE afk_start IS NOT NULL")
-            afk_rows = await cursor.fetchall()
+            result = await session.execute(select(User.id, User.afk_start, User.afk_end).filter(User.afk_start.is_not(None)))
+            afk_rows = result.all()
 
-            # Also fetch from afk_history table for ALL historical AFK periods
-            cursor = await conn.execute("SELECT user_id, start_date, end_date FROM afk_history")
-            afk_history_rows = await cursor.fetchall()
+            result = await session.execute(select(AFKHistory.user_id, AFKHistory.start_date, AFKHistory.end_date))
+            afk_history_rows = result.all()
 
         # Process AFK Data - store as list of periods per user
         afk_map = {}  # {user_id: [(start_dt, end_dt), ...]}
@@ -395,53 +371,43 @@ async def read_root(
 
         # History Query Construction
         sql_history = """
-        SELECT e.event_date, COALESCE(p.nickname, 'ID '||e.role_id), p.class_id, e.raw_desc, e.event_type, e.role_id, i.name, e.timestamp 
-        FROM events e 
-        LEFT JOIN players p ON e.role_id = p.role_id 
-        LEFT JOIN items i ON (e.event_type = 0 AND e.value = i.id)
-        WHERE 1=1
-    """
-        h_params = []
+            SELECT e.event_date, COALESCE(p.nickname, 'ID ' || e.role_id::text) as name, 
+                   p.class_id, e.raw_desc, e.event_type, e.role_id, i.name as item_name, e.timestamp 
+            FROM events e 
+            LEFT JOIN players p ON e.role_id = p.role_id 
+            LEFT JOIN items i ON (e.event_type = 0 AND e.value = i.id)
+            WHERE 1=1
+        """
+        h_params = {}
 
-        # 1. Date Filter
         if current_history_start:
-            sql_history += " AND substr(e.event_date, 1, 10) >= ?"
-            h_params.append(current_history_start)
+            sql_history += " AND e.event_date >= :h_start"
+            h_params["h_start"] = current_history_start
         if current_history_end:
-            sql_history += " AND substr(e.event_date, 1, 10) <= ?"
-            h_params.append(current_history_end)
+            sql_history += " AND e.event_date <= :h_end"
+            h_params["h_end"] = current_history_end + " 23:59:59"
 
-        # 2. Class Filter (SQL level for efficiency)
         if current_history_classes:
-            placeholders = ",".join("?" for _ in current_history_classes)
-            sql_history += f" AND p.class_id IN ({placeholders})"
-            h_params.extend(current_history_classes)
+            sql_history += " AND p.class_id IN :h_classes"
+            h_params["h_classes"] = tuple(current_history_classes)
 
-        # 3. Event Type Filter (SQL)
         if current_history_types:
-            # Mapping
-            # Valor=1, Gold=2, Items=0, Roster=[6, 8, 10]
             allowed_types = []
             for t in current_history_types:
-                if t == "valor":
-                    allowed_types.append(1)
-                elif t == "gold":
-                    allowed_types.append(2)
-                elif t == "items":
-                    allowed_types.append(0)
-                elif t == "roster":
-                    allowed_types.extend([6, 8, 10])
+                if t == "valor": allowed_types.append(1)
+                elif t == "gold": allowed_types.append(2)
+                elif t == "items": allowed_types.append(0)
+                elif t == "roster": allowed_types.extend([6, 8, 10])
 
             if allowed_types:
-                placeholders = ",".join("?" for _ in allowed_types)
-                sql_history += f" AND e.event_type IN ({placeholders})"
-                h_params.extend(allowed_types)
+                sql_history += " AND e.event_type IN :h_types"
+                h_params["h_types"] = tuple(allowed_types)
 
-        sql_history += " ORDER BY e.timestamp DESC LIMIT 500"  # Increased limit slightly
+        sql_history += " ORDER BY e.timestamp DESC LIMIT 500"
 
-        async with aiosqlite.connect(DB_NAME) as conn:
-            cursor = await conn.execute(sql_history, tuple(h_params))
-            raw_history = await cursor.fetchall()
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(text(sql_history), h_params)
+            raw_history = result.all()
 
         history_rows = []
 
@@ -515,15 +481,14 @@ async def remote_auth_page(request: Request):
     """
     Secret admin page for remote browser authentication.
     """
-    # Auth Logic Reuse
-    from database import User, session
-
     user_id = request.session.get("user_id")
     is_admin = False
 
     if user_id:
-        u = session.query(User).filter_by(telegram_id=user_id).first()
-        if u and u.is_master:
-            is_admin = True
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).filter_by(telegram_id=user_id))
+            u = result.scalar_one_or_none()
+            if u and u.is_master:
+                is_admin = True
 
     return templates.TemplateResponse("remote_auth.html", {"request": request, "is_admin": is_admin})

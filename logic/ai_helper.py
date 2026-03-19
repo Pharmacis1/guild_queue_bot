@@ -1,5 +1,6 @@
 
 import os
+from typing import Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +27,7 @@ class MessageCache:
 # Global Cache
 message_cache = MessageCache()
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from google import genai
 from google.genai import types
 
@@ -213,19 +215,30 @@ Question: {question}
             print(f"Error computing embedding: {e}")
             return []
 
-    async def find_relevant_topics(self, query: str, limit: int = 15):
+    async def find_relevant_topics(self, query: str, session: Optional[AsyncSession] = None, limit: int = 15):
         """
         Finds the most relevant topics for the query using Cosine Similarity.
         """
-        from database import session, FaqTopic
+        from database import FaqTopic, select, AsyncSessionLocal
         import json
         import math
 
+        if session is None:
+            async with AsyncSessionLocal() as temp_session:
+                return await self._find_relevant_topics_impl(temp_session, query, limit)
+        return await self._find_relevant_topics_impl(session, query, limit)
+
+    async def _find_relevant_topics_impl(self, session, query, limit):
+        from database import FaqTopic, select
+        import json
+        import math
+        
         query_embedding = await self.embed_text(query)
         if not query_embedding:
             return []
 
-        topics = session.query(FaqTopic).filter(FaqTopic.embedding.isnot(None)).all()
+        result = await session.execute(select(FaqTopic).filter(FaqTopic.embedding.isnot(None)))
+        topics = result.scalars().all()
         scored_topics = []
 
         def cosine_similarity(v1, v2):
@@ -248,19 +261,12 @@ Question: {question}
         # Sort by score DESC
         scored_topics.sort(key=lambda x: x[0], reverse=True)
         
-        # LOGIC UPDATE:
-        # If total topics count is relatively small (< 2x Limit), we should be generous.
-        # But if total topics <= limit, just return ALL of them regardless of score.
-        # The LLM (Gemini 1.5/2.0) has a huge context window, so seeing 6 or 20 topics is nothing.
-        # This ensures we don't accidentally filter out a necessary "puzzle piece" (like Topic 6 vs Topic 4).
-        
         if len(scored_topics) <= limit:
              return [t[1] for t in scored_topics]
 
-        # Otherwise, filter by threshold and take top N
         filtered_topics = []
         for score, topic in scored_topics:
-            if score > 0.25: # Even lower threshold if we have many topics
+            if score > 0.25:
                 filtered_topics.append(topic)
                 
         return filtered_topics[:limit]
