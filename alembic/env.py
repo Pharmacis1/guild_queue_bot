@@ -23,6 +23,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+db_url = os.environ.get("DATABASE_URL")
+if db_url:
+    # Expand vars in case docker passed literal ${POSTGRES_USER} etc.
+    db_url = os.path.expandvars(db_url)
+    config.set_main_option("sqlalchemy.url", db_url)
+
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
