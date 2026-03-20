@@ -2152,10 +2152,13 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
 
     # Notify Other Masters
     approver_id = event.from_user.id
-    approver_user = session.query(User).filter_by(telegram_id=approver_id).first()
+    from sqlalchemy import select
+    result_appr = await session.execute(select(User).filter_by(telegram_id=approver_id))
+    approver_user = result_appr.scalar_one_or_none()
     approver_name = f"@{approver_user.username}" if (approver_user and approver_user.username) else "Мастер"
 
-    other_masters = session.query(User).filter(User.is_master, User.telegram_id != approver_id).all()
+    result_others = await session.execute(select(User).filter(User.is_master, User.telegram_id != approver_id))
+    other_masters = result_others.scalars().all()
     for m in other_masters:
         try:
             await event.bot.send_message(

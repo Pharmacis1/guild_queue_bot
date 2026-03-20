@@ -6,7 +6,11 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Install PostgreSQL client tools (pg_dump, pg_restore)
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl gnupg && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg && \
+    echo "deb http://apt.postgresql.org/pub/repos/apt jammy-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && apt-get install -y postgresql-client-16 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
