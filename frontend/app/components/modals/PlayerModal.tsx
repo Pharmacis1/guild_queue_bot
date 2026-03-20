@@ -297,12 +297,12 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
         }
     };
 
-    const handleDeleteEvent = async (timestamp: number) => {
+    const handleDeleteEvent = async (eventId: number) => {
         if (!confirm("Удалить это действие? Это нельзя отменить.")) return;
         if (!roleId) return;
 
         try {
-            const res = await deleteEvent(roleId, timestamp);
+            const res = await deleteEvent(eventId);
             if (res.status === 'ok') {
                 // Refresh
                 fetchProfile(roleId).then(setData);

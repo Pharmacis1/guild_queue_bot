@@ -122,6 +122,14 @@ class ProfileParty(BaseModel):
     is_leader: bool
     members: List[ProfilePartyMember]
 
+class ProfileEvent(BaseModel):
+    id: int
+    timestamp: int
+    date: str
+    type: int
+    value: int
+    description: Optional[str]
+
 class ProfileResponse(BaseModel):
     role_id: int
     nickname: Optional[str]
@@ -139,6 +147,7 @@ class ProfileResponse(BaseModel):
     linked_chars: List[ProfileLinkedChar]
     parties: List[ProfileParty] = []
     party: Optional[ProfileParty]
+    events: List[ProfileEvent] = []
 
 
 # --- Helpers ---

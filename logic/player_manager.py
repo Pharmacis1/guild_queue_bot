@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select, update, delete, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import User, Player, Character, AFKHistory, AsyncSessionLocal, ConstantParty, PartyMember, QueueEntry, QueueType
+from database import User, Player, Character, AFKHistory, AsyncSessionLocal, ConstantParty, PartyMember, QueueEntry, QueueType, Event
 from consts import CLASSES
 
 # Helper to parse dates safely
@@ -236,6 +236,7 @@ async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Di
         data["queues"] = []
         data["linked_chars"] = []
         data["parties"] = []
+        data["events"] = []
 
         # 2. AFK History
         if user_id:
@@ -327,6 +328,20 @@ async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Di
             data["parties"].append(party_data)
 
         data["party"] = data["parties"][0] if data["parties"] else None
+        
+        # 6. Recent Events (Valor etc.)
+        e_stmt = select(Event).filter_by(role_id=role_id).order_by(Event.timestamp.desc()).limit(20)
+        e_result = await session.execute(e_stmt)
+        for er in e_result.scalars():
+            data["events"].append({
+                "id": er.id,
+                "timestamp": int(er.timestamp.timestamp() if er.timestamp else 0),
+                "date": er.timestamp.strftime("%Y-%m-%d %H:%M") if er.timestamp else "",
+                "type": er.event_type or 0,
+                "value": er.value or 0,
+                "description": er.description
+            })
+
         return data
 
     except Exception as e:
