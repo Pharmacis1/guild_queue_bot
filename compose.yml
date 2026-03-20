@@ -4,6 +4,8 @@ services:
     restart: always
     ports:
       - "8001:8081"
+    depends_on:
+      - db
     volumes:
       - ./backups:/app/backups
       - ./credentials.json:/app/credentials.json:ro
@@ -21,3 +23,21 @@ services:
       - "3000:3000"
     depends_on:
       - bot
+
+  db:
+    image: postgres:18-alpine
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "5433:5432"
+    volumes:
+      - guild_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  guild_db_data:

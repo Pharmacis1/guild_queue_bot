@@ -132,7 +132,7 @@ def get_backups_list_kb(files, page=0, page_size=5):
         # Display: 01.02.26 17:34
         display = f
         if "guild_bot_" in f:
-            parts = f.replace("guild_bot_", "").replace(".db", "").split("_")
+            parts = f.replace("guild_bot_", "").replace(".db", "").replace(".sql", "").replace(".bak", "").split("_")
             if len(parts) >= 2:
                 # 2026-02-01_17-34-43 -> 01.02 17:34
                 date_p = parts[0].split("-")  # [2026, 02, 01]

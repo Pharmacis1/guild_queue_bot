@@ -1770,8 +1770,10 @@ async def m_bk_list(callback: types.CallbackQuery):
         page = 0
 
     # Get files
+    import glob
     backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
-    files = glob.glob(os.path.join(backup_dir, "guild_bot_*.db"))
+    files = glob.glob(os.path.join(backup_dir, "guild_bot_*.*"))
+    files = [f for f in files if f.endswith(".db") or f.endswith(".sql") or f.endswith(".bak")]
     files.sort(key=os.path.getmtime, reverse=True)  # Newest first
 
     files = [os.path.basename(f) for f in files]
@@ -1867,7 +1869,7 @@ async def m_bk_restore_do(callback: types.CallbackQuery):
         # scripts.restore_db.restore(target_backup) logic:
         # It prints to stdout. We want it to be silent or log?
         # Let's trust it.
-
+        from scripts.restore_db import restore as restore_db_func
         restore_db_func(filepath, skip_confirm=True)  # This assumes it works and doesn't exit sys.
 
         await callback.message.answer("✅ **УСПЕШНО!**\nБот перезагружается прямо сейчас...")
