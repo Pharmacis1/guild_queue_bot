@@ -19,8 +19,8 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 class UserData(BaseModel):
     id: int
-    telegram_id: int
-    username: str
+    telegram_id: Optional[int] = None
+    username: Optional[str] = None
     avatar_url: Optional[str] = None
     is_master: bool
     is_banned: bool
@@ -94,8 +94,8 @@ class HistoryRow(BaseModel):
 
 class ProfileAfkHistory(BaseModel):
     id: int
-    start: str
-    end: str
+    start: Optional[str] = None
+    end: Optional[str] = None
     reason: Optional[str] = None
 
 class ProfileQueue(BaseModel):
