@@ -333,13 +333,14 @@ async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Di
         e_stmt = select(Event).filter_by(role_id=role_id).order_by(Event.timestamp.desc()).limit(20)
         e_result = await session.execute(e_stmt)
         for er in e_result.scalars():
+            ts_dt = datetime.fromtimestamp(er.timestamp) if er.timestamp else None
             data["events"].append({
                 "id": er.id,
-                "timestamp": int(er.timestamp.timestamp() if er.timestamp else 0),
-                "date": er.timestamp.strftime("%Y-%m-%d %H:%M") if er.timestamp else "",
+                "timestamp": int(er.timestamp or 0),
+                "date": ts_dt.strftime("%Y-%m-%d %H:%M") if ts_dt else "",
                 "type": er.event_type or 0,
                 "value": er.value or 0,
-                "description": er.description
+                "description": er.raw_desc
             })
 
         return data

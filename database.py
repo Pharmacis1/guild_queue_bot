@@ -229,7 +229,7 @@ AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
-        return session
+        yield session
 
 DEFAULT_QUEUES = [
     "Жемчужины Фу Си",
