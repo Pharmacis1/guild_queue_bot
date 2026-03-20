@@ -2152,7 +2152,6 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
 
     # Notify Other Masters
     approver_id = event.from_user.id
-    from sqlalchemy import select
     result_appr = await session.execute(select(User).filter_by(telegram_id=approver_id))
     approver_user = result_appr.scalar_one_or_none()
     approver_name = f"@{approver_user.username}" if (approver_user and approver_user.username) else "Мастер"
