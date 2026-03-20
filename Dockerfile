@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y wget build-essential libpq-dev python3-
 
 COPY requirements.txt .
 
+# Install core dependencies separately to isolate potential failures
+RUN pip install --no-cache-dir aiogram aiohttp aiofiles alembic APScheduler pydantic fastapi uvicorn greenlet
+RUN pip install --no-cache-dir SQLAlchemy asyncpg
+# Install the rest
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
