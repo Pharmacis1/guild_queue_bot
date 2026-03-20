@@ -1764,41 +1764,71 @@ async def force_player_scan(background_tasks: BackgroundTasks):
 async def add_event(request: Request):
     try:
         from database import Event
+        from sqlalchemy import select
         data = await request.json()
         role_id, d_str, val = data.get("role_id"), data.get("date"), data.get("value")
         msk_tz = pytz.timezone("Europe/Moscow")
         dt_naive = datetime.strptime(d_str.replace("T", " "), "%Y-%m-%d %H:%M:%S" if len(d_str)>16 else "%Y-%m-%d %H:%M")
         ts = int(msk_tz.localize(dt_naive).timestamp())
         async with AsyncSessionLocal() as session:
+            # Check for existing
+            stmt_check = select(Event).filter_by(
+                role_id=role_id,
+                timestamp=ts,
+                event_type=1,
+                value=int(val)
+            )
+            res_check = await session.execute(stmt_check)
+            if res_check.scalar_one_or_none():
+                return {"status": "ok", "message": "Duplicate event skipped"}
+
             ev = Event(role_id=role_id, timestamp=ts, event_date=d_str, event_type=1, value=int(val), raw_desc=data.get("description", ""))
             session.add(ev)
             await session.commit()
-        return {"status": "ok"}
+            return {"status": "ok", "message": "Event added"}
     except Exception as e: return {"status": "error", "message": str(e)}
 @router.post("/add_event_bulk")
 async def add_event_bulk(request: Request):
     try:
         from database import Event
+        from sqlalchemy import select
         data = await request.json()
         ids, d_str, val = data.get("role_ids"), data.get("date"), data.get("value")
         msk_tz = pytz.timezone("Europe/Moscow")
         dt_naive = datetime.strptime(d_str.replace("T", " "), "%Y-%m-%d %H:%M:%S" if len(d_str)>16 else "%Y-%m-%d %H:%M")
         ts = int(msk_tz.localize(dt_naive).timestamp())
         async with AsyncSessionLocal() as session:
+            added_count = 0
+            skipped_count = 0
             for rid in ids:
+                # Check for existing
+                stmt_check = select(Event).filter_by(
+                    role_id=rid,
+                    timestamp=ts,
+                    event_type=1,
+                    value=int(val)
+                )
+                res_check = await session.execute(stmt_check)
+                if res_check.scalar_one_or_none():
+                    skipped_count += 1
+                    continue
+
                 ev = Event(role_id=rid, timestamp=ts, event_date=d_str, event_type=1, value=int(val), raw_desc=data.get("description", ""))
                 session.add(ev)
+                added_count += 1
             await session.commit()
-        return {"status": "ok"}
+        return {"status": "ok", "message": f"Events added: {added_count}, skipped: {skipped_count}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 @router.post("/delete_event")
 async def delete_event(request: Request):
     try:
         from database import Event
         data = await request.json()
-        rid, ts = data.get("role_id"), data.get("timestamp")
+        event_id = data.get("event_id")
+        if not event_id:
+            return {"status": "error", "message": "Missing event_id"}
         async with AsyncSessionLocal() as session:
-            await session.execute(delete(Event).where(Event.role_id == rid, Event.timestamp == ts))
+            await session.execute(delete(Event).where(Event.id == int(event_id)))
             await session.commit()
         return {"status": "ok"}
     except Exception as e: return {"status": "error", "message": str(e)}

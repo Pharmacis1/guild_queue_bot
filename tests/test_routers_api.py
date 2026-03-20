@@ -174,13 +174,13 @@ async def test_api_add_event(async_test_session):
 
 @pytest.mark.asyncio
 async def test_api_delete_event(async_test_session):
-    # Use datetime objects for setup
-    event = Event(role_id=1, timestamp=1000, event_date="2024-01-01 12:00:00")
+    # Setup
+    event = Event(id=999, role_id=1, timestamp=1000, event_date="2024-01-01 12:00:00")
     async_test_session.add(event)
     await async_test_session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/api/delete_event", json={"role_id": 1, "timestamp": 1000})
+        response = await ac.post("/api/delete_event", json={"event_id": 999})
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 

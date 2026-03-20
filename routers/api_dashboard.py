@@ -91,6 +91,7 @@ class HistoryRow(BaseModel):
     afk_dates: Optional[str]
     afk_reason: Optional[str] = None
     timestamp: float
+    id: int
 
 class ProfileAfkHistory(BaseModel):
     id: int

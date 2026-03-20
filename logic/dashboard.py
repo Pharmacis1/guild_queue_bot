@@ -502,7 +502,8 @@ async def get_history_data(
                 Event.event_type,
                 Event.role_id,
                 Item.name.label("item_name"),
-                Event.timestamp
+                Event.timestamp,
+                Event.id
             )
             .join(Player, Event.role_id == Player.role_id, isouter=True)
             .join(Item, and_(Event.event_type == 0, Event.value == Item.id), isouter=True)
@@ -552,7 +553,7 @@ async def get_history_data(
     id_pattern = re.compile(r"ID (\d+)")
 
     result = []
-    for date_evt, name, cid, desc, etype, role_id, item_name, ts in raw:
+    for date_evt, name, cid, desc, etype, role_id, item_name, ts, event_id in raw:
         # [FIX] Dynamic ID resolution in description
         if desc and "ID " in desc:
             matches = id_pattern.findall(desc)
@@ -611,7 +612,8 @@ async def get_history_data(
             "join_days_ago": jd_diff,
             "is_afk": is_afk,
             "afk_dates": afk_text,
-            "afk_reason": afk_reason
+            "afk_reason": afk_reason,
+            "id": event_id
         })
         
     return result

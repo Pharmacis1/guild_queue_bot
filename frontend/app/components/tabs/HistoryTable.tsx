@@ -539,9 +539,9 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                                                 e.stopPropagation();
                                                 if (!confirm("Удалить это событие?")) return;
                                                 try {
-                                                    await deleteEvent(row.role_id, row.timestamp);
+                                                    await deleteEvent(row.id);
                                                     // Remove from local state
-                                                    setAllRows(prev => prev.filter(r => r.timestamp !== row.timestamp || r.role_id !== row.role_id));
+                                                    setAllRows(prev => prev.filter(r => r.id !== row.id));
                                                 } catch (err) {
                                                     alert("Ошибка удаления");
                                                 }

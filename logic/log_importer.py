@@ -120,6 +120,18 @@ async def process_log_upload(file_path: str) -> Tuple[Dict[str, Any], Set[int], 
                     await session.execute(update(Player).filter_by(role_id=rid).values(in_clan=1))
 
                 # Insert Event
+                # [DEDUPLICATION] Check if this event already exists to avoid duplicates
+                stmt_check = select(Event).filter_by(
+                    role_id=rid,
+                    timestamp=row["timestamp"],
+                    event_type=etype,
+                    value=val
+                )
+                res_check = await session.execute(stmt_check)
+                if res_check.scalar_one_or_none():
+                    logging.info(f"Skipping duplicate event for role_id {rid} at {row['date']}")
+                    continue
+
                 new_event = Event(
                     role_id=rid,
                     timestamp=row["timestamp"],

@@ -155,6 +155,7 @@ export interface HistoryRow {
     is_afk: boolean;
     afk_dates?: string;
     afk_reason?: string;
+    id: number;
 }
 
 export const fetchHistoryTable = async (params?: Record<string, any>): Promise<HistoryRow[]> => {
@@ -213,8 +214,8 @@ export const addEventBulk = async (data: { role_ids: number[], date: string, val
     return response.data;
 };
 
-export const deleteEvent = async (roleId: number, timestamp: number): Promise<any> => {
-    const response = await api.post('/delete_event', { role_id: roleId, timestamp });
+export const deleteEvent = async (eventId: number): Promise<any> => {
+    const response = await api.post('/delete_event', { event_id: eventId });
     return response.data;
 };
 

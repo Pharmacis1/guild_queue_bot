@@ -65,7 +65,7 @@ def test_db_session(test_db_path, monkeypatch):
     for module_name in [
         "database", "web_database", "logic.dashboard", "logic.party_manager", 
         "logic.player_manager", "logic.queue_ops", "logic.queue_manager", 
-        "logic.reward_ops", "logic.ai_helper", "handlers.user", "handlers.ai_user",
+        "logic.reward_ops", "logic.ai_helper", "logic.log_importer", "handlers.user", "handlers.ai_user",
         "routers.api", "routers.api_dashboard", "routers.admin_browser", "routers.auth", "routers.observer", "routers.views"
     ]:
         try:
@@ -107,7 +107,7 @@ def patch_async_session(monkeypatch, tmp_path_factory):
     modules_to_patch = [
         "database", "web_database", "logic.dashboard", "logic.player_manager", 
         "logic.party_manager", "logic.queue_ops", "logic.queue_manager", 
-        "logic.reward_ops", "logic.ai_helper", "handlers.user", "handlers.ai_user",
+        "logic.reward_ops", "logic.ai_helper", "logic.log_importer", "handlers.user", "handlers.ai_user",
         "handlers.admin", "handlers.ai_admin",
         "routers.api", "routers.api_dashboard", "routers.admin_browser", "routers.auth", "routers.observer", "routers.views"
     ]
