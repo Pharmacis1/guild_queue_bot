@@ -510,6 +510,16 @@ async def m_rename_save(message: types.Message, state: FSMContext, session: Asyn
     old_nick = char.nickname
     char.nickname = new_nick
 
+    # Sync with Player table for website
+    from database import Player
+    from sqlalchemy import func
+    stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(old_nick))
+    result_p = await session.execute(stmt_p)
+    player_obj = result_p.scalar_one_or_none()
+    if player_obj:
+        player_obj.nickname = new_nick
+        player_obj.user_id = uid
+
     # Update Queues
     count = 0
     from sqlalchemy import update
@@ -546,6 +556,18 @@ async def m_delete_char_admin(callback: types.CallbackQuery, session: AsyncSessi
         user_id = char.user_id
 
         await session.delete(char)
+
+        # Sync with Player table for website (clear user_id and reset is_alt to false since it's no longer linked)
+        from database import Player
+        from sqlalchemy import func
+        stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
+        result_p = await session.execute(stmt_p)
+        player_obj = result_p.scalar_one_or_none()
+        if player_obj:
+            player_obj.user_id = None
+            player_obj.is_alt = False # Default back to False if unlinked? Or keep?
+            # User probably wants it unlinked on site too.
+
         # Orphan queue entries instead of deleting
         from sqlalchemy import update
         await session.execute(
@@ -2132,6 +2154,20 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
         else:
             session.add(Character(user_id=target_user.id, nickname=nick, is_main=False))
             msg = f"✅ Твин добавлен: <b>{nick}</b> (Одобрено Мастером)"
+
+    # Sync with Player table for website
+    from database import Player
+    from sqlalchemy import func
+    stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
+    result_p = await session.execute(stmt_p)
+    player_obj = result_p.scalar_one_or_none()
+    if player_obj:
+        # is_main == True -> is_alt = False
+        # reg_type == "main_input" -> is_alt = False
+        # reg_type == "alt_input" -> is_alt = True
+        player_obj.is_alt = (reg_type == "alt_input")
+        player_obj.user_id = target_user.id
+        await session.commit()
 
     # Clear pending state
     target_user.pending_request_nick = None

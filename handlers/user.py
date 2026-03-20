@@ -79,6 +79,17 @@ async def cmd_start(message: types.Message, session: AsyncSession = None):
             await session.commit()
             main_char = any_char  # Recovered
 
+            # Sync with Player table for website
+            from database import Player
+            from sqlalchemy import func
+            stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(any_char.nickname))
+            result_p = await session.execute(stmt_p)
+            player_obj = result_p.scalar_one_or_none()
+            if player_obj:
+                player_obj.is_alt = False
+                player_obj.user_id = user.id
+                await session.commit()
+
     if not main_char:
         # Check for pending request
         if user.pending_request_nick:
@@ -286,6 +297,17 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
         )
         await session.commit()
 
+    # Sync with Player table for website
+    from database import Player
+    from sqlalchemy import func
+    stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
+    result_p = await session.execute(stmt_p)
+    player_obj = result_p.scalar_one_or_none()
+    if player_obj:
+        player_obj.is_alt = False
+        player_obj.user_id = user.id
+        await session.commit()
+
     text, restricted = await get_menu_text(session, user)
     await message.answer(
         f"✅ Основа сохранена: <b>{nick}</b>\n\nДобро пожаловать в клан! 🕷",
@@ -384,8 +406,18 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
     await session.execute(
         update(QueueEntry).filter_by(character_name=nick, user_id=None).values(user_id=user.id)
     )
-
     await session.commit()
+
+    # Sync with Player table for website
+    from database import Player
+    from sqlalchemy import func
+    stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
+    result_p = await session.execute(stmt_p)
+    player_obj = result_p.scalar_one_or_none()
+    if player_obj:
+        player_obj.is_alt = True
+        player_obj.user_id = user.id
+        await session.commit()
     text, restricted = await get_menu_text(session, user)
     await message.answer(f"✅ Твин добавлен: <b>{nick}</b>", parse_mode="HTML", reply_markup=get_main_menu(user, restricted))
     await state.clear()
