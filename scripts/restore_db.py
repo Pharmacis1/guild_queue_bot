@@ -102,6 +102,8 @@ def restore(target_backup=None, skip_confirm=False):
         "-d", DB_NAME,
         "-c", # clean (drop) database objects before recreating
         "--if-exists",
+        "-O", # no-owner: skip restoration of object ownership
+        "-x", # no-privileges: skip restoration of access privileges (grant/revoke)
         target_backup
     ]
 

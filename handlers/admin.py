@@ -555,7 +555,7 @@ async def m_delete_char_admin(callback: types.CallbackQuery, session: AsyncSessi
         await callback.answer(f"✅ Ник {nick} отвязан.")
 
         # Check for kick
-        await session.expire_all()
+        session.expire_all()
     else:
         await callback.answer("Уже удален.")
 
@@ -600,7 +600,7 @@ async def m_dist_start(callback: types.CallbackQuery, session: AsyncSession = No
         from database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             return await m_dist_start(callback, session)
-    await session.expire_all()
+    session.expire_all()
     stmt_queues = select(QueueType).filter_by(is_active=True)
     result_queues = await session.execute(stmt_queues)
     queues = result_queues.scalars().all()
@@ -643,7 +643,7 @@ async def render_dist_list(event, qid, session: AsyncSession = None):
         from database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             return await render_dist_list(event, qid, session)
-    await session.expire_all()
+    session.expire_all()
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
     q = await session.get(QueueType, qid)
@@ -710,7 +710,12 @@ async def m_issue_reward(callback: types.CallbackQuery, session: AsyncSession = 
         eid = int(callback.data.split("_")[1])
     except Exception:
         return
-    entry = await session.get(QueueEntry, eid)
+    
+    # Use select with selectinload to avoid MissingGreenlet error on entry.queue.name
+    stmt = select(QueueEntry).filter_by(id=eid).options(selectinload(QueueEntry.queue))
+    result = await session.execute(stmt)
+    entry = result.scalar_one_or_none()
+
     if not entry:
         return await callback.answer("Уже выдано/удалено.")
 
@@ -752,7 +757,12 @@ async def m_warn_user(callback: types.CallbackQuery, session: AsyncSession = Non
         eid = int(callback.data.split("_")[1])
     except Exception:
         return
-    entry = await session.get(QueueEntry, eid)
+    
+    # Use select with selectinload to avoid potential MissingGreenlet errors
+    stmt = select(QueueEntry).filter_by(id=eid).options(selectinload(QueueEntry.queue))
+    result = await session.execute(stmt)
+    entry = result.scalar_one_or_none()
+
     if not entry:
         return await callback.answer("Запись не найдена.", show_alert=True)
 
