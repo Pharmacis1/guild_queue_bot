@@ -28,8 +28,6 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: hyperf0rm/guild_queue_bot:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
       - name: Build and push Frontend
         uses: docker/build-push-action@v6
         with:
@@ -37,8 +35,6 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: hyperf0rm/guild_queue_bot:frontend
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   deploy:
     runs-on: ubuntu-latest
