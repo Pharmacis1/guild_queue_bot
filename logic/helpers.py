@@ -7,18 +7,30 @@ def is_newcomer(role_id: int, join_dates_map: dict, ref_date_str: str = None) ->
 
     Args:
         role_id: The player's role ID.
-        join_dates_map: Dictionary mapping role_id to join_date string (YYYY-MM-DD ...).
+        join_dates_map: Dictionary mapping role_id to join_date (str or datetime).
         ref_date_str: Ignored, kept for backward compatibility.
     """
     if not role_id or role_id not in join_dates_map:
         return False
     try:
         val = join_dates_map[role_id]
-        if " " in val:
-            val = val.split()[0]
-        join_dt = datetime.strptime(val, "%Y-%m-%d")
+        
+        join_dt = None
+        if isinstance(val, datetime):
+            join_dt = val
+        elif isinstance(val, str):
+            if " " in val:
+                val = val.split()[0]
+            join_dt = datetime.strptime(val, "%Y-%m-%d")
+        
+        if not join_dt:
+            return False
 
+        # Ensure comparison is with naive datetimes if join_dt is naive
         now = datetime.now()
+        if join_dt.tzinfo is not None:
+            now = datetime.now(join_dt.tzinfo)
+        
         # "Real time" check: < 2 weeks (14 days)
         return (now - join_dt).days < 14
     except Exception:

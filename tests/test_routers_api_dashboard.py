@@ -129,7 +129,8 @@ async def test_get_history_data(mock_current_user):
     mock_row = {
         "date": "2024", "name": "Test", "class_id": 1, "class_name": "W", "desc": "kill",
         "type": 1, "role_id": 1, "item_name": None, "is_mine": False, "is_afk": False,
-        "timestamp": 123456.0, "afk_dates": None
+        "timestamp": 123456.0, "afk_dates": None, "id": 123,
+        "join_date": "2024-01-01", "join_days_ago": 10
     }
     
     with patch("routers.api_dashboard.get_history_data", return_value=[mock_row]) as mock_logic:

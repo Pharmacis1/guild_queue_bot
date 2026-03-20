@@ -85,11 +85,11 @@ class HistoryRow(BaseModel):
     role_id: int
     item_name: Optional[str]
     is_mine: bool
-    item_name: Optional[str]
-    is_mine: bool
     is_afk: bool
     afk_dates: Optional[str]
     afk_reason: Optional[str] = None
+    join_date: Optional[str] = None
+    join_days_ago: Optional[int] = 0
     timestamp: float
     id: int
 
