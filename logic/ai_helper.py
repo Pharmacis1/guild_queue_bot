@@ -237,7 +237,10 @@ Question: {question}
         if not query_embedding:
             return []
 
-        result = await session.execute(select(FaqTopic).filter(FaqTopic.embedding.isnot(None)))
+        from sqlalchemy.orm import selectinload
+        result = await session.execute(
+            select(FaqTopic).options(selectinload(FaqTopic.messages)).filter(FaqTopic.embedding.isnot(None))
+        )
         topics = result.scalars().all()
         scored_topics = []
 

@@ -175,7 +175,28 @@ async def get_current_user(request: Request):
         )
         return result.scalar_one_or_none()
 
-# --- Endpoints ---
+class FaqMessageBase(BaseModel):
+    text: Optional[str] = None
+    photo_id: Optional[str] = None
+    order_index: int = 0
+
+class FaqMessageResponse(FaqMessageBase):
+    id: int
+    topic_id: int
+
+class FaqTopicBase(BaseModel):
+    topic: str
+
+class FaqTopicCreate(FaqTopicBase):
+    initial_messages: List[FaqMessageBase] = []
+
+class FaqTopicResponse(FaqTopicBase):
+    id: int
+    content: Optional[str] = None
+    updated_at: datetime
+    message_count: int
+
+# --- API ENDPOINTS ---
 
 @router.get("/init", response_model=InitResponse)
 async def get_init_data(request: Request):
@@ -401,7 +422,7 @@ async def create_backup_endpoint(request: Request):
     if not user or not user.is_master:
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    from helpers import perform_backup
+    from scripts.backup_db import perform_backup
     success = perform_backup("manual_web")
     if not success:
         raise HTTPException(status_code=500, detail="Backup failed")
@@ -458,3 +479,264 @@ async def restore_backup_endpoint(filename: str, request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
 
+# --- FAQ / AI MANAGEMENT ---
+
+@router.get("/admin/faq", response_model=List[FaqTopicResponse])
+async def list_faq_topics(request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic, FaqMessage
+    from sqlalchemy import func
+    
+    # Get topics with message count
+    stmt = select(
+        FaqTopic, 
+        func.count(FaqMessage.id).label("msg_count")
+    ).outerjoin(FaqMessage).group_by(FaqTopic.id).order_by(FaqTopic.updated_at.desc())
+    
+    result = await db.execute(stmt)
+    rows = result.all()
+    
+    res = []
+    for topic, count in rows:
+        res.append(FaqTopicResponse(
+            id=topic.id,
+            topic=topic.topic,
+            content=topic.content,
+            updated_at=topic.updated_at,
+            message_count=count
+        ))
+    return res
+
+@router.post("/admin/faq", response_model=FaqTopicResponse)
+async def create_faq_topic(topic_data: FaqTopicCreate, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic, FaqMessage
+    
+    new_topic = FaqTopic(
+        topic=topic_data.topic,
+        created_by=user.telegram_id
+    )
+    db.add(new_topic)
+    await db.flush()
+    
+    for i, msg in enumerate(topic_data.initial_messages):
+        new_msg = FaqMessage(
+            topic_id=new_topic.id,
+            text=msg.text,
+            photo_id=msg.photo_id,
+            order_index=i
+        )
+        db.add(new_msg)
+    
+    await db.commit()
+    await db.refresh(new_topic)
+    
+    # Trigger embedding update
+    await update_topic_embedding(new_topic.id, db)
+    
+    return FaqTopicResponse(
+        id=new_topic.id,
+        topic=new_topic.topic,
+        content=new_topic.content,
+        updated_at=new_topic.updated_at,
+        message_count=len(topic_data.initial_messages)
+    )
+
+@router.get("/admin/faq/{topic_id}")
+async def get_faq_topic(topic_id: int, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic, FaqMessage
+    topic = await db.get(FaqTopic, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    stmt = select(FaqMessage).filter_by(topic_id=topic_id).order_by(FaqMessage.order_index)
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+    
+    return {
+        "topic": FaqTopicResponse(
+            id=topic.id,
+            topic=topic.topic,
+            content=topic.content,
+            updated_at=topic.updated_at,
+            message_count=len(messages)
+        ),
+        "messages": [FaqMessageResponse(
+            id=m.id,
+            topic_id=m.topic_id,
+            text=m.text,
+            photo_id=m.photo_id,
+            order_index=m.order_index
+        ) for m in messages]
+    }
+
+@router.put("/admin/faq/{topic_id}")
+async def update_faq_topic(topic_id: int, topic_data: FaqTopicBase, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic, get_msk_now
+    topic = await db.get(FaqTopic, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    topic.topic = topic_data.topic
+    topic.updated_at = get_msk_now()
+    await db.commit()
+    
+    # Update embedding
+    await update_topic_embedding(topic_id, db)
+    
+    return {"status": "ok"}
+
+@router.delete("/admin/faq/{topic_id}")
+async def delete_faq_topic(topic_id: int, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic
+    topic = await db.get(FaqTopic, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    await db.delete(topic)
+    await db.commit()
+    return {"status": "ok"}
+
+@router.post("/admin/faq/{topic_id}/messages")
+async def add_faq_message(topic_id: int, msg_data: FaqMessageBase, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqTopic, FaqMessage, get_msk_now
+    topic = await db.get(FaqTopic, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    # Get max order_index
+    stmt = select(func.max(FaqMessage.order_index)).filter_by(topic_id=topic_id)
+    result = await db.execute(stmt)
+    max_idx = result.scalar() or -1
+    
+    new_msg = FaqMessage(
+        topic_id=topic_id,
+        text=msg_data.text,
+        photo_id=msg_data.photo_id,
+        order_index=max_idx + 1
+    )
+    db.add(new_msg)
+    topic.updated_at = get_msk_now()
+    await db.commit()
+    
+    # Update embedding
+    await update_topic_embedding(topic_id, db)
+    
+    return {"status": "ok"}
+
+@router.delete("/admin/faq/messages/{message_id}")
+async def delete_faq_message(message_id: int, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import FaqMessage, FaqTopic, get_msk_now
+    msg = await db.get(FaqMessage, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    tid = msg.topic_id
+    await db.delete(msg)
+    
+    topic = await db.get(FaqTopic, tid)
+    if topic:
+        topic.updated_at = get_msk_now()
+        
+    await db.commit()
+    
+    # Update embedding
+    await update_topic_embedding(tid, db)
+    
+    return {"status": "ok"}
+
+async def update_topic_embedding(topic_id: int, db: AsyncSession):
+    """Internal helper to recompute and save embeddings for a topic."""
+    from database import FaqTopic, FaqMessage
+    topic = await db.get(FaqTopic, topic_id)
+    if not topic:
+        return
+    
+    stmt = select(FaqMessage).filter_by(topic_id=topic_id).order_by(FaqMessage.order_index)
+    result = await db.execute(stmt)
+    messages = result.scalars().all()
+    
+    # Prepare text for embedding
+    full_text = f"Topic: {topic.topic}\n"
+    for m in messages:
+        if m.text:
+            full_text += m.text + "\n"
+        if m.photo_id:
+            full_text += "[Photo]\n"
+    
+    from logic.ai_helper import get_ai_helper
+    ai = get_ai_helper()
+    if ai:
+        embedding = await ai.embed_text(full_text)
+        if embedding:
+            import json
+            topic.embedding = json.dumps(embedding)
+            await db.commit()
+@router.post("/admin/faq/ask")
+async def ask_faq_ai(data: dict, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    question = data.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Empty question")
+    
+    from logic.ai_helper import get_ai_helper
+    from database import FaqTopic, FaqMessage
+    from sqlalchemy.orm import selectinload
+    
+    ai = get_ai_helper()
+    if not ai:
+        raise HTTPException(status_code=503, detail="AI service unavailable")
+    
+    # RAG Search
+    relevant_topics = await ai.find_relevant_topics(question, session=db)
+    
+    if not relevant_topics:
+        # Fallback if few topics
+        stmt_count = select(func.count(FaqTopic.id))
+        result_count = await db.execute(stmt_count)
+        if (result_count.scalar() or 0) < 20:
+             stmt_topics = select(FaqTopic).options(selectinload(FaqTopic.messages))
+             result_topics = await db.execute(stmt_topics)
+             relevant_topics = result_topics.scalars().all()
+    
+    # Build context
+    context_text = ""
+    for t in relevant_topics:
+        context_text += f"\n--- Topic: {t.topic} ---\n"
+        # Accessing .messages which should be loaded by find_relevant_topics or fallback
+        # If not, we might need selectinload in find_relevant_topics
+        for m in t.messages:
+            if m.text:
+                context_text += m.text + "\n"
+    
+    answer = await ai.get_answer(question, context_text)
+    return {"answer": answer}
