@@ -127,7 +127,7 @@ def cleanup_old_backups(max_files=20, max_days=7):
     try:
         files = []
         for f in os.listdir(BACKUP_DIR):
-            if f.endswith(".sql") and "guild_bot_" in f:
+            if any(f.endswith(ext) for ext in [".sql", ".db", ".bak"]) and "guild_bot_" in f:
                 path = os.path.join(BACKUP_DIR, f)
                 files.append(path)
 
