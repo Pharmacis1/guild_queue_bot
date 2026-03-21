@@ -13,7 +13,20 @@ export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
     const user = data?.user;
     const lastUpdated = data?.last_updated || "Загрузка...";
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
+
+    // Persistence for collapsed state
+    useEffect(() => {
+        const saved = localStorage.getItem('header_collapsed');
+        if (saved === 'true') setIsCollapsed(true);
+    }, []);
+
+    const toggleCollapse = () => {
+        const newState = !isCollapsed;
+        setIsCollapsed(newState);
+        localStorage.setItem('header_collapsed', newState ? 'true' : 'false');
+    };
 
     // Close menu when clicking outside
     // Close menu when clicking outside - DISABLED per user request
@@ -184,7 +197,27 @@ export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
             {/* Thin Top Header */}
             <div className="thin-header">
                 <div className="thin-header-content">
-                    <div className="thin-header-left">
+                    <div className="thin-header-left" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <button 
+                            onClick={toggleCollapse}
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                color: '#ccc',
+                                cursor: 'pointer',
+                                borderRadius: '4px',
+                                padding: '2px 8px',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                transition: 'all 0.2s'
+                            }}
+                            title={isCollapsed ? "Раскрыть заголовок" : "Свернуть заголовок"}
+                        >
+                            {isCollapsed ? '▼' : '▲'} 
+                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>{isCollapsed ? 'LOGO' : 'HIDE'}</span>
+                        </button>
                         <span className="upd-text">Обновлено: {lastUpdated}</span>
                     </div>
                     <div className="thin-header-right" style={{ position: 'relative' }} ref={menuRef}>
@@ -205,16 +238,18 @@ export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
                 </div>
             </div>
 
-            {/* Hero Section */}
-            <section className="hero-section">
-                <div className="hero-content">
-                    <a href="#" className="spider-main-logo">
-                        <img src="/img/spider_arcane_ruby_transparent.png" alt="Arahnius Spider" className="spider-main-logo-img" />
-                    </a>
-                    <h1 className="hero-title">We Weave the Fate</h1>
-                    <div className="hero-subtitle">Arahnius Clan</div>
-                </div>
-            </section>
+            {/* Hero Section - Toggleable */}
+            {!isCollapsed && (
+                <section className="hero-section">
+                    <div className="hero-content">
+                        <a href="#" className="spider-main-logo">
+                            <img src="/img/spider_arcane_ruby_transparent.png" alt="Arahnius Spider" className="spider-main-logo-img" />
+                        </a>
+                        <h1 className="hero-title">We Weave the Fate</h1>
+                        <div className="hero-subtitle">Arahnius Clan</div>
+                    </div>
+                </section>
+            )}
 
             {/* Navigation Tabs (Sticky) */}
             <nav className="top-nav">
