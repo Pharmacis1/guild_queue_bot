@@ -231,9 +231,6 @@ h4,
 
 /* --- Thin Top Header --- */
 .thin-header {
-    position: sticky;
-    top: 0;
-    z-index: 1001;
     background: rgba(5, 5, 5, 0.9);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -291,8 +288,8 @@ h4,
 }
 
 .top-nav {
-    position: sticky;
-    top: 40px;
+    position: relative;
+    top: 0;
     z-index: 1000;
     background: rgba(5, 5, 5, 0.85);
     backdrop-filter: blur(10px);
