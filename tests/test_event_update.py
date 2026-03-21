@@ -23,6 +23,7 @@ async def test_api():
     old_date = "2023-11-14 23:06:40"  # UTC approx? No matter, string is what counts for UI
 
     async with aiosqlite.connect(DB_NAME) as conn:
+        await conn.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, role_id INTEGER, timestamp INTEGER, event_date TEXT, event_type INTEGER, value INTEGER, raw_desc TEXT)")
         await conn.execute("DELETE FROM events WHERE role_id = ?", (role_id,))
         await conn.execute(
             """

@@ -39,7 +39,8 @@ async def test_upload_log():
     file_content = b"test log content"
     files = {"file": ("test.log", io.BytesIO(file_content), "text/plain")}
     
-    with patch("routers.api.log_importer.process_log_upload", new_callable=AsyncMock) as mock_process:
+    with patch("routers.api.log_importer.process_log_upload", new_callable=AsyncMock) as mock_process, \
+         patch("routers.api.run_item_scraper", new_callable=AsyncMock):
         mock_process.return_value = ({"status": "ok", "message": "Imported"}, [123], True)
         
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

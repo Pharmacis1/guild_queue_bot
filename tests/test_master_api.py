@@ -57,7 +57,8 @@ async def test_api_coverage_completion(async_test_session):
             await client.get("/api/dashboard/history?limit=10")
             
             # 9. Upload
-            with patch("logic.log_importer.process_log_upload", new_callable=AsyncMock) as m_up:
+            with patch("logic.log_importer.process_log_upload", new_callable=AsyncMock) as m_up, \
+                 patch("routers.api.run_item_scraper", new_callable=AsyncMock):
                 m_up.return_value = ({"status": "ok"}, {123}, True)
                 await client.post("/api/upload", files={"file": ("test.log", b"data")})
             
