@@ -1,0 +1,143 @@
+.tmaMode {
+  background: #080808 !important;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+.tmaMode * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: opacity 0.1s ease-out !important;
+  box-shadow: none !important;
+}
+
+.container {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.card {
+  background: #121212;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.avatarOuter {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  border: 2px solid #8b0000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nickname {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.roleId {
+  font-size: 0.8rem;
+  color: #aaaaaa;
+}
+
+.sectionTitle {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #aaaaaa;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+
+.infoItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.infoItem:last-child {
+  border-bottom: none;
+}
+
+.infoLabel {
+  color: #aaaaaa;
+  font-size: 0.9rem;
+}
+
+.infoValue {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.statusOn { color: #00ff66; }
+.statusOff { color: #666; }
+
+.historyList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.historyItem {
+  padding: 10px 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.historyItem:last-child {
+  border-bottom: none;
+}
+
+.historyDate {
+  font-size: 0.8rem;
+  color: #aaaaaa;
+}
+
+.historyDesc {
+  font-size: 0.9rem;
+  margin-top: 2px;
+}
+
+.historyValue {
+  float: right;
+  font-weight: 700;
+  color: #ff4d4d;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  color: #aaaaaa;
+}
+
+.error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  color: #ff4d4d;
+  padding: 20px;
+  text-align: center;
+}

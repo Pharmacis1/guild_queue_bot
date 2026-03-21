@@ -1,6 +1,16 @@
+'use client';
+
 import React from 'react';
+import { usePathname } from 'next/navigation';
 
 const MobileStub: React.FC = () => {
+    const pathname = usePathname();
+    
+    // Hide stub for Player Profile (TMA) routes
+    if (pathname?.startsWith('/player/')) {
+        return null;
+    }
+
     return (
         <div className="mobile-stub">
             <div className="mobile-stub-content">
