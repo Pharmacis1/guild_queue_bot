@@ -15,6 +15,19 @@ from logic.dashboard import get_kh_table_data, get_history_data, get_money_table
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
+# Models for Admin Settings
+class AdminSettings(BaseModel):
+    public_log_enabled: bool
+    public_log_channel_id: str
+    public_log_thread_id: str
+    verification_code: str
+
+class BackupFile(BaseModel):
+    name: str
+    size_mb: float
+    mtime: float
+
+
 # --- Models ---
 
 class UserData(BaseModel):
@@ -319,3 +332,129 @@ async def update_profile_endpoint(role_id: int, request: Request, session: Async
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- Admin Settings & Backups ---
+
+@router.get("/admin/settings", response_model=AdminSettings)
+async def get_admin_settings(request: Request, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    from database import get_setting
+    
+    enabled = await get_setting(session, "public_log_enabled", "false")
+    chan_id = await get_setting(session, "public_log_channel_id", "")
+    thread_id = await get_setting(session, "public_log_thread_id", "")
+    code = await get_setting(session, "verification_code", "")
+
+    return AdminSettings(
+        public_log_enabled=(enabled == "true"),
+        public_log_channel_id=chan_id,
+        public_log_thread_id=thread_id,
+        verification_code=code
+    )
+
+@router.post("/admin/settings")
+async def update_admin_settings(request: Request, settings: AdminSettings, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    from database import set_setting
+    
+    await set_setting(session, "public_log_enabled", "true" if settings.public_log_enabled else "false")
+    await set_setting(session, "public_log_channel_id", settings.public_log_channel_id)
+    await set_setting(session, "public_log_thread_id", settings.public_log_thread_id)
+    await set_setting(session, "verification_code", settings.verification_code)
+
+    return {"status": "ok"}
+
+@router.get("/admin/backups", response_model=List[BackupFile])
+async def list_backups(request: Request):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    import glob
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    if not os.path.exists(backup_dir):
+        return []
+
+    files = glob.glob(os.path.join(backup_dir, "guild_bot_*.*"))
+    files = [f for f in files if f.endswith(".db") or f.endswith(".sql") or f.endswith(".bak")]
+    files.sort(key=os.path.getmtime, reverse=True)
+
+    result = []
+    for f in files:
+        result.append(BackupFile(
+            name=os.path.basename(f),
+            size_mb=os.path.getsize(f) / (1024 * 1024),
+            mtime=os.path.getmtime(f)
+        ))
+    return result
+
+@router.post("/admin/backups/create")
+async def create_backup_endpoint(request: Request):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    from helpers import perform_backup
+    success = perform_backup("manual_web")
+    if not success:
+        raise HTTPException(status_code=500, detail="Backup failed")
+    return {"status": "ok"}
+
+@router.delete("/admin/backups/{filename}")
+async def delete_backup_endpoint(filename: str, request: Request):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if os.path.exists(filepath) and os.path.isfile(filepath):
+        os.remove(filepath)
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="File not found")
+
+@router.get("/admin/backups/download/{filename}")
+async def download_backup_endpoint(filename: str, request: Request):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    from fastapi.responses import FileResponse
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if os.path.exists(filepath) and os.path.isfile(filepath):
+        return FileResponse(filepath, filename=filename)
+    raise HTTPException(status_code=404, detail="File not found")
+
+@router.post("/admin/backups/restore/{filename}")
+async def restore_backup_endpoint(filename: str, request: Request):
+    user = await get_current_user(request)
+    if not user or not user.is_master:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
+    filepath = os.path.join(backup_dir, filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        from scripts.restore_db import restore as restore_db_func
+        # This will restart the bot process if it uses os.execv internally, 
+        # but in web context it might just kill the worker. 
+        # Usually web app should be restarted by system supervisor (PM2/Docker).
+        # We'll call the restore script.
+        restore_db_func(filepath, skip_confirm=True)
+        return {"status": "ok", "message": "Restore successful. Bot is restarting..."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+

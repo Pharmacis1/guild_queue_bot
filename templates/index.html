@@ -324,6 +324,63 @@
             color: #6c757d !important;
             /* Bootstrap's default muted color */
         }
+
+        /* ADMIN / SYSTEM TAB STYLES */
+        .admin-card {
+            background: rgba(20, 20, 20, 0.6);
+            border: 1px solid rgba(209, 30, 50, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            height: 100%;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .admin-card-header {
+            background: rgba(40, 0, 5, 0.4);
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(209, 30, 50, 0.3);
+        }
+
+        .admin-card-body {
+            padding: 20px;
+        }
+
+        .text-ruby {
+            color: #d11e32 !important;
+            text-shadow: 0 0 10px rgba(209, 30, 50, 0.3);
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .btn-ruby-glow {
+            background: linear-gradient(45deg, #800000, #d11e32);
+            border: none;
+            color: white;
+            font-weight: 600;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(209, 30, 50, 0.4);
+        }
+
+        .btn-ruby-glow:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 25px rgba(209, 30, 50, 0.6);
+            color: white;
+        }
+
+        .btn-xs {
+            padding: 2px 8px;
+            font-size: 0.7rem;
+        }
+
+        .status-section-divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(209, 30, 50, 0.3), transparent);
+            margin: 15px 0;
+        }
     </style>
 
 </head>
@@ -395,6 +452,10 @@
                     type="button" role="tab" aria-controls="money-pane" aria-selected="false">ДОБЛЕСТЬ</button>
                 <button class="header-tab" id="tab-history" data-bs-toggle="tab" data-bs-target="#history-pane"
                     type="button" role="tab" aria-controls="history-pane" aria-selected="false">ИСТОРИЯ</button>
+                {% if is_admin %}
+                <button class="header-tab" id="tab-system" data-bs-toggle="tab" data-bs-target="#system-pane"
+                    type="button" role="tab" aria-controls="system-pane" aria-selected="false">СИСТЕМА</button>
+                {% endif %}
             </div>
 
             <!-- Right: Search -->
@@ -1340,6 +1401,88 @@
                     </div>
                 </div>
 
+                <!-- System Pane -->
+                {% if is_admin %}
+                <div class="tab-pane fade" id="system-pane">
+                    <div class="row g-4">
+                        <!-- Settings Column -->
+                        <div class="col-md-6">
+                            <div class="admin-card">
+                                <div class="admin-card-header">
+                                    <h5 class="m-0 text-ruby">⚙️ Настройки системы</h5>
+                                </div>
+                                <div class="admin-card-body">
+                                    <form id="systemSettingsForm">
+                                        <div class="mb-4">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <label class="form-label mb-0">Сводка в Telegram</label>
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="publicLogEnabled">
+                                                </div>
+                                            </div>
+                                            <div class="small text-muted mb-3">Автоматическая отправка отчетов в группу/канал.</div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="small text-silver mb-1">ID Канала/Группы</label>
+                                                <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light" id="publicLogChannelId" placeholder="-100...">
+                                            </div>
+                                            <div class="mb-0">
+                                                <label class="small text-silver mb-1">ID Топика (если есть)</label>
+                                                <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light" id="publicLogThreadId" placeholder="12345">
+                                            </div>
+                                        </div>
+
+                                        <div class="status-section-divider"></div>
+
+                                        <div class="mb-4 pt-2">
+                                            <label class="form-label">Код верификации</label>
+                                            <div class="small text-muted mb-2">Код, который бот требует при регистрации новых персонажей.</div>
+                                            <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light" id="verificationCode" placeholder="Оставьте пустым, чтобы отключить">
+                                        </div>
+
+                                        <div class="d-grid">
+                                            <button type="button" class="btn btn-ruby-glow btn-sm" onclick="saveSystemSettings()">
+                                                СОХРАНИТЬ НАСТРОЙКИ
+                                            </button>
+                                        </div>
+                                        <div id="settingsSaveStatus" class="alert py-2 small mt-2" style="display:none;"></div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Backups Column -->
+                        <div class="col-md-6">
+                            <div class="admin-card">
+                                <div class="admin-card-header d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 text-ruby">💾 Бэкапы системы</h5>
+                                    <button class="btn btn-deck btn-xs" onclick="createNewBackup()">+ СОЗДАТЬ</button>
+                                </div>
+                                <div class="admin-card-body p-0">
+                                    <div class="table-responsive" style="max-height: 500px;">
+                                        <table class="table table-dark table-hover mb-0 luxury-table small">
+                                            <thead>
+                                                <tr>
+                                                    <th>Файл</th>
+                                                    <th class="text-center">Размер</th>
+                                                    <th class="text-end">Действия</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="backupsListTable">
+                                                <!-- Filled by JS -->
+                                                <tr>
+                                                    <td colspan="3" class="text-center py-4 text-muted">Загрузка бэкапов...</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
             </div>
         </div>
     </div>
@@ -1528,6 +1671,166 @@
             }
         }
     </script>
+    <script>
+        // --- SYSTEM / ADMIN TAB LOGIC ---
+        
+        // Listen for tab changes
+        document.addEventListener('DOMContentLoaded', () => {
+            const systemTab = document.getElementById('tab-system');
+            if (systemTab) {
+                systemTab.addEventListener('shown.bs.tab', (event) => {
+                    loadSystemData();
+                });
+            }
+        });
+
+        async function loadSystemData() {
+            await Promise.all([
+                loadSettings(),
+                loadBackups()
+            ]);
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/dashboard/admin/settings');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('publicLogEnabled').checked = data.public_log_enabled;
+                    document.getElementById('publicLogChannelId').value = data.public_log_channel_id;
+                    document.getElementById('publicLogThreadId').value = data.public_log_thread_id;
+                    document.getElementById('verificationCode').value = data.verification_code;
+                }
+            } catch (e) {
+                console.error('Failed to load settings:', e);
+            }
+        }
+
+        async function saveSystemSettings() {
+            const statusEl = document.getElementById('settingsSaveStatus');
+            const data = {
+                public_log_enabled: document.getElementById('publicLogEnabled').checked,
+                public_log_channel_id: document.getElementById('publicLogChannelId').value,
+                public_log_thread_id: document.getElementById('publicLogThreadId').value,
+                verification_code: document.getElementById('verificationCode').value
+            };
+
+            statusEl.textContent = "Сохранение...";
+            statusEl.className = "alert alert-info py-2 small mt-2";
+            statusEl.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/dashboard/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    statusEl.textContent = "✅ Настройки сохранены!";
+                    statusEl.className = "alert alert-success py-2 small mt-2";
+                    setTimeout(() => statusEl.style.display = 'none', 3000);
+                } else {
+                    const err = await response.json();
+                    statusEl.textContent = "❌ Ошибка: " + (err.detail || 'Неизвестная ошибка');
+                    statusEl.className = "alert alert-danger py-2 small mt-2";
+                }
+            } catch (e) {
+                statusEl.textContent = "❌ Сетевая ошибка";
+                statusEl.className = "alert alert-danger py-2 small mt-2";
+            }
+        }
+
+        async function loadBackups() {
+            const tableBody = document.getElementById('backupsListTable');
+            try {
+                const response = await fetch('/api/dashboard/admin/backups');
+                if (response.ok) {
+                    const backups = await response.json();
+                    if (backups.length === 0) {
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">Бэкапов не найдено.</td></tr>';
+                        return;
+                    }
+
+                    tableBody.innerHTML = backups.map(b => `
+                        <tr>
+                            <td class="align-middle">
+                                <div class="text-white fw-bold">${b.name}</div>
+                                <div class="x-small text-muted">${new Date(b.mtime * 1000).toLocaleString()}</div>
+                            </td>
+                            <td class="text-center align-middle">${b.size_mb.toFixed(2)} MB</td>
+                            <td class="text-end align-middle">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="/api/dashboard/admin/backups/download/${b.name}" class="btn btn-outline-info" title="Скачать">📥</a>
+                                    <button class="btn btn-outline-warning" onclick="restoreBackup('${b.name}')" title="Восстановить">🔄</button>
+                                    <button class="btn btn-outline-danger" onclick="deleteBackup('${b.name}')" title="Удалить">🗑️</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load backups:', e);
+                tableBody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-danger">Ошибка загрузки.</td></tr>';
+            }
+        }
+
+        async function createNewBackup() {
+            if (!confirm('Создать новый бэкап базы данных прямо сейчас?')) return;
+            
+            try {
+                const response = await fetch('/api/dashboard/admin/backups/create', { method: 'POST' });
+                if (response.ok) {
+                    loadBackups();
+                } else {
+                    alert('Ошибка при создании бэкапа');
+                }
+            } catch (e) {
+                alert('Ошибка сети при создании бэкапа');
+            }
+        }
+
+        async function deleteBackup(filename) {
+            if (!confirm(`Вы уверены, что хотите УДАЛИТЬ бэкап ${filename}?`)) return;
+
+            try {
+                const response = await fetch(`/api/dashboard/admin/backups/${filename}`, { method: 'DELETE' });
+                if (response.ok) {
+                    loadBackups();
+                } else {
+                    alert('Ошибка при удалении');
+                }
+            } catch (e) {
+                alert('Ошибка сети');
+            }
+        }
+
+        async function restoreBackup(filename) {
+            const warning = `⚠️ ВНИМАНИЕ! ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ ⚠️\n\n` +
+                          `Вы выбрали файл: ${filename}\n\n` +
+                          `ПОСЛЕДСТВИЯ:\n` +
+                          `1. Текущая база будет перезаписана.\n` +
+                          `2. Бот будет перезагружен.\n\n` +
+                          `Вы уверены на 100%?`;
+            
+            if (!confirm(warning)) return;
+            if (!confirm('ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ: Все данные после этого бэкапа будут потеряны. Продолжить?')) return;
+
+            try {
+                const response = await fetch(`/api/dashboard/admin/backups/restore/${filename}`, { method: 'POST' });
+                const res = await response.json();
+                if (response.ok) {
+                    alert('✅ База успешно восстановлена! Бот перезагружается. Страница будет обновлена через 5 секунд.');
+                    setTimeout(() => location.reload(), 5000);
+                } else {
+                    alert('❌ Ошибка: ' + res.detail);
+                }
+            } catch (e) {
+                alert('❌ Критическая ошибка при восстановлении');
+            }
+        }
+    </script>
+
 </body>
 
 </html>

@@ -5,6 +5,19 @@ const api = axios.create({
     withCredentials: true, // Important for session cookies (Auth)
 });
 
+export interface AdminSettings {
+    public_log_enabled: boolean;
+    public_log_channel_id: string;
+    public_log_thread_id: string;
+    verification_code: string;
+}
+
+export interface BackupFile {
+    name: string;
+    size_mb: number;
+    mtime: number;
+}
+
 // --- INIT DATA ---
 export interface InitData {
     user: UserData | null;
@@ -348,6 +361,34 @@ export const sendAnnouncement = async (payload: { text: string; schedule_type: s
     const { data } = await api.post('/master/announce', payload);
     if (data.status === 'error') throw new Error(data.message);
     return data.message || 'Объявление отправлено';
+};
+
+// --- ADMIN SETTINGS & BACKUPS ---
+
+export const fetchAdminSettings = async (): Promise<AdminSettings> => {
+    const { data } = await api.get<AdminSettings>('/dashboard/admin/settings');
+    return data;
+};
+
+export const updateAdminSettings = async (settings: AdminSettings): Promise<void> => {
+    await api.post('/dashboard/admin/settings', settings);
+};
+
+export const fetchBackups = async (): Promise<BackupFile[]> => {
+    const { data } = await api.get<BackupFile[]>('/dashboard/admin/backups');
+    return data;
+};
+
+export const createBackup = async (): Promise<void> => {
+    await api.post('/dashboard/admin/backups/create');
+};
+
+export const deleteBackup = async (filename: string): Promise<void> => {
+    await api.delete(`/dashboard/admin/backups/${filename}`);
+};
+
+export const restoreBackup = async (filename: string): Promise<void> => {
+    await api.post(`/dashboard/admin/backups/restore/${filename}`);
 };
 
 export default api;

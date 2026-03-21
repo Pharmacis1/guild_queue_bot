@@ -107,7 +107,9 @@ async def update_player_logic(session: AsyncSession, role_id: int, update_data: 
 
         # 3. Update Players Table
         if nickname is not None:
-            player.nickname = nickname.strip() if nickname else None
+            new_nick = nickname.strip()
+            if new_nick:  # Only update if not empty to prevent accidental wipe
+                player.nickname = new_nick
 
         if class_id is not None:
             if class_id not in CLASSES and class_id != -1:
