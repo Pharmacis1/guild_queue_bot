@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.orm import selectinload
 
 from consts import CLASSES
