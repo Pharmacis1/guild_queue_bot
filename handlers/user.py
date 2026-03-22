@@ -22,7 +22,11 @@ from database import (
     get_msk_now,
     get_setting,
 )
-from helpers import get_menu_text
+from helpers import (
+    get_menu_text,
+    get_user_main_role_id,
+    update_user_menu_button,
+)
 from keyboards import (
     get_afk_end_kb,
     get_afk_menu,
@@ -68,12 +72,19 @@ async def cmd_start(message: types.Message, session: AsyncSession = None):
 
     # Check for main character
     result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-    main_char = result.scalar_one_or_none()
+    main_chars = result.scalars().all()
+    main_char = main_chars[0] if main_chars else None
+    
+    # Data normalization: If multiple mains found, fix them
+    if len(main_chars) > 1:
+        for extra in main_chars[1:]:
+            extra.is_main = False
+        await session.commit()
 
     # Self-healing: If no main char found, but user HAS characters (e.g. main deleted), make one main.
     if not main_char:
         result = await session.execute(select(Character).filter_by(user_id=user.id))
-        any_char = result.scalar_one_or_none()
+        any_char = result.scalars().first()
         if any_char:
             any_char.is_main = True
             await session.commit()
@@ -84,7 +95,7 @@ async def cmd_start(message: types.Message, session: AsyncSession = None):
             from sqlalchemy import func
             stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(any_char.nickname))
             result_p = await session.execute(stmt_p)
-            player_obj = result_p.scalar_one_or_none()
+            player_obj = result_p.scalars().first()
             if player_obj:
                 player_obj.is_alt = False
                 player_obj.user_id = user.id
@@ -118,7 +129,11 @@ async def cmd_start(message: types.Message, session: AsyncSession = None):
     # Let's send a "Welcome" with ReplyMarkup, and then the menu with Inline.
 
     await message.answer("👋", reply_markup=get_persistent_menu())
-    await message.answer(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
+    
+    main_role_id = await get_user_main_role_id(session, user)
+    await update_user_menu_button(user.telegram_id, main_role_id)
+    
+    await message.answer(text, reply_markup=get_main_menu(user, restricted, main_role_id=main_role_id), parse_mode="HTML")
 
 
 @router.message(F.text == "🏠 Главное меню")
@@ -176,10 +191,13 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, session
         return await callback.message.edit_text("⛔ Вы забанены.", parse_mode="HTML")
 
     text, restricted = await get_menu_text(session, user)
+    main_role_id = await get_user_main_role_id(session, user)
+    await update_user_menu_button(user.telegram_id, main_role_id)
+    
     try:
-        await callback.message.edit_text(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=get_main_menu(user, restricted, main_role_id=main_role_id), parse_mode="HTML")
     except Exception:
-        await callback.message.answer(text, reply_markup=get_main_menu(user, restricted), parse_mode="HTML")
+        await callback.message.answer(text, reply_markup=get_main_menu(user, restricted, main_role_id=main_role_id), parse_mode="HTML")
 
 
 # --- УПРАВЛЕНИЕ ПЕРСОНАЖАМИ ---
@@ -256,16 +274,16 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
     user = await ensure_user(session, message.from_user.id, message.from_user.username)
 
     result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
     if existing:
         existing.is_main = False
 
     result = await session.execute(select(Character).filter_by(nickname=nick))
-    taken = result.scalar_one_or_none()
+    taken = result.scalars().first()
     if taken and taken.user_id != user.id:
         # We need to load taken.user
         result_user = await session.execute(select(User).filter_by(id=taken.user_id))
-        old_user = result_user.scalar_one_or_none()
+        old_user = result_user.scalars().first()
         if old_user and old_user.telegram_id is None:
             # MERGE LOGIC
             print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id}")
@@ -277,7 +295,7 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
             await session.delete(old_user)
             await session.commit()
             result = await session.execute(select(Character).filter_by(nickname=nick))
-            taken = result.scalar_one_or_none()
+            taken = result.scalars().first()
         else:
             return await message.answer(
                 f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
@@ -302,17 +320,20 @@ async def finish_main_input(message: types.Message, state: FSMContext, nick_over
     from sqlalchemy import func
     stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
     result_p = await session.execute(stmt_p)
-    player_obj = result_p.scalar_one_or_none()
+    player_obj = result_p.scalars().first()
     if player_obj:
         player_obj.is_alt = False
         player_obj.user_id = user.id
         await session.commit()
 
     text, restricted = await get_menu_text(session, user)
+    main_role_id = await get_user_main_role_id(session, user)
+    await update_user_menu_button(user.telegram_id, main_role_id)
+    
     await message.answer(
         f"✅ Основа сохранена: <b>{nick}</b>\n\nДобро пожаловать в клан! 🕷",
         parse_mode="HTML",
-        reply_markup=get_main_menu(user, restricted),
+        reply_markup=get_main_menu(user, restricted, main_role_id=main_role_id),
     )
     await state.clear()
 
@@ -366,7 +387,7 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
     nick = nick_override if nick_override else message.text.strip()
     user = await ensure_user(session, message.from_user.id, message.from_user.username)
     result = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-    main_char = result.scalar_one_or_none()
+    main_char = result.scalars().first()
 
     if not main_char:
         return await message.answer(
@@ -375,10 +396,10 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
 
     # Check if nick taken by SOMEONE ELSE
     result = await session.execute(select(Character).filter_by(nickname=nick))
-    taken = result.scalar_one_or_none()
+    taken = result.scalars().first()
     if taken and taken.user_id != user.id:
         result_user = await session.execute(select(User).filter_by(id=taken.user_id))
-        old_user = result_user.scalar_one_or_none()
+        old_user = result_user.scalars().first()
         if old_user and old_user.telegram_id is None:
             # MERGE LOGIC
             print(f"Merging virtual user {old_user.username} (ID {old_user.id}) into real user {user.telegram_id} (via alt)")
@@ -389,7 +410,7 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
             await session.delete(old_user)
             await session.commit()
             result = await session.execute(select(Character).filter_by(nickname=nick))
-            taken = result.scalar_one_or_none()
+            taken = result.scalars().first()
         else:
             return await message.answer(
                 f"⚠️ Ник <b>{nick}</b> уже занят другим пользователем.",
@@ -413,7 +434,7 @@ async def finish_alt_input(message: types.Message, state: FSMContext, nick_overr
     from sqlalchemy import func
     stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
     result_p = await session.execute(stmt_p)
-    player_obj = result_p.scalar_one_or_none()
+    player_obj = result_p.scalars().first()
     if player_obj:
         player_obj.is_alt = True
         player_obj.user_id = user.id
@@ -556,7 +577,7 @@ async def del_char_action(callback: types.CallbackQuery, session: AsyncSession =
     entries = result.scalars().all()
     if entries:
         result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-        main_char = result_main.scalar_one_or_none()
+        main_char = result_main.scalars().first()
         text = f"⚠️ Персонаж <b>{char.nickname}</b> записан в очередях ({len(entries)} шт.)!\n\n"
         kb = []
         if main_char:
@@ -622,7 +643,7 @@ async def confirm_del_char_complex(callback: types.CallbackQuery, session: Async
         q_name = e.queue.name
         if action == "swap":
             result_main = await session.execute(select(Character).filter_by(user_id=user_id, is_main=True))
-            main_char = result_main.scalar_one_or_none()
+            main_char = result_main.scalars().first()
             if main_char:
                 e.character_name = main_char.nickname
                 asyncio.create_task(
@@ -758,7 +779,7 @@ async def view_queue(callback: types.CallbackQuery, session: AsyncSession = None
     kb = []
     stmt_user_entry = select(QueueEntry).filter_by(queue_type_id=qid, user_id=user.id)
     result_user_entry = await session.execute(stmt_user_entry)
-    user_entry = result_user_entry.scalar_one_or_none()
+    user_entry = result_user_entry.scalars().first()
 
     if user_entry:
         kb.append([types.InlineKeyboardButton(text="🏃 Выйти из очереди", callback_data=f"leave_q_{qid}")])
@@ -851,7 +872,7 @@ async def join_final(callback: types.CallbackQuery, session: AsyncSession = None
 
     if entry:
         result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-        main_char = result_main.scalar_one_or_none()
+        main_char = result_main.scalars().first()
         main_nick = main_char.nickname if main_char else entry.character_name
 
         log_status = "В очереди (Авто)" if is_auto else "В очереди"
@@ -893,7 +914,7 @@ async def leave_queue_handler(callback: types.CallbackQuery, session: AsyncSessi
         q_name = result_q.scalar_one().name
 
         result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-        main_char = result_main.scalar_one_or_none()
+        main_char = result_main.scalars().first()
         
         main_nick = main_char.nickname if main_char else deleted_entry.character_name
         asyncio.create_task(
@@ -1043,7 +1064,7 @@ async def do_swap_finish(callback: types.CallbackQuery, session: AsyncSession = 
 
         user = await session.get(User, entry.user_id)
         result_main = await session.execute(select(Character).filter_by(user_id=user.id, is_main=True))
-        main_char = result_main.scalar_one_or_none()
+        main_char = result_main.scalars().first()
         main_nick = main_char.nickname if main_char else new_char.nickname
         
         # Load queue name

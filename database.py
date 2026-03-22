@@ -176,6 +176,16 @@ class PartyMember(Base):
     party = relationship("ConstantParty", back_populates="members")
 
 
+class PartyApplication(Base):
+    __tablename__ = "party_applications"
+    id = Column(Integer, primary_key=True)
+    party_id = Column(Integer, ForeignKey("constant_parties.id"))
+    player_role_id = Column(Integer) # role_id of the applicant
+    status = Column(String, default="pending") # pending, accepted, rejected
+    created_at = Column(DateTime, default=get_msk_now)
+    party = relationship("ConstantParty")
+
+
 class FaqTopic(Base):
     __tablename__ = "faq_topics"
     id = Column(Integer, primary_key=True)

@@ -105,10 +105,10 @@ async def login(data: LoginRequest, request: Request, response: Response):
             result = await session.execute(select(func.count(Character.id)).filter_by(user_id=user.id))
             char_count = result.scalar()
 
+            # For TMA, we allow login even with 0 characters so they can link themselves
             if char_count == 0:
-                return JSONResponse(
-                    status_code=403, content={"status": "error", "message": "У вас нет персонажей в гильдии."}
-                )
+                # We can check a flag or just allow it if initData was provided (TMA)
+                logging.info(f"User {tg_id} has 0 chars but allowing login via TMA.")
 
             # Fetch and update avatar
             avatar_url = await get_telegram_avatar_url(tg_id, BOT_TOKEN)

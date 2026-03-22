@@ -1,7 +1,7 @@
 import './globals.css'
+import 'bootstrap/dist/css/bootstrap.min.css';
 import type { Metadata, Viewport } from 'next'
 import SpiderScroll from './components/ui/SpiderScroll'
-import MobileStub from './components/MobileStub'
 
 export const viewport: Viewport = {
     width: 'device-width',
@@ -28,7 +28,6 @@ export default function RootLayout({
                 <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet" />
             </head>
             <body>
-                <MobileStub />
                 {children}
                 <SpiderScroll />
             </body>

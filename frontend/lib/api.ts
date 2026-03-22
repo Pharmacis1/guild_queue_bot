@@ -5,6 +5,14 @@ const api = axios.create({
     withCredentials: true, // Important for session cookies (Auth)
 });
 
+// Add TMA initData to headers if available
+api.interceptors.request.use((config) => {
+    if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData) {
+        config.headers['X-Telegram-Init-Data'] = (window as any).Telegram.WebApp.initData;
+    }
+    return config;
+});
+
 export interface AdminSettings {
     public_log_enabled: boolean;
     public_log_channel_id: string;
@@ -22,7 +30,7 @@ export interface BackupFile {
 export interface InitData {
     user: UserData | null;
     classes: Record<string, [string, string, string]>;
-    queue_types: { id: number; name: string }[];
+    queue_types: { id: number; name: string; description?: string }[];
     last_updated: string;
     bot_username: string;
 }
@@ -34,11 +42,16 @@ export interface UserData {
     avatar_url?: string;
     is_master: boolean;
     is_banned: boolean;
+    main_role_id: number | null;
 }
 
 export const fetchInitData = async (): Promise<InitData> => {
     const { data } = await api.get<InitData>('/dashboard/init');
     return data;
+};
+
+export const loginViaTMA = async (initData: string): Promise<void> => {
+    await api.post('/login', { initData });
 };
 
 // --- KH TABLE DATA ---
@@ -177,6 +190,47 @@ export const fetchHistoryTable = async (params?: Record<string, any>): Promise<H
 };
 
 // --- PROFILE DATA ---
+export interface ProfileLinkedChar {
+    nickname: string;
+    is_main: boolean;
+    class_id: number;
+    role_id: number;
+    kh_stats?: KHStatsSummary;
+}
+
+export interface KHPeriodStats {
+    s1: number;
+    s2: number;
+    s3: number;
+    s4: number;
+    s5: number;
+    s6: number;
+    s7: number;
+    adepts: number;
+    dances: number;
+    total_valor: number;
+}
+
+export interface KHStatsSummary {
+    day: KHPeriodStats;
+    week: KHPeriodStats;
+    month: KHPeriodStats;
+}
+
+export interface SquadKHCharStats {
+    role_id: number;
+    nickname: string;
+    stats: KHPeriodStats;
+}
+
+export interface SquadKHStatsResponse {
+    period: string;
+    offset: number;
+    start_date: string;
+    end_date: string;
+    squad_stats: SquadKHCharStats[];
+}
+
 export interface ProfileResponse {
     role_id: number;
     nickname: string | null;
@@ -190,11 +244,20 @@ export interface ProfileResponse {
     afk_end: string | null;
     afk_reason: string | null;
     afk_history: { id: number; start: string; end: string; reason?: string }[];
-    queues: { id: number; name: string; auto_requeue: boolean; character_name?: string }[];
-    linked_chars: { nickname: string; is_main: boolean; class_id?: number }[];
+    queues: { id: number; queue_id: number; name: string; auto_requeue: boolean; character_name?: string; position?: number }[];
+    linked_chars: ProfileLinkedChar[];
     parties: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] }[];
     party: { id: number; name: string | null; color: string | null; is_leader: boolean; members: { nickname: string; is_leader: boolean; class_id: number; role_id: number }[] } | null;
     events: { id: number; timestamp: number; date: string; type: number; value: number; description: string | null }[];
+    kh_stats?: KHStatsSummary;
+    reward_history?: {
+        id: number;
+        character_name: string;
+        queue_name: string;
+        issued_by: string;
+        record_type: string;
+        timestamp: string;
+    }[];
 }
 
 export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => {
@@ -204,6 +267,18 @@ export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => 
 
 export const updateProfile = async (roleId: number, data: any): Promise<any> => {
     const response = await api.post(`/dashboard/profile/${roleId}`, data);
+    return response.data;
+};
+
+export const fetchSquadKHStats = async (roleId: number, period: string, offset: number): Promise<SquadKHStatsResponse> => {
+    const { data } = await api.get<SquadKHStatsResponse>(`/dashboard/profile/${roleId}/squad_kh_stats`, {
+        params: { period, offset }
+    });
+    return data;
+};
+
+export const updateCharacterNickname = async (roleId: number, charRoleId: number, nickname: string): Promise<void> => {
+    const response = await api.patch(`/dashboard/profile/${roleId}/linked_chars/${charRoleId}/nickname`, { nickname });
     return response.data;
 };
 
@@ -232,8 +307,38 @@ export const deleteEvent = async (eventId: number): Promise<any> => {
     return response.data;
 };
 
-export const addAfkHistory = async (data: { user_id?: number, role_id?: number, start: string, end: string, reason?: string }): Promise<any> => {
+export const addAfkHistory = async (data: { user_id?: number, role_id?: number, start: string, end?: string | null, reason?: string }): Promise<any> => {
     const response = await api.post('/afk/add', data);
+    return response.data;
+};
+
+export const joinQueue = async (data: { user_id: number, queue_id: number, character_name: string, auto_requeue?: boolean }): Promise<any> => {
+    const response = await api.post('/queue/join', data);
+    return response.data;
+};
+
+export const leaveQueue = async (entryId: number): Promise<any> => {
+    const response = await api.post('/queue/leave', { entry_id: entryId });
+    return response.data;
+};
+
+export const updateQueueEntry = async (entryId: number, characterName: string, autoRequeue: boolean): Promise<any> => {
+    const response = await api.post('/queue/update_entry', { entry_id: entryId, character_name: characterName, auto_requeue: autoRequeue });
+    return response.data;
+};
+
+export const fetchQueueEntries = async (queueId: number): Promise<any> => {
+    const response = await api.post('/master/queue_entries', { queue_id: queueId });
+    return response.data;
+};
+
+export const linkCharacter = async (userId: number, nickname: string): Promise<any> => {
+    const response = await api.post('/character/link', { user_id: userId, nickname });
+    return response.data;
+};
+
+export const unlinkCharacter = async (roleId: number, nickname?: string): Promise<any> => {
+    const response = await api.post('/character/unlink', { role_id: roleId, nickname });
     return response.data;
 };
 
@@ -243,14 +348,16 @@ export const deleteAfkHistory = async (afkId: number): Promise<any> => {
     return response.data;
 };
 
-export const transferPartyLeadership = async (partyId: number, newLeaderRoleId: number): Promise<any> => {
-    const response = await api.post('/party/transfer_leadership', { party_id: partyId, new_leader_role_id: newLeaderRoleId });
-    return response.data;
+export const kickPartyMember = async (partyId: number, memberRoleId: number): Promise<any> => {
+    const { data } = await api.post('/dashboard/party/kick', { party_id: partyId, role_id: memberRoleId });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+    return { status: 'ok' };
 };
 
-export const kickPartyMember = async (memberRoleId: number): Promise<any> => {
-    const response = await api.post('/party/kick', { member_role_id: memberRoleId });
-    return response.data;
+export const transferPartyLeadership = async (partyId: number, newLeaderRoleId: number): Promise<any> => {
+    const { data } = await api.post('/dashboard/party/transfer_leadership', { party_id: partyId, new_leader_role_id: newLeaderRoleId });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+    return { status: 'ok' };
 };
 
 // --- OBSERVER ---
@@ -390,5 +497,68 @@ export const deleteBackup = async (filename: string): Promise<void> => {
 export const restoreBackup = async (filename: string): Promise<void> => {
     await api.post(`/dashboard/admin/backups/restore/${filename}`);
 };
+
+// --- CP (Constant Party) Management ---
+
+export interface CPListItem {
+    id: number;
+    name: string | null;
+    leader_nickname: string | null;
+    member_count: number;
+}
+
+export interface CPApplicationItem {
+    application_id: number;
+    applicant_role_id: number;
+    applicant_nickname: string | null;
+    applicant_class_id: number;
+    created_at: string;
+}
+
+export const setMainCharacter = async (roleId: number, newMainRoleId: number): Promise<void> => {
+    const { data } = await api.post(`/dashboard/profile/${roleId}/set_main`, { new_main_role_id: newMainRoleId });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+};
+
+export const fetchAllParties = async (): Promise<CPListItem[]> => {
+    const { data } = await api.get('/dashboard/party/list');
+    return data.parties;
+};
+
+export const applyToParty = async (partyId: number): Promise<void> => {
+    const { data } = await api.post('/dashboard/party/apply', { party_id: partyId });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+};
+
+export const fetchPartyApplications = async (partyId: number): Promise<CPApplicationItem[]> => {
+    const { data } = await api.get(`/dashboard/party/${partyId}/applications`);
+    return data.applications;
+};
+
+export const resolvePartyApplication = async (applicationId: number, action: 'accept' | 'reject'): Promise<void> => {
+    const { data } = await api.post('/dashboard/party/applications/resolve', { application_id: applicationId, action });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+};
+
+export const createNamedParty = async (name?: string): Promise<number> => {
+    const { data } = await api.post('/dashboard/party/create_named', { name });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+    return data.party_id;
+};
+
+export const addCPMember = async (partyId: number, nickname: string): Promise<void> => {
+    const { data } = await api.post('/dashboard/party/add_member', { party_id: partyId, nickname });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+};
+
+export const fetchPartyKHStats = async (roleId: number, period: string, offset: number): Promise<SquadKHStatsResponse> => {
+    const { data } = await api.get<SquadKHStatsResponse>(`/dashboard/party/${roleId}/kh_stats`, {
+        params: { period, offset }
+    });
+    return data;
+};
+
+
+
 
 export default api;

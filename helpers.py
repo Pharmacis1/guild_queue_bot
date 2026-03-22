@@ -1,5 +1,5 @@
 import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -193,3 +193,57 @@ async def get_menu_text(session: AsyncSession, user: User, custom_title=None) ->
         f"{afk_info}"
         f"👇 <b>Выбери действие:</b>"
     ), all_out_of_guild
+
+
+async def get_user_main_role_id(session: AsyncSession, user: User) -> Optional[int]:
+    """Возвращает role_id основного персонажа пользователя."""
+    from database import Player
+    
+    # 1. Check if user has a character set as main in Character table
+    stmt_c = select(Character).where(Character.user_id == user.id, Character.is_main == True)
+    res_c = await session.execute(stmt_c)
+    main_char = res_c.scalar_one_or_none()
+    
+    if main_char:
+        # Get role_id for this nickname
+        stmt_p = select(Player.role_id).where(func.lower(Player.nickname) == func.lower(main_char.nickname))
+        res_p = await session.execute(stmt_p)
+        role_id = res_p.scalar_one_or_none()
+        if role_id: return role_id
+    
+    # 2. Fallback: find any player record linked to this user that is NOT an alt
+    stmt_p2 = select(Player.role_id).where(Player.user_id == user.id, Player.is_alt == False)
+    res_p2 = await session.execute(stmt_p2)
+    role_id = res_p2.scalar_one_or_none()
+    if role_id:
+        return role_id
+        
+    # 3. Last fallback: first available player record
+    stmt_p3 = select(Player.role_id).where(Player.user_id == user.id).limit(1)
+    res_p3 = await session.execute(stmt_p3)
+    return res_p3.scalar_one_or_none()
+
+
+async def update_user_menu_button(user_tg_id: int, role_id: Optional[int]):
+    """Обновляет кнопку меню в Телеграме для конкретного пользователя."""
+    from aiogram.types import MenuButtonWebApp, WebAppInfo
+    from loader import bot
+    from typing import Optional
+    import os
+    
+    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
+    url = site_url
+    if role_id:
+        url = f"{site_url}/player/{role_id}"
+        
+    try:
+        await bot.set_chat_menu_button(
+            chat_id=user_tg_id,
+            menu_button=MenuButtonWebApp(
+                text="📱 Мой Профиль",
+                web_app=WebAppInfo(url=url)
+            )
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to set menu button for {user_tg_id}: {e}")

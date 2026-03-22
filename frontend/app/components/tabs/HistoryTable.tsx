@@ -446,7 +446,9 @@ export default function HistoryTable({ onRowClick, onObserverClick, classes, cur
                             >
                                 {/* Date Column */}
                                 <div style={{ minWidth: '100px', display: 'flex', flexDirection: 'column', marginRight: '32px' }}>
-                                    <span style={{ color: '#ccc', fontWeight: 600, fontSize: '0.9rem', marginBottom: '4px' }}>{date}</span>
+                                    <span style={{ color: '#ccc', fontWeight: 600, fontSize: '0.9rem', marginBottom: '4px' }}>
+                                        {date.split('-').reverse().join('.')}
+                                    </span>
                                     <span style={{ color: '#666', fontSize: '0.75rem', fontFamily: 'monospace' }}>{time}</span>
                                 </div>
 

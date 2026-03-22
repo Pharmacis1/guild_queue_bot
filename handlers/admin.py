@@ -29,7 +29,11 @@ from database import (
     set_setting,
 )
 from handlers.user import parse_date_input
-from helpers import get_menu_text
+from helpers import (
+    get_menu_text,
+    get_user_main_role_id,
+    update_user_menu_button,
+)
 from keyboards import (
     get_afk_end_kb,
     get_afk_start_kb,
@@ -63,7 +67,7 @@ PAGE_SIZE = 10
 # Проверка на мастера
 async def is_master(session: AsyncSession, telegram_id: int):
     result = await session.execute(select(User).filter_by(telegram_id=telegram_id))
-    user = result.scalar_one_or_none()
+    user = result.scalars().first()
     return user and user.is_master
 
 
@@ -515,7 +519,7 @@ async def m_rename_save(message: types.Message, state: FSMContext, session: Asyn
     from sqlalchemy import func
     stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(old_nick))
     result_p = await session.execute(stmt_p)
-    player_obj = result_p.scalar_one_or_none()
+    player_obj = result_p.scalars().first()
     if player_obj:
         player_obj.nickname = new_nick
         player_obj.user_id = uid
@@ -562,7 +566,7 @@ async def m_delete_char_admin(callback: types.CallbackQuery, session: AsyncSessi
         from sqlalchemy import func
         stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
         result_p = await session.execute(stmt_p)
-        player_obj = result_p.scalar_one_or_none()
+        player_obj = result_p.scalars().first()
         if player_obj:
             player_obj.user_id = None
             player_obj.is_alt = False # Default back to False if unlinked? Or keep?
@@ -603,7 +607,7 @@ async def m_add_admin_save(message: types.Message, state: FSMContext, session: A
             return await m_add_admin_save(message, state, session)
     target = message.text.replace("@", "").strip()
     result = await session.execute(select(User).filter(User.username == target))
-    user = result.scalar_one_or_none()
+    user = result.scalars().first()
     if not user:
         return await message.answer(
             f"❌ Пользователь @{target} не найден в базе.", reply_markup=get_back_btn("menu_master")
@@ -736,7 +740,7 @@ async def m_issue_reward(callback: types.CallbackQuery, session: AsyncSession = 
     # Use select with selectinload to avoid MissingGreenlet error on entry.queue.name
     stmt = select(QueueEntry).filter_by(id=eid).options(selectinload(QueueEntry.queue))
     result = await session.execute(stmt)
-    entry = result.scalar_one_or_none()
+    entry = result.scalars().first()
 
     if not entry:
         return await callback.answer("Уже выдано/удалено.")
@@ -745,14 +749,14 @@ async def m_issue_reward(callback: types.CallbackQuery, session: AsyncSession = 
     uid = entry.user_id
     
     result_master = await session.execute(select(User).filter_by(telegram_id=callback.from_user.id))
-    master = result_master.scalar_one_or_none()
+    master = result_master.scalars().first()
 
     # Логика поиска основы
     main_nick = char_nick
     if uid:
         stmt_main = select(Character).filter_by(user_id=uid, is_main=True)
         result_main = await session.execute(stmt_main)
-        main_char = result_main.scalar_one_or_none()
+        main_char = result_main.scalars().first()
         if main_char:
             main_nick = main_char.nickname
 
@@ -783,13 +787,13 @@ async def m_warn_user(callback: types.CallbackQuery, session: AsyncSession = Non
     # Use select with selectinload to avoid potential MissingGreenlet errors
     stmt = select(QueueEntry).filter_by(id=eid).options(selectinload(QueueEntry.queue))
     result = await session.execute(stmt)
-    entry = result.scalar_one_or_none()
+    entry = result.scalars().first()
 
     if not entry:
         return await callback.answer("Запись не найдена.", show_alert=True)
 
     result_master = await session.execute(select(User).filter_by(telegram_id=callback.from_user.id))
-    master = result_master.scalar_one_or_none()
+    master = result_master.scalars().first()
 
     success, msg, hist = await warn_user(session, entry.id, master.username if master else "Admin")
 
@@ -915,7 +919,7 @@ async def m_limits_menu(callback: types.CallbackQuery, session: AsyncSession = N
             return await m_limits_menu(callback, session)
     stmt_global = select(Settings).filter_by(key="default_limit")
     result_global = await session.execute(stmt_global)
-    g_limit_obj = result_global.scalar_one_or_none()
+    g_limit_obj = result_global.scalars().first()
     g_limit = g_limit_obj.value if g_limit_obj else "Unknown"
 
     # Fetch personal limits
@@ -965,7 +969,7 @@ async def m_set_global_save(message: types.Message, state: FSMContext, session: 
             raise ValueError
         stmt = select(Settings).filter_by(key="default_limit")
         result = await session.execute(stmt)
-        setting = result.scalar_one_or_none()
+        setting = result.scalars().first()
         if setting:
             setting.value = str(val)
         await session.commit()
@@ -1011,7 +1015,7 @@ async def m_set_personal_nick(message: types.Message, state: FSMContext, session
             return await m_set_personal_nick(message, state, session)
     stmt = select(Character).filter_by(nickname=message.text.strip())
     result = await session.execute(stmt)
-    char = result.scalar_one_or_none()
+    char = result.scalars().first()
     if not char:
         return await message.answer("❌ Не найден.", reply_markup=get_back_btn("m_limits_menu"))
     await state.update_data(user_id=char.user_id, nick=char.nickname)
@@ -1287,12 +1291,12 @@ async def finalize_add(event, state, qid, action_type, session: AsyncSession = N
     for nick in nicks:
         stmt_char = select(Character).filter_by(nickname=nick)
         result_char = await session.execute(stmt_char)
-        char = result_char.scalar_one_or_none()
+        char = result_char.scalars().first()
         if char:
             uid = char.user_id
             stmt_main = select(Character).filter_by(user_id=char.user_id, is_main=True)
             result_main = await session.execute(stmt_main)
-            main_char = result_main.scalar_one_or_none()
+            main_char = result_main.scalars().first()
             main_nick = main_char.nickname if main_char else nick
         else:
             uid = None
@@ -2113,11 +2117,11 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     if reg_type == "main_input":
         stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
         result_existing = await session.execute(stmt_existing)
-        existing_char = result_existing.scalar_one_or_none()
+        existing_char = result_existing.scalars().first()
 
         stmt_old = select(Character).filter_by(user_id=target_user.id, is_main=True)
         result_old = await session.execute(stmt_old)
-        old_main = result_old.scalar_one_or_none()
+        old_main = result_old.scalars().first()
 
         if not old_main:
             if existing_char:
@@ -2149,7 +2153,7 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     elif reg_type == "alt_input":
         stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
         result_existing = await session.execute(stmt_existing)
-        if result_existing.scalar_one_or_none():
+        if result_existing.scalars().first():
             msg = f"⚠️ Твин {nick} уже был у пользователя."
         else:
             session.add(Character(user_id=target_user.id, nickname=nick, is_main=False))
@@ -2160,7 +2164,7 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     from sqlalchemy import func
     stmt_p = select(Player).where(func.lower(Player.nickname) == func.lower(nick))
     result_p = await session.execute(stmt_p)
-    player_obj = result_p.scalar_one_or_none()
+    player_obj = result_p.scalars().first()
     if player_obj:
         # is_main == True -> is_alt = False
         # reg_type == "main_input" -> is_alt = False
@@ -2177,7 +2181,11 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     try:
         # Generate the main menu text with the approval message as header
         menu_text, restricted = await get_menu_text(session, target_user, custom_title=msg)
-        main_menu_kb = await get_main_menu(session, target_user, restricted)
+        
+        main_role_id = await get_user_main_role_id(session, target_user)
+        await update_user_menu_button(target_user.telegram_id, main_role_id)
+        
+        main_menu_kb = get_main_menu(target_user, restricted, main_role_id=main_role_id)
 
         await bot.send_message(target_user.telegram_id, menu_text, parse_mode="HTML", reply_markup=main_menu_kb)
     except Exception:
@@ -2199,7 +2207,7 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     # Notify Other Masters
     approver_id = event.from_user.id
     result_appr = await session.execute(select(User).filter_by(telegram_id=approver_id))
-    approver_user = result_appr.scalar_one_or_none()
+    approver_user = result_appr.scalars().first()
     approver_name = f"@{approver_user.username}" if (approver_user and approver_user.username) else "Мастер"
 
     result_others = await session.execute(select(User).filter(User.is_master, User.telegram_id != approver_id))
@@ -2275,7 +2283,7 @@ async def m_set_code_save(message: types.Message, state: FSMContext, session: As
 async def m_disable_code(callback: types.CallbackQuery, session: AsyncSession):
     stmt = select(Settings).filter_by(key="verification_code")
     result = await session.execute(stmt)
-    s = result.scalar_one_or_none()
+    s = result.scalars().first()
     if s:
         await session.delete(s)
         await session.commit()
@@ -2310,7 +2318,7 @@ async def on_user_join(event: ChatMemberUpdated, session: AsyncSession):
     # Проверка по базе
     stmt_user = select(User).filter_by(telegram_id=user.id)
     result_user = await session.execute(stmt_user)
-    db_user = result_user.scalar_one_or_none()
+    db_user = result_user.scalars().first()
     has_chars = False
 
     if db_user:

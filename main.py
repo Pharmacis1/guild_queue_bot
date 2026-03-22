@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import uvicorn
 import aiohttp
@@ -22,7 +23,16 @@ from loader import bot, dp, scheduler
 from routers import admin_browser, api, auth, observer, views, api_dashboard
 
 # --- WEB APP SETUP ---
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize Browser
+    # from routers import observer
+    # await observer.init_browser()
+    yield
+    # Shutdown: Close Browser
+    # await observer.close_browser()
+
+app = FastAPI(lifespan=lifespan)
 
 # Session Middleware (Needed for Auth)
 SECRET_KEY = os.getenv("BOT_TOKEN", "super-secret-key-fallback")
@@ -62,13 +72,22 @@ async def main():
     # 1. Web DB init removed (handled by async init_db)
     pass
 
-    # 1.1 Observer Browser Init
-    await observer.init_browser()
+    # 1.1 Observer Browser Init is handled by FastAPI lifespan
 
     # 2. Bot Setup - Menu
-    from aiogram.types import BotCommand
+    from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 
     await bot.set_my_commands([BotCommand(command="/start", description="🏠 Главное меню")])
+    
+    # Set Menu Button (WebApp)
+    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="📱 Мой Профиль", web_app=WebAppInfo(url=site_url))
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to set menu button: {e}")
 
     # 3. Restore Scheduled Tasks
     async with AsyncSessionLocal() as session:
@@ -115,8 +134,6 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
 
     # Configure Web Server
-    import os
-
     port = int(os.getenv("WEB_PORT", 8081))
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)

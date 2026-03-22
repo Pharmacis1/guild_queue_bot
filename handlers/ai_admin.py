@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from database import User, FaqTopic, Settings, get_setting, set_setting
 from states import AIAdminStates
 from keyboards import get_back_btn, get_main_menu, get_master_ai_menu
+from helpers import get_user_main_role_id, update_user_menu_button
 from loader import bot
 
 router = Router()
@@ -153,9 +154,13 @@ async def process_content(message: types.Message, state: FSMContext, session: As
         result_user = await session.execute(stmt_user)
         db_user = result_user.scalar_one_or_none()
         
+        # Refresh menu button too
+        main_role_id = await get_user_main_role_id(session, db_user)
+        await update_user_menu_button(message.from_user.id, main_role_id)
+        
         await wait_msg.edit_text(
             f"✅ Тема '{topic_name}' успешно создана! ({len(messages_data)} сообщений)",
-            reply_markup=get_main_menu(db_user)
+            reply_markup=get_main_menu(db_user, main_role_id=main_role_id)
         )
         await state.clear()
         return
@@ -269,7 +274,11 @@ async def process_edit_content(message: types.Message, state: FSMContext, sessio
         result_user = await session.execute(stmt_user)
         db_user = result_user.scalar_one_or_none()
         
-        await message.answer("✅ Тема обновлена.", reply_markup=get_main_menu(db_user))
+        # Refresh menu button too
+        main_role_id = await get_user_main_role_id(session, db_user)
+        await update_user_menu_button(message.from_user.id, main_role_id)
+        
+        await message.answer("✅ Тема обновлена.", reply_markup=get_main_menu(db_user, main_role_id=main_role_id))
     else:
         await message.answer("❌ Ошибка: тема не найдена.")
     await state.clear()

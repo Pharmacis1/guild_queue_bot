@@ -35,6 +35,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
     const [afkReason, setAfkReason] = useState('');
     const [showAFK, setShowAFK] = useState(false);
     const [isValourOpen, setIsValourOpen] = useState(false);
+    const isMyProfile = initData?.user?.main_role_id === roleId || initData?.user?.id === data?.user_id;
 
     // Queue Form States
     const [selectedQueueId, setSelectedQueueId] = useState<number>(0);
@@ -359,10 +360,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                             </div>
                             <div className="profile-hero-info">
                                 <h4 className="profile-hero-name">
-                                    {nickname || 'Unknown'}
+                                    {nickname || 'Неизвестно'}
                                 </h4>
                                 <div className="profile-hero-meta">
-                                    <span>{data?.class_id !== undefined && data?.class_id !== null ? (initData?.classes[data.class_id]?.[0] || 'Unknown Class') : '...'}</span>
+                                    <span>{data?.class_id !== undefined && data?.class_id !== null ? (initData?.classes[data.class_id]?.[0] || 'Неизвестный класс') : '...'}</span>
                                     <span>• ID: {roleId}</span>
                                 </div>
                             </div>
@@ -396,7 +397,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
 
                     {/* Body */}
                     <div className="modal-body">
-                        {loading && <div className="text-center p-4">Loading...</div>}
+                        {loading && <div className="text-center p-4">Загрузка...</div>}
 
                         {!loading && (
                             <div className="profile-tab-content">
@@ -671,38 +672,40 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                 {
                                     activeTab === 'links' && (
                                         <div className="links-tab-container">
-                                            <div className="links-card">
-                                                <div className="links-section-header">
-                                                    <span>👥</span> Другие персонажи
-                                                </div>
-                                                <div className="char-grid">
-                                                    {data?.linked_chars.filter(c => c.nickname.toLowerCase() !== (nickname || '').toLowerCase()).map((c, i) => (
-                                                        <div key={i} className="char-status-card">
-                                                            <button
-                                                                className="btn-char-unlink"
-                                                                title="Отвязать"
-                                                                onClick={() => handleUnlink(c.nickname)}
-                                                            >&times;</button>
-                                                            <ClassIcon classId={c.class_id || 0} size={28} />
-                                                            <div className="char-status-name">{c.nickname}</div>
-                                                            <div className={`char-status-type ${c.is_main ? 'is-main' : ''}`}>
-                                                                <span>👤</span> {c.is_main ? 'Основа' : 'Твин'}
+                                            {!isMyProfile && (
+                                                <div className="links-card">
+                                                    <div className="links-section-header">
+                                                        <span>👥</span> Другие персонажи
+                                                    </div>
+                                                    <div className="char-grid">
+                                                        {data?.linked_chars.filter(c => c.nickname.toLowerCase() !== (nickname || '').toLowerCase()).map((c, i) => (
+                                                            <div key={i} className="char-status-card">
+                                                                <button
+                                                                    className="btn-char-unlink"
+                                                                    title="Отвязать"
+                                                                    onClick={() => handleUnlink(c.nickname)}
+                                                                >&times;</button>
+                                                                <ClassIcon classId={c.class_id || 0} size={28} />
+                                                                <div className="char-status-name">{c.nickname}</div>
+                                                                <div className={`char-status-type ${c.is_main ? 'is-main' : ''}`}>
+                                                                    <span>👤</span> {c.is_main ? 'Основа' : 'Твин'}
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    ))}
+                                                        ))}
+                                                    </div>
+                                                    <div className="links-action-row">
+                                                        <input
+                                                            type="text"
+                                                            className="links-field"
+                                                            placeholder="Никнейм нового персонажа"
+                                                            value={newCharNickname}
+                                                            onChange={(e) => setNewCharNickname(e.target.value)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleCharLink()}
+                                                        />
+                                                        <button type="button" className="btn-links-add" onClick={handleCharLink}>ПРИВЯЗАТЬ</button>
+                                                    </div>
                                                 </div>
-                                                <div className="links-action-row">
-                                                    <input
-                                                        type="text"
-                                                        className="links-field"
-                                                        placeholder="Никнейм нового персонажа"
-                                                        value={newCharNickname}
-                                                        onChange={(e) => setNewCharNickname(e.target.value)}
-                                                        onKeyDown={(e) => e.key === 'Enter' && handleCharLink()}
-                                                    />
-                                                    <button type="button" className="btn-links-add" onClick={handleCharLink}>ПРИВЯЗАТЬ</button>
-                                                </div>
-                                            </div>
+                                            )}
 
                                             <div className="links-card">
                                                 <div className="links-section-header">
@@ -880,7 +883,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                                                         onClick={() => {
                                                                                             if (confirm(`Исключить игроку ${m.nickname} из КП?`)) {
                                                                                                 import('@/lib/api').then(({ kickPartyMember }) => {
-                                                                                                    kickPartyMember(m.role_id).then(res => {
+                                                                                                    kickPartyMember(party.id, m.role_id).then(res => {
                                                                                                         if (res.status === 'ok') {
                                                                                                             setHasChanged(true);
                                                                                                             if (roleId) fetchProfile(roleId).then(setData);
@@ -982,13 +985,16 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                     <div className="queues-card-body">
                                                         <div className="queues-grid">
                                                             {data?.queues.map((q, i) => (
-                                                                <div key={i} className="queue-chip">
+                                                                 <div key={i} className="queue-chip" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid #333' }}>
                                                                     <span className="queue-chip-icon">
                                                                         {q.auto_requeue ? '🔄' : '📅'}
                                                                     </span>
-                                                                    <span className="queue-name">{q.name}</span>
+                                                                    <span className="queue-name" style={{ color: '#eee' }}>{q.name}</span>
                                                                     {q.character_name && (
-                                                                        <span className="queue-nick-badge">{q.character_name}</span>
+                                                                        <span className="queue-nick-badge" style={{ background: '#8B0000', color: '#fff' }}>{q.character_name}</span>
+                                                                    )}
+                                                                    {q.position !== undefined && (
+                                                                        <span className="queue-pos-badge" style={{ marginLeft: '5px', fontSize: '0.8rem', color: '#8B0000', fontWeight: 'bold' }}>#{q.position}</span>
                                                                     )}
                                                                     <button
                                                                         className="btn-queue-remove"
@@ -1004,9 +1010,10 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                             )}
                                                         </div>
 
-                                                        <div className="queues-action-row">
+                                                        <div className="queues-action-row" style={{ background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px' }}>
                                                             <select
                                                                 className="queues-select"
+                                                                style={{ background: '#111', color: '#fff', border: '1px solid #333' }}
                                                                 value={selectedQueueId}
                                                                 onChange={(e) => setSelectedQueueId(parseInt(e.target.value))}
                                                             >
@@ -1018,11 +1025,12 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
 
                                                             <select
                                                                 className="queues-select queues-char-select"
+                                                                style={{ background: '#111', color: '#fff', border: '1px solid #333' }}
                                                                 value={queueCharName}
                                                                 onChange={(e) => setQueueCharName(e.target.value)}
                                                             >
                                                                 <option value="">Персонаж...</option>
-                                                                {data?.nickname && <option value={data.nickname}>{data.nickname} (Main)</option>}
+                                                                {data?.nickname && <option value={data.nickname}>{data.nickname}</option>}
                                                                 {data?.linked_chars.map(c => (
                                                                     <option key={c.nickname} value={c.nickname}>{c.nickname}</option>
                                                                 ))}
@@ -1031,6 +1039,7 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                             <button
                                                                 type="button"
                                                                 className={`btn-toggle-icon ${isCalendarMode ? 'active' : ''}`}
+                                                                style={{ border: '1px solid #333', background: isCalendarMode ? '#8B0000' : '#111' }}
                                                                 onClick={() => setIsCalendarMode(!isCalendarMode)}
                                                                 title="Календарь"
                                                             >📅</button>
@@ -1038,15 +1047,31 @@ const PlayerModal: React.FC<PlayerModalProps> = ({ roleId, onClose, onSave }) =>
                                                             <button
                                                                 type="button"
                                                                 className={`btn-toggle-icon ${isAutoRequeue ? 'active' : ''}`}
+                                                                style={{ border: '1px solid #333', background: isAutoRequeue ? '#8B0000' : '#111' }}
                                                                 onClick={() => setIsAutoRequeue(!isAutoRequeue)}
                                                                 title="Авто-ревайв"
                                                             >🔄</button>
 
-                                                            <button
-                                                                type="button"
-                                                                className="btn-queues-add"
-                                                                onClick={handleJoinQueue}
-                                                            >+</button>
+                                                            {(() => {
+                                                                const alreadyIn = data?.queues.find(q => q.queue_id === selectedQueueId);
+                                                                return (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="btn-queues-add"
+                                                                        style={{ 
+                                                                            background: alreadyIn ? '#444' : '#1a1a1a', 
+                                                                            border: '1px solid #333', 
+                                                                            color: '#fff',
+                                                                            width: alreadyIn ? 'auto' : '40px',
+                                                                            padding: alreadyIn ? '0 15px' : '0',
+                                                                            fontSize: alreadyIn ? '0.8rem' : '1.2rem'
+                                                                        }}
+                                                                        onClick={handleJoinQueue}
+                                                                    >
+                                                                        {alreadyIn ? 'ЗАМЕНИТЬ' : '+'}
+                                                                    </button>
+                                                                );
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 </div>

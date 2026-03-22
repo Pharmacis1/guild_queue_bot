@@ -1976,14 +1976,10 @@ button.btn-ruby-glow {
 }
 
 /* --- Mobile Responsiveness (Fixed at End) --- */
-@media (max-width: 768px) {
-
-    /* FORCE SHOW STUB */
+/* @media (max-width: 768px) {
     .mobile-stub {
         display: flex !important;
     }
-
-    /* HIDE APP INTERFACE */
     .app-container,
     .hero-section,
     .thin-header,
@@ -1991,12 +1987,10 @@ button.btn-ruby-glow {
     .footer-spider {
         display: none !important;
     }
-
-    /* PREVENT SCROLLING */
     body {
         overflow: hidden;
     }
-}
+} */
 
 /* --- Top Scrollbar for Tables --- */
 .top-scrollbar-wrapper {

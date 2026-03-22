@@ -1,14 +1,22 @@
+import os
 from aiogram import types
+from aiogram.types import WebAppInfo
 
 # --- INLINE KEYBOARDS ---
 
 
-def get_main_menu(user, is_restricted=False):
+def get_main_menu(user, is_restricted=False, main_role_id=None):
     kb = []
     
-    # 👥 Мои персонажи is always available as per requirement 1
+    # 📱 Открыть Профиль
+    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
+    web_app_url = site_url
+    if main_role_id:
+        web_app_url = f"{site_url}/player/{main_role_id}"
+        
+    kb.append([types.InlineKeyboardButton(text="📱 Мой Профиль", web_app=WebAppInfo(url=web_app_url))])
     kb.append([types.InlineKeyboardButton(text="👥 Мои персонажи", callback_data="menu_chars")])
-    
+
     if not is_restricted:
         kb.append([types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")])
         kb.append([types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")])

@@ -1341,6 +1341,31 @@ async def queue_leave(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@router.post("/queue/update_entry")
+async def queue_update_entry(request: Request):
+    try:
+        data = await request.json()
+        entry_id = data.get("entry_id")
+        character_name = data.get("character_name")
+        auto_requeue = 1 if data.get("auto_requeue") else 0
+        if not entry_id or not character_name:
+            return {"status": "error", "message": "Missing entry_id or character_name"}
+        
+        from database import QueueEntry
+        from sqlalchemy import update
+        async with AsyncSessionLocal() as session:
+            stmt = update(QueueEntry).where(QueueEntry.id == entry_id).values(
+                character_name=character_name,
+                auto_requeue=bool(auto_requeue)
+            )
+            await session.execute(stmt)
+            await session.commit()
+            
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @router.post("/character/link")
 async def char_link(request: Request):
     try:
@@ -1351,10 +1376,25 @@ async def char_link(request: Request):
             return {"status": "error", "message": "Missing fields"}
 
         async with AsyncSessionLocal() as session:
-            # Check if exists (case-insensitive)
+            # 1. Check if nickname exists in Character table
             stmt = select(Character).filter(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(nickname)))
             result = await session.execute(stmt)
             char = result.scalar_one_or_none()
+
+            if char and char.user_id and char.user_id != target_user_id:
+                return {"status": "error", "message": "Персонаж уже привязан к другому профилю"}
+
+            # 2. Check if nickname exists in Player table and is ALREADY linked to someone else
+            stmt_p = select(Player).filter(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(nickname)))
+            result_p = await session.execute(stmt_p)
+            player_obj = result_p.scalar_one_or_none()
+            
+            if player_obj and player_obj.user_id and player_obj.user_id != target_user_id:
+                # Double check the User exists
+                stmt_u = select(User).filter_by(id=player_obj.user_id)
+                res_u = await session.execute(stmt_u)
+                if res_u.scalar_one_or_none():
+                    return {"status": "error", "message": "Персонаж уже закреплен за другим участником в базе игроков."}
 
             if char:
                 char.user_id = target_user_id

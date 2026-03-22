@@ -1,33 +1,103 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Header from './components/Header';
-import { fetchInitData, InitData } from '@/lib/api';
+import { fetchInitData, InitData, loginViaTMA } from '@/lib/api';
+import { useRouter } from 'next/navigation';
 import KHTable from './components/tabs/KHTable';
 import MoneyTable from './components/tabs/MoneyTable';
 import HistoryTable from './components/tabs/HistoryTable';
 import PlayerModal from './components/modals/PlayerModal';
 import ObserverModal from './components/modals/ObserverModal';
+import SettingsModal from './components/modals/SettingsModal';
 import MasterPanel from './components/tabs/MasterPanel';
 
 export default function Home() {
     const [initData, setInitData] = useState<InitData | null>(null);
     const [activeTab, setActiveTab] = useState("kh");
     const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [observerTarget, setObserverTarget] = useState<{ roleId: number; name: string } | null>(null);
+    const [isTMA, setIsTMA] = useState(false);
+
+    const router = useRouter();
 
     useEffect(() => {
-        fetchInitData()
-            .then(setInitData)
-            .catch((err) => console.error("Failed to fetch init data:", err));
-    }, []);
+        const init = async () => {
+            const tma = typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData;
+            setIsTMA(!!tma);
+
+            try {
+                let data = await fetchInitData();
+                
+                // Auto-login if in TMA
+                if (!data.user && tma) {
+                    try {
+                        await loginViaTMA((window as any).Telegram.WebApp.initData);
+                        data = await fetchInitData();
+                    } catch (e) {
+                         console.error("Auto-login failed:", e);
+                    }
+                }
+                
+                setInitData(data);
+                
+                // Redirect to main character profile if available (TMA ONLY)
+                if (data.user?.main_role_id && tma) {
+                    router.replace(`/player/${data.user.main_role_id}`);
+                }
+            } catch (err) {
+                console.error("Failed to fetch init data:", err);
+            }
+        };
+        init();
+    }, [router]);
 
     const [refreshKey, setRefreshKey] = useState(0);
     const handleRefresh = () => setRefreshKey(prev => prev + 1);
 
+    if (isTMA && !initData?.user) {
+        return (
+            <main style={{ background: '#0a0a0f', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+                <div style={{
+                    background: 'linear-gradient(145deg, #1a1a24, #0f0f16)',
+                    border: '1px solid #8B0000',
+                    borderRadius: '16px',
+                    padding: '30px',
+                    maxWidth: '400px',
+                    width: '100%',
+                    textAlign: 'center',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+                }}>
+                    <div style={{ fontSize: '50px', marginBottom: '20px' }}>🕷️</div>
+                    <h2 style={{ color: '#fff', fontFamily: 'Cinzel, serif', marginBottom: '15px' }}>Добро пожаловать</h2>
+                    <p style={{ color: '#ccc', fontSize: '16px', lineHeight: '1.5', marginBottom: '25px' }}>
+                        Для доступа к функциям гильдии в Telegram вам необходимо зарегистрироваться и привязать персонажа через бота.
+                    </p>
+                    <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '15px', textAlign: 'left', marginBottom: '25px' }}>
+                        <div style={{ color: '#8B0000', fontWeight: 'bold', marginBottom: '8px' }}>Инструкция:</div>
+                        <ol style={{ color: '#aaa', fontSize: '14px', paddingLeft: '20px', margin: 0 }}>
+                            <li>Нажмите <b>/start</b> в боте</li>
+                            <li>Пришлите свой скриншот характеристик</li>
+                            <li>Дождитесь одобрения Мастера</li>
+                        </ol>
+                    </div>
+                    <p style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
+                        Если вы уже отправили данные, подождите, пока Мастер подтвердит вашу заявку.
+                    </p>
+                </div>
+            </main>
+        );
+    }
+
     return (
         <main>
-            <Header data={initData} activeTab={activeTab} onTabChange={setActiveTab} />
+            <Header 
+                data={initData} 
+                activeTab={activeTab} 
+                onTabChange={setActiveTab} 
+                onSettingsOpen={() => setIsSettingsOpen(true)}
+            />
 
             <div className="container mt-4" style={{ minHeight: '100vh', padding: '20px' }}>
                 {activeTab === 'kh' && (
@@ -66,6 +136,14 @@ export default function Home() {
                     />
                 )}
             </div>
+
+            {isSettingsOpen && (
+                <SettingsModal
+                    data={initData}
+                    onClose={() => setIsSettingsOpen(false)}
+                    onRefresh={handleRefresh}
+                />
+            )}
 
             {selectedRoleId && (
                 <PlayerModal

@@ -7,9 +7,10 @@ interface HeaderProps {
     data: InitData | null;
     activeTab: string;
     onTabChange: (tab: string) => void;
+    onSettingsOpen?: () => void;
 }
 
-export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
+export default function Header({ data, activeTab, onTabChange, onSettingsOpen }: HeaderProps) {
     const user = data?.user;
     const lastUpdated = data?.last_updated || "Загрузка...";
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -220,7 +221,29 @@ export default function Header({ data, activeTab, onTabChange }: HeaderProps) {
                         </button>
                         <span className="upd-text">Обновлено: {lastUpdated}</span>
                     </div>
-                    <div className="thin-header-right" style={{ position: 'relative' }} ref={menuRef}>
+                    <div className="thin-header-right" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '15px' }} ref={menuRef}>
+                        {user && (
+                            <button 
+                                onClick={onSettingsOpen}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#ccc',
+                                    fontSize: '1.2rem',
+                                    cursor: 'pointer',
+                                    padding: '5px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'color 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.color = '#8B0000'}
+                                onMouseLeave={(e) => e.currentTarget.style.color = '#ccc'}
+                                title="Настройки"
+                            >
+                                ⚙️
+                            </button>
+                        )}
                         <div
                             className="guest-profile"
                             style={{ gap: '10px', cursor: 'pointer' }}

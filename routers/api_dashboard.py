@@ -12,6 +12,9 @@ from database import User, AsyncSessionLocal, Player, get_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from web_database import get_last_update_time
 from logic.dashboard import get_kh_table_data, get_history_data, get_money_table_data
+from auth_helper import validate_init_data
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -37,6 +40,7 @@ class UserData(BaseModel):
     avatar_url: Optional[str] = None
     is_master: bool
     is_banned: bool
+    main_role_id: Optional[int] = None
 
 class InitResponse(BaseModel):
     user: Optional[UserData]
@@ -118,10 +122,29 @@ class ProfileQueue(BaseModel):
     auto_requeue: bool
     character_name: Optional[str]
 
+class KHPeriodStats(BaseModel):
+    s1: int = 0
+    s2: int = 0
+    s3: int = 0
+    s4: int = 0
+    s5: int = 0
+    s6: int = 0
+    s7: int = 0
+    adepts: int = 0
+    dances: int = 0
+    total_valor: int = 0
+
+class KHStatsSummary(BaseModel):
+    day: KHPeriodStats
+    week: KHPeriodStats
+    month: KHPeriodStats
+
 class ProfileLinkedChar(BaseModel):
     nickname: str
     is_main: bool
     class_id: Optional[int] = 0
+    role_id: Optional[int] = None
+    kh_stats: Optional[KHStatsSummary] = None
 
 class ProfilePartyMember(BaseModel):
     nickname: Optional[str]
@@ -132,8 +155,24 @@ class ProfilePartyMember(BaseModel):
 class ProfileParty(BaseModel):
     id: int
     name: Optional[str]
+    color: Optional[str] = None
     is_leader: bool
     members: List[ProfilePartyMember]
+
+class SquadKHCharStats(BaseModel):
+    role_id: int
+    nickname: str
+    stats: KHPeriodStats
+
+class SquadKHStatsResponse(BaseModel):
+    period: str
+    offset: int
+    start_date: str
+    end_date: str
+    squad_stats: List[SquadKHCharStats]
+
+class NicknameUpdateRequest(BaseModel):
+    nickname: str
 
 class ProfileEvent(BaseModel):
     id: int
@@ -161,19 +200,63 @@ class ProfileResponse(BaseModel):
     parties: List[ProfileParty] = []
     party: Optional[ProfileParty]
     events: List[ProfileEvent] = []
+    kh_stats: Optional[KHStatsSummary] = None
+
+class CPListItem(BaseModel):
+    id: int
+    name: Optional[str]
+    leader_nickname: Optional[str]
+    member_count: int
+
+class CPApplicationRequest(BaseModel):
+    party_id: int
+
+class CPApplicationItem(BaseModel):
+    application_id: int
+    applicant_role_id: int
+    applicant_nickname: Optional[str]
+    applicant_class_id: int
+    created_at: str
+
+class CPResolveRequest(BaseModel):
+    application_id: int
+    action: str  # 'accept' or 'reject'
+
+class CPCreateRequest(BaseModel):
+    name: Optional[str] = None
+
+class CPAddMemberRequest(BaseModel):
+    party_id: int
+    nickname: str
+
+class SetMainRequest(BaseModel):
+    new_main_role_id: int
 
 
 # --- Helpers ---
 
 async def get_current_user(request: Request):
     user_id = request.session.get("user_id")
+    
+    # Fallback to TMA header if session is missing
+    if not user_id:
+        init_data = request.headers.get("X-Telegram-Init-Data")
+        if init_data and BOT_TOKEN:
+            try:
+                parsed = validate_init_data(init_data, BOT_TOKEN)
+                if parsed.get("user"):
+                    user_id = parsed["user"]["id"]
+            except Exception:
+                pass
+
     if not user_id:
         return None
+        
     async with AsyncSessionLocal() as db_session:
         result = await db_session.execute(
             select(User).options(selectinload(User.characters)).filter_by(telegram_id=user_id)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
 class FaqMessageBase(BaseModel):
     text: Optional[str] = None
@@ -205,18 +288,35 @@ async def get_init_data(request: Request):
     
     # Fetch active queue types
     async with AsyncSessionLocal() as db_session:
-        result = await db_session.execute(text("SELECT id, name FROM queue_types WHERE is_active = TRUE"))
+        result = await db_session.execute(text("SELECT id, name, description FROM queue_types WHERE is_active = TRUE"))
         queue_types = [dict(r) for r in result.mappings().all()]
 
     user_data = None
     if user:
+        # Find main character role ID
+        async with AsyncSessionLocal() as db_session_internal:
+            res_m = await db_session_internal.execute(
+                select(Player.role_id).where(Player.user_id == user.id, Player.is_alt == False)
+            )
+            main_role_id = res_m.scalars().first()
+            
+            # Fallback if no explicit main found, take first available role
+            if not main_role_id:
+                res_f = await db_session_internal.execute(
+                    select(Player.role_id).where(Player.user_id == user.id).limit(1)
+                )
+                main_role_id = res_f.scalars().first()
+
+        import logging
+        logging.getLogger("uvicorn.error").warning(f"DEBUG: get_init_data user={user.id} tg={user.telegram_id}")
         user_data = UserData(
             id=user.id,
             telegram_id=user.telegram_id,
             username=user.username or "Unknown",
             avatar_url=user.avatar_url,
             is_master=user.is_master,
-            is_banned=user.is_banned
+            is_banned=user.is_banned,
+            main_role_id=main_role_id
         )
 
     return InitResponse(
@@ -332,11 +432,11 @@ async def update_profile_endpoint(role_id: int, request: Request, session: Async
         # Now check if the current user owns a character with this player's nickname
         from database import Player, Character
         player_result = await session.execute(select(Player).filter_by(role_id=role_id))
-        player_row = player_result.scalar_one_or_none()
+        player_row = player_result.scalars().first()
 
         if player_row:
             char_row = await session.execute(select(Character).filter_by(user_id=user.id, nickname=player_row.nickname))
-            char = char_row.scalar_one_or_none()
+            char = char_row.scalars().first()
             if char:
                 can_edit = True
 
@@ -353,6 +453,114 @@ async def update_profile_endpoint(role_id: int, request: Request, session: Async
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/profile/{role_id}/squad_kh_stats", response_model=SquadKHStatsResponse)
+async def get_squad_kh_stats(role_id: int, period: str = "week", offset: int = 0, session: AsyncSession = Depends(get_session)):
+    from logic.player_manager import calculate_calendar_stats
+    from database import Player, Character
+    
+    # 1. Get the main requested player
+    stmt = select(Player.nickname).where(Player.role_id == role_id)
+    res = await session.execute(stmt)
+    main_nick = res.scalars().first()
+    if not main_nick:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Player not found")
+        
+    # 2. Find all linked characters
+    user_id_stmt = select(Character.user_id).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(main_nick)))
+    user_id_res = await session.execute(user_id_stmt)
+    user_id_row = user_id_res.first()
+    
+    linked_chars = []
+    if user_id_row and user_id_row.user_id:
+        uid = user_id_row.user_id
+        chars_stmt = select(Character.nickname).where(Character.user_id == uid)
+        for c_row in (await session.execute(chars_stmt)).all():
+            c_nick = c_row.nickname
+            p_stmt = select(Player.role_id).where(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(c_nick)))
+            p_role_id = (await session.execute(p_stmt)).scalars().first()
+            if p_role_id:
+                linked_chars.append({"role_id": p_role_id, "nickname": c_nick})
+    else:
+        linked_chars.append({"role_id": role_id, "nickname": main_nick})
+
+    squad_stats = []
+    common_start = None
+    common_end = None
+    
+    for char in linked_chars:
+        try:
+            char_data = await calculate_calendar_stats(session, char["role_id"], period, offset)
+            if not common_start:
+                common_start = char_data["start_date"]
+                common_end = char_data["end_date"]
+            squad_stats.append(SquadKHCharStats(
+                role_id=char["role_id"],
+                nickname=char["nickname"],
+                stats=KHPeriodStats(**char_data["stats"])
+            ))
+        except Exception as e:
+            logging.error(f"Error calculating stats for {char['nickname']}: {e}")
+            
+    return SquadKHStatsResponse(
+        period=period,
+        offset=offset,
+        start_date=common_start or "",
+        end_date=common_end or "",
+        squad_stats=squad_stats
+    )
+
+@router.patch("/profile/{role_id}/linked_chars/{char_role_id}/nickname")
+async def update_linked_char_nickname(role_id: int, char_role_id: int, req: NicknameUpdateRequest, request: Request, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    # Permission check: needs to be master to alter nicknames system-wide, or own them? 
+    # Usually editing linked characters requires master or ownership.
+    # We will enforce master for simplicity or ownership if they are linked to the user.
+    can_edit = user.is_master
+    from database import Player, Character
+    
+    if not can_edit:
+        # check if char belongs to user
+        p_stmt = select(Player.nickname).where(Player.role_id == role_id)
+        p_nick = (await session.execute(p_stmt)).scalars().first()
+        if p_nick:
+             char_row = await session.execute(select(Character).filter_by(user_id=user.id, nickname=p_nick))
+             if char_row.scalars().first():
+                 can_edit = True
+
+    if not can_edit:
+         from fastapi import HTTPException
+         raise HTTPException(status_code=403, detail="Permission denied")
+         
+    # Find old nickname to update in characters table
+    p_stmt = select(Player.nickname).where(Player.role_id == char_role_id)
+    old_nick = (await session.execute(p_stmt)).scalars().first()
+    if not old_nick:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Player not found")
+        
+    c_stmt = select(Character).where(
+        func.lower(func.trim(Character.nickname)) == func.lower(func.trim(old_nick))
+    )
+    character = (await session.execute(c_stmt)).scalars().first()
+    if not character:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Character record not found. Link a character first.")
+        
+    character.nickname = req.nickname
+    # Sync Player table
+    stmt_p_sync = select(Player).where(Player.role_id == char_role_id)
+    res_p_sync = await session.execute(stmt_p_sync)
+    player_record = res_p_sync.scalars().first()
+    if player_record:
+        player_record.nickname = req.nickname
+    await session.commit()
+    return {"status": "ok", "message": "Nickname updated"}
 
 
 # --- Admin Settings & Backups ---
@@ -740,3 +948,306 @@ async def ask_faq_ai(data: dict, request: Request, db: AsyncSession = Depends(ge
     
     answer = await ai.get_answer(question, context_text)
     return {"answer": answer}
+
+
+@router.post("/profile/{role_id}/set_main")
+async def set_main_char(role_id: int, req: SetMainRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import Player, Character
+    
+    # 1. Auth check: must own both role_id and req.new_main_role_id
+    p = await db.get(Player, role_id)
+    if not p: raise HTTPException(404)
+    
+    is_owner = (p.user_id == user.id)
+    if not is_owner and p.nickname:
+        # Fallback check character ownership via bot's characters table
+        stmt_c = select(Character).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(p.nickname)), Character.user_id == user.id)
+        res_c = await db.execute(stmt_c)
+        if res_c.first(): is_owner = True
+        
+    if not is_owner: raise HTTPException(403)
+    
+    new_p = await db.get(Player, req.new_main_role_id)
+    if not new_p: raise HTTPException(404)
+    
+    is_new_owner = (new_p.user_id == user.id)
+    if not is_new_owner and new_p.nickname:
+        stmt_cn = select(Character).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(new_p.nickname)), Character.user_id == user.id)
+        res_cn = await db.execute(stmt_cn)
+        if res_cn.first(): is_new_owner = True
+        
+    if not is_new_owner: raise HTTPException(403)
+    
+    # 2. Update Players table (Dashboard)
+    stmt_all_p = select(Player).where(Player.user_id == user.id)
+    res_all_p = await db.execute(stmt_all_p)
+    all_p = res_all_p.scalars().all()
+    
+    updated_role_ids = set()
+    for pl in all_p:
+        pl.is_alt = (pl.role_id != req.new_main_role_id)
+        updated_role_ids.add(pl.role_id)
+    
+    if p.role_id not in updated_role_ids:
+        p.is_alt = (p.role_id != req.new_main_role_id)
+        p.user_id = user.id
+    if new_p.role_id not in updated_role_ids:
+        new_p.is_alt = (new_p.role_id != req.new_main_role_id)
+        new_p.user_id = user.id
+
+    # 3. Synchronize Character table (Bot/Queues)
+    stmt_chars = select(Character).where(Character.user_id == user.id)
+    res_chars = await db.execute(stmt_chars)
+    all_chars = res_chars.scalars().all()
+    
+    target_nick = new_p.nickname.strip().lower() if new_p.nickname else ""
+    for ch in all_chars:
+        ch_nick = ch.nickname.strip().lower() if ch.nickname else ""
+        ch.is_main = (ch_nick == target_nick)
+        
+    await db.commit()
+    return {"status": "ok"}
+
+@router.get("/party/list")
+async def get_all_parties(request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import ConstantParty, PartyMember, Player
+    stmt = select(ConstantParty).options(selectinload(ConstantParty.members))
+    res = await db.execute(stmt)
+    parties = res.scalars().all()
+    out = []
+    for p in parties:
+        leader = next((m for m in p.members if m.is_leader), None)
+        leader_nick = None
+        if leader:
+            lp = await db.get(Player, leader.player_role_id)
+            if lp: leader_nick = lp.nickname
+        out.append({"id": p.id, "name": p.name, "leader_nickname": leader_nick, "member_count": len(p.members)})
+    return {"parties": out}
+
+@router.post("/party/apply")
+async def apply_to_party(req: CPApplicationRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import Player, PartyApplication, PartyMember
+    stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(stmt)).scalars().first()
+    if not p: raise HTTPException(400, detail="Main character not found")
+    
+    pm_stmt = select(PartyMember).filter_by(player_role_id=p.role_id)
+    if (await db.execute(pm_stmt)).scalars().first():
+         raise HTTPException(400, detail="Already in a party")
+    
+    app_stmt = select(PartyApplication).filter_by(party_id=req.party_id, player_role_id=p.role_id, status="pending")
+    if (await db.execute(app_stmt)).scalars().first():
+         raise HTTPException(400, detail="Already applied")
+         
+    new_app = PartyApplication(party_id=req.party_id, player_role_id=p.role_id, status="pending")
+    db.add(new_app)
+    await db.commit()
+    return {"status": "ok"}
+
+@router.get("/party/{party_id}/applications")
+async def get_party_applications(party_id: int, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import PartyMember, PartyApplication, Player
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    if not p: raise HTTPException(403)
+    pm = (await db.execute(select(PartyMember).filter_by(party_id=party_id, player_role_id=p.role_id, is_leader=True))).scalars().first()
+    if not pm: raise HTTPException(403, detail="Not leader of this party")
+    
+    apps_stmt = select(PartyApplication).filter_by(party_id=party_id, status="pending")
+    apps = (await db.execute(apps_stmt)).scalars().all()
+    out = []
+    for a in apps:
+        ap = await db.get(Player, a.player_role_id)
+        if ap:
+            out.append({
+                "application_id": a.id,
+                "applicant_role_id": a.player_role_id,
+                "applicant_nickname": ap.nickname,
+                "applicant_class_id": ap.class_id,
+                "created_at": a.created_at.isoformat() if a.created_at else ""
+            })
+    return {"applications": out}
+
+@router.post("/party/applications/resolve")
+async def resolve_party_application(req: CPResolveRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import PartyMember, PartyApplication, Player
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    if not p: raise HTTPException(403)
+    
+    app = await db.get(PartyApplication, req.application_id)
+    if not app or app.status != "pending": raise HTTPException(404, detail="Application not found or already resolved")
+    
+    pm = (await db.execute(select(PartyMember).filter_by(party_id=app.party_id, player_role_id=p.role_id, is_leader=True))).scalars().first()
+    if not pm: raise HTTPException(403, detail="Not leader")
+    
+    app.status = req.action
+    if req.action == "accept":
+        epm = (await db.execute(select(PartyMember).filter_by(player_role_id=app.player_role_id))).scalars().first()
+        if not epm:
+            new_member = PartyMember(party_id=app.party_id, player_role_id=app.player_role_id, is_leader=False)
+            db.add(new_member)
+    await db.commit()
+    return {"status": "ok"}
+
+@router.post("/party/create_named")
+async def create_party_named(req: CPCreateRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import ConstantParty, PartyMember, Player
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    if not p: raise HTTPException(400, detail="Main char not found")
+    
+    if (await db.execute(select(PartyMember).filter_by(player_role_id=p.role_id))).scalars().first():
+         raise HTTPException(400, detail="Already in a party")
+         
+    new_party = ConstantParty(name=req.name)
+    db.add(new_party)
+    await db.flush() 
+    new_member = PartyMember(party_id=new_party.id, player_role_id=p.role_id, is_leader=True)
+    db.add(new_member)
+    await db.commit()
+    return {"status": "ok", "party_id": new_party.id}
+
+@router.post("/party/add_member")
+async def add_party_member(req: CPAddMemberRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import PartyMember, Player
+    # 1. Verify requester is leader
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    if not p: raise HTTPException(403)
+    pm = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, player_role_id=p.role_id, is_leader=True))).scalars().first()
+    if not pm: raise HTTPException(403, detail="Not leader of this party")
+    
+    # 2. Find target player by nickname
+    target_p = (await db.execute(select(Player).filter_by(nickname=req.nickname))).scalars().first()
+    if not target_p: raise HTTPException(404, detail="Player not found")
+    
+    # 3. Check if already in party
+    existing = (await db.execute(select(PartyMember).filter_by(player_role_id=target_p.role_id))).scalars().first()
+    if existing:
+         raise HTTPException(400, detail="Player already in a party")
+         
+    # 4. Add to party
+    new_member = PartyMember(party_id=req.party_id, player_role_id=target_p.role_id, is_leader=False)
+    db.add(new_member)
+    await db.commit()
+    return {"status": "ok"}
+
+@router.get("/party/{role_id}/kh_stats", response_model=SquadKHStatsResponse)
+async def get_party_kh_stats(role_id: int, period: str = Query("day"), offset: int = Query(0), request: Request = None, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+        
+    from database import Player, PartyMember
+    pm_stmt = select(PartyMember).filter_by(player_role_id=role_id)
+    pm = (await db.execute(pm_stmt)).scalars().first()
+    if not pm:
+         raise HTTPException(status_code=404, detail="Party not found")
+         
+    party_id = pm.party_id
+    all_members = (await db.execute(select(PartyMember).filter_by(party_id=party_id))).scalars().all()
+    member_role_ids = [m.player_role_id for m in all_members]
+    
+    from logic.player_manager import calculate_calendar_stats
+    squad_stats = []
+    start_date = ""
+    end_date = ""
+    for r_id in member_role_ids:
+        pl = await db.get(Player, r_id)
+        if pl:
+            stats = await calculate_calendar_stats(db, r_id, period, offset)
+            squad_stats.append({
+                "role_id": r_id,
+                "nickname": pl.nickname,
+                "stats": stats["stats"]
+            })
+            if not start_date:
+                start_date = stats["start_date"]
+                end_date = stats["end_date"]
+                
+    return {
+        "period": period,
+        "offset": offset,
+        "start_date": start_date or "",
+        "end_date": end_date or "",
+        "squad_stats": squad_stats
+    }
+
+class CPKickRequest(BaseModel):
+    party_id: int
+    role_id: int
+
+class CPTransferRequest(BaseModel):
+    party_id: int
+    new_leader_role_id: int
+
+@router.post("/party/kick")
+async def kick_party_member_endpoint(req: CPKickRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import PartyMember, Player
+    
+    # 1. Verify requester is leader of the party or Master
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    
+    can_kick = user.is_master
+    if not can_kick and p:
+        pm_leader = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, player_role_id=p.role_id, is_leader=True))).scalars().first()
+        if pm_leader: can_kick = True
+        
+    if not can_kick: raise HTTPException(403, detail="Permission denied")
+    
+    # 2. Delete member record
+    target_pm = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, player_role_id=req.role_id))).scalars().first()
+    if target_pm:
+        if target_pm.is_leader and not user.is_master:
+             raise HTTPException(400, detail="Cannot kick a leader")
+        await db.delete(target_pm)
+        await db.commit()
+    return {"status": "ok"}
+
+@router.post("/party/transfer_leadership")
+async def transfer_party_leadership_endpoint(req: CPTransferRequest, request: Request, db: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user: raise HTTPException(401)
+    from database import PartyMember, Player
+    
+    # 1. Verify requester is current leader
+    main_stmt = select(Player).filter_by(user_id=user.id, is_alt=False)
+    p = (await db.execute(main_stmt)).scalars().first()
+    if not p and not user.is_master: raise HTTPException(403)
+    
+    pm_leader = None
+    if not user.is_master:
+        pm_leader = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, player_role_id=p.role_id, is_leader=True))).scalars().first()
+        if not pm_leader: raise HTTPException(403, detail="Not a leader")
+    else:
+        # Master can transfer leadership for any party
+        pm_leader = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, is_leader=True))).scalars().first()
+
+    # 2. Find new leader record
+    new_leader_pm = (await db.execute(select(PartyMember).filter_by(party_id=req.party_id, player_role_id=req.new_leader_role_id))).scalars().first()
+    if not new_leader_pm: raise HTTPException(404, detail="Target player not in party")
+    
+    if pm_leader:
+        pm_leader.is_leader = False
+    new_leader_pm.is_leader = True
+    await db.commit()
+    return {"status": "ok"}
+
