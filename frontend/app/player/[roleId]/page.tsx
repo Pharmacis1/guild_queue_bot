@@ -84,7 +84,7 @@ export default function PlayerProfileLite() {
     }, [profile, initData]);
 
     const isMaster = useMemo(() => initData?.user?.is_master || false, [initData]);
-    const canEdit = true; // FORCED FOR VERIFICATION
+    const canEdit = isMaster || isMyProfile || (isTMA && !profile?.user_id);
 
     const loadAll = async () => {
         if (!roleId) return;
@@ -311,78 +311,18 @@ export default function PlayerProfileLite() {
                 )}
 
                 {activeTab === 'queues' && (
-                    <div className={styles.card}>
-                        {initData?.queue_types.map(item => {
-                            const qEntry = profile.queues.find(q => q.queue_id === item.id);
-                            return (
-                                <div key={item.id} className={styles.queueListItem}>
-                                    <div style={{flex: 1, minWidth: 0}}>
-                                        <div className={styles.queueName}>{item.name}</div>
-                                        <button onClick={() => handleShowParticipants(item.id)} style={{background:'none', border:'none', color:'#007aff', fontSize:'12px', padding: 0}}>Участники</button>
-                                    </div>
-                                    <div style={{flexShrink: 0, marginLeft: '12px'}}>
-                                        {qEntry ? (
-                                            <div style={{textAlign:'right'}}>
-                                                <div style={{color:'#ffd700', fontWeight:'bold', fontSize: '14px'}}>#{qEntry.position}</div>
-                                                <button onClick={() => handleLeaveQueue(qEntry.id)} className={styles.btnLeave} style={{padding:'4px 8px', fontSize:'11px', marginTop: '4px'}}>Выйти</button>
-                                            </div>
-                                        ) : (
-                                            <button onClick={() => { setQueueForm({queue_id: item.id, character_name: profile.nickname || '', auto_requeue: false}); setIsQueueFormOpen(true); }} className={styles.btnDark} style={{width: 'auto', padding: '8px 16px', marginTop: 0}}>Записаться</button>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    <div className={styles.card} style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📋</div>
+                        <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Очереди в разработке</div>
+                        <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Система записи в очереди скоро будет доступна</div>
                     </div>
                 )}
 
                 {activeTab === 'cp' && (
-                    <div className={styles.card}>
-                        {profile.parties.map(party => (
-                            <div key={party.id} style={{marginBottom:'20px'}}>
-                                <div className={styles.sectionTitle} style={{color: party.color || '#fff'}}>{party.name || 'КП'}</div>
-                                <div className={styles.squadTable}>
-                                    {cpStats?.squad_stats?.map(m => {
-                                        const pm = party.members.find(p => p.role_id === m.role_id);
-                                        if(!pm) return null;
-                                        return (
-                                            <div key={m.role_id} className={styles.squadRow}>
-                                                <div className={styles.squadCharInfo}>
-                                                    <ClassIcon classId={pm.class_id} size={20} />
-                                                    <span className={styles.squadNick} style={{marginLeft: '8px'}}>{m.nickname} {pm.is_leader && '👑'}</span>
-                                                </div>
-                                                
-                                                <div className={styles.squadStages}>
-                                                    {[1, 2, 3, 4, 5, 6, 7].map(num => {
-                                                        const val = (m.stats as any)[`s${num}`];
-                                                        return (
-                                                            <div key={num} className={`${styles.stageBox} ${val > 0 ? styles.stageBoxActive : ''}`}>
-                                                                {num}
-                                                                {val > 1 && <span className={styles.stageBadge}>x{val}</span>}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                <span className={styles.squadTotalKH}>{m.stats.total_valor}</span>
-                                                {party.is_leader && m.role_id !== profile.role_id && (
-                                                    <div style={{display:'flex', gap:'4px', marginLeft: '8px'}}>
-                                                        <button className={styles.btnActionSmall} onClick={() => handleTransferLeadership(party.id, m.role_id)}>👑</button>
-                                                        <button className={styles.btnActionSmall} onClick={() => handleKickMember(party.id, m.role_id, m.nickname)}>✕</button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                                {party.is_leader && (
-                                    <div style={{marginTop:'10px', display:'flex', gap:'8px'}}>
-                                        <input className={styles.inputSmall} placeholder="Пригласить..." value={addMemberNick} onChange={e => setAddMemberNick(e.target.value)} />
-                                        <button onClick={() => handleAddMember(party.id)} className={styles.btnDark}>+</button>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
+                    <div className={styles.card} style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: '10px' }}>⚔️</div>
+                        <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Раздел КП в разработке</div>
+                        <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Управление конст-пати появится в ближайшее время</div>
                     </div>
                 )}
             </div>

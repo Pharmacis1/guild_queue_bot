@@ -678,11 +678,11 @@
 
 .btnAfkWide {
     flex: 1;
-    background: linear-gradient(135deg, #8B0000 0%, #500000 100%);
-    border: 1px solid #ff4d6d;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(139, 0, 0, 0.2);
     color: #fff;
     padding: 12px;
-    border-radius: 12px;
+    border-radius: 20px;
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
@@ -691,16 +691,12 @@
     justify-content: center;
     gap: 8px;
     transition: all 0.2s ease;
-    box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
 .btnAfkWide:hover {
-    background: linear-gradient(135deg, #a00000 0%, #600000 100%);
-    border-color: #ff6685;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(139, 0, 0, 0.6);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(139, 0, 0, 0.4);
+    transform: translateY(-1px);
 }
 
 .btnSettingsCircle {

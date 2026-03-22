@@ -126,88 +126,21 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                     <div className="modal-body" style={{ padding: '20px' }}>
                         
                         {showAfkForm ? (
-                            /* AFK Section ONLY */
-                            <section>
-                                <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '15px', border: '1px solid #222' }}>
-                                    <div className="mb-3">
-                                        <label className="form-label small text-muted">С (дата)</label>
-                                        <input type="date" className="form-control bg-dark text-white border-secondary" value={afkStart} onChange={e => setAfkStart(e.target.value)} />
-                                    </div>
-                                    <div className="mb-3">
-                                        <label className="form-label small text-muted">По (дата, не обязательно)</label>
-                                        <input type="date" className="form-control bg-dark text-white border-secondary" value={afkEnd} onChange={e => setAfkEnd(e.target.value)} />
-                                    </div>
-                                    <div className="mb-3">
-                                        <label className="form-label small text-muted">Причина</label>
-                                        <textarea className="form-control bg-dark text-white border-secondary" rows={3} value={afkReason} onChange={e => setAfkReason(e.target.value)} placeholder="Причина отсутствия..." />
-                                    </div>
-                                    <div className="d-flex flex-column gap-2 mt-2">
-                                        <button className="btn btn-danger w-100" onClick={handleSaveAfk} style={{ background: '#8B0000', border: 'none', padding: '12px', fontWeight: 'bold' }}>СОХРАНИТЬ</button>
-                                        <button className="btn btn-outline-secondary w-100" onClick={() => setShowAfkForm(false)}>Назад к настройкам</button>
-                                    </div>
-                                </div>
-                            </section>
+                            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+                                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>🚧</div>
+                                <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>В разработке</div>
+                                <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Функционал уведомлений об отсутствии скоро появится</div>
+                                <button className="btn btn-outline-secondary w-100 mt-4" onClick={() => setShowAfkForm(false)}>Назад к настройкам</button>
+                            </div>
                         ) : (
-                            <>
-                                {/* Main Settings Section */}
-                                <section className="mb-4">
-                                    <h6 style={{ color: '#8B0000', textTransform: 'uppercase', fontSize: '0.8rem', letterSpacing: '2px' }}>Отсутствие (AFK)</h6>
-                                    <button className="btn btn-outline-danger w-100 mt-2" onClick={() => setShowAfkForm(true)} style={{ borderColor: '#8B0000', color: '#fff' }}>
-                                        ☕ Сообщить об отсутствии
-                                    </button>
-                                </section>
-
-                                <section className="mb-4">
-                                    <h6 style={{ color: '#8B0000', textTransform: 'uppercase', fontSize: '0.8rem', letterSpacing: '2px' }}>Мои персонажи</h6>
-                                    {loading ? <div className="text-center py-3">Загрузка...</div> : (
-                                        <div className="d-flex flex-column gap-2 mt-3">
-                                            {profile?.linked_chars.map(char => (
-                                                <div key={char.role_id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #222', borderRadius: '8px', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                    <div className="d-flex align-items-center gap-2">
-                                                        <ClassIcon classId={char.class_id} size={24} />
-                                                        {editingChar?.roleId === char.role_id ? (
-                                                            <input 
-                                                                type="text" 
-                                                                className="form-control form-control-sm bg-dark text-white border-secondary" 
-                                                                value={editingChar.nickname}
-                                                                onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
-                                                                onKeyDown={e => e.key === 'Enter' && handleEditNickname()}
-                                                                autoFocus
-                                                            />
-                                                        ) : (
-                                                            <span style={{ fontWeight: char.is_main ? 'bold' : 'normal', color: char.is_main ? '#fff' : '#aaa' }}>
-                                                                {char.nickname} {char.is_main && <span style={{ fontSize: '0.7rem', color: '#8B0000' }}>[ОСНОВА]</span>}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div className="d-flex gap-2">
-                                                        {editingChar?.roleId === char.role_id ? (
-                                                            <button className="btn btn-sm btn-success" onClick={handleEditNickname}>✓</button>
-                                                        ) : (
-                                                            <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditingChar({ roleId: char.role_id!, nickname: char.nickname })}>✎</button>
-                                                        )}
-                                                        <button className="btn btn-sm btn-outline-danger" onClick={() => handleUnlink(char.role_id!, char.nickname)}>🗑</button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </section>
-
-                                <section>
-                                    <h6 style={{ color: '#8B0000', textTransform: 'uppercase', fontSize: '0.8rem', letterSpacing: '2px' }}>Привязать персонажа</h6>
-                                    <div className="input-group mt-3">
-                                        <input 
-                                            type="text" 
-                                            className="form-control bg-dark text-white border-secondary" 
-                                            placeholder="Никнейм персонажа"
-                                            value={newCharNickname}
-                                            onChange={e => setNewCharNickname(e.target.value)}
-                                        />
-                                        <button className="btn btn-danger" onClick={handleLink} style={{ background: '#8B0000', border: 'none' }}>Привязать</button>
-                                    </div>
-                                </section>
-                            </>
+                            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+                                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>⚙️</div>
+                                <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Настройки в разработке</div>
+                                <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Управление персонажами временно недоступно</div>
+                                <button className="btn btn-outline-danger w-100 mt-4" onClick={() => setShowAfkForm(true)} style={{ borderColor: '#8B0000', color: '#fff' }}>
+                                    ☕ Сообщить об отсутствии
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>
