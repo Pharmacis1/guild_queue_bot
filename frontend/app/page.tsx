@@ -16,7 +16,6 @@ export default function Home() {
     const [initData, setInitData] = useState<InitData | null>(null);
     const [activeTab, setActiveTab] = useState("kh");
     const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [observerTarget, setObserverTarget] = useState<{ roleId: number; name: string } | null>(null);
     const [isTMA, setIsTMA] = useState<boolean | null>(null); // null means "detecting"
     const [loading, setLoading] = useState(true);
@@ -113,7 +112,6 @@ export default function Home() {
                 data={initData} 
                 activeTab={activeTab} 
                 onTabChange={setActiveTab} 
-                onSettingsOpen={() => setIsSettingsOpen(true)}
             />
 
             <div className="container mt-4" style={{ minHeight: '100vh', padding: '20px' }}>
@@ -154,13 +152,6 @@ export default function Home() {
                 )}
             </div>
 
-            {isSettingsOpen && (
-                <SettingsModal
-                    data={initData}
-                    onClose={() => setIsSettingsOpen(false)}
-                    onRefresh={handleRefresh}
-                />
-            )}
 
             {selectedRoleId && (
                 <PlayerModal
