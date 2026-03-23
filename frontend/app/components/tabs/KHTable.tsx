@@ -7,6 +7,30 @@ import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
 import MassEventModal from '../modals/MassEventModal';
 
+const DAYS_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+const formatPeriod = (start: string, end: string) => {
+    if (!start || !end) return '';
+    try {
+        const sDate = new Date(start);
+        const eDate = new Date(end);
+        const sStr = sDate.toLocaleDateString('ru-RU');
+        const eStr = eDate.toLocaleDateString('ru-RU');
+        
+        const isSameDay = sDate.getFullYear() === eDate.getFullYear() &&
+                          sDate.getMonth() === eDate.getMonth() &&
+                          sDate.getDate() === eDate.getDate();
+
+        if (isSameDay) {
+            const dayOfWeek = DAYS_RU[sDate.getDay()];
+            return `${sStr} (${dayOfWeek})`;
+        }
+        return `${sStr} — ${eStr}`;
+    } catch (e) {
+        return `${start} — ${end}`;
+    }
+};
+
 // Class ID -> Russian Name mapping (from consts.py)
 const CLASS_NAMES: Record<number, string> = {
     0: 'Воин',
@@ -867,7 +891,8 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     }
                                 });
 
-                                const content = [`Всего: ${totalCount}`];
+                                const content = [formatPeriod(dateRange.start, dateRange.end)];
+                                content.push(`Всего: ${totalCount}`);
                                 if (totalValor > 0) content.push(`Доблесть: +${totalValor}`);
 
                                 return (

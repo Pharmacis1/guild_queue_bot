@@ -7,25 +7,28 @@ import PlayerTooltip from '../shared/PlayerTooltip';
 import GenericTooltip from '../shared/GenericTooltip';
 import MassEventModal from '../modals/MassEventModal';
 
-// Class ID -> Russian Name mapping (from consts.py)
-const CLASS_NAMES: Record<number, string> = {
-    0: 'Воин',
-    1: 'Маг',
-    2: 'Шаман',
-    3: 'Друид',
-    4: 'Оборотень',
-    5: 'Убийца',
-    6: 'Лучник',
-    7: 'Жрец',
-    8: 'Страж',
-    9: 'Мистик',
-    10: 'Призрак',
-    11: 'Жрец',
-    12: 'Стрелок', // Verify ID mapping if needed
-    13: 'Паладин',
-    14: 'Странник',
-    15: 'Бард',
-    16: 'Дух крови',
+const DAYS_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+const formatPeriod = (start: string, end: string) => {
+    if (!start || !end) return '';
+    try {
+        const sDate = new Date(start);
+        const eDate = new Date(end);
+        const sStr = sDate.toLocaleDateString('ru-RU');
+        const eStr = eDate.toLocaleDateString('ru-RU');
+        
+        const isSameDay = sDate.getFullYear() === eDate.getFullYear() &&
+                          sDate.getMonth() === eDate.getMonth() &&
+                          sDate.getDate() === eDate.getDate();
+
+        if (isSameDay) {
+            const dayOfWeek = DAYS_RU[sDate.getDay()];
+            return `${sStr} (${dayOfWeek})`;
+        }
+        return `${sStr} — ${eStr}`;
+    } catch (e) {
+        return `${start} — ${end}`;
+    }
 };
 
 interface MoneyTableProps {
@@ -38,7 +41,7 @@ interface MoneyTableProps {
 export default function MoneyTable({ onRowClick, onObserverClick, classes, currentUser }: MoneyTableProps) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<MoneyTableRow[]>([]);
-    const [intervals, setIntervals] = useState<{ label: string, guild_bonus?: number }[]>([]);
+    const [intervals, setIntervals] = useState<{ label: string, start: string, end: string, guild_bonus?: number }[]>([]);
     const [totalGuildBonus, setTotalGuildBonus] = useState(0);
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
@@ -1078,7 +1081,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                                             ) : (
                                                                 <GenericTooltip
                                                                     title="Детализация по периоду"
-                                                                    content={stat.valor_details || []}
+                                                                    content={[formatPeriod(intervals[i].start, intervals[i].end), ...(stat.valor_details || [])]}
                                                                 >
                                                                     <span style={{
                                                                         background: bg,
@@ -1166,30 +1169,44 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 const bonus = interval.guild_bonus || 0;
                                 const sum = playerSum + bonus;
                                 
-                                const s1 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s1 || 0), 0) * 4;
-                                const s2 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s2 || 0), 0) * 6;
-                                const s3 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s3 || 0), 0) * 10;
-                                const s4 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s4 || 0), 0) * 14;
-                                const s5 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s5 || 0), 0) * 24;
-                                const s6 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s6 || 0), 0) * 40;
-                                const s7 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s7 || 0), 0) * 70;
-                                const adepts = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.adepts || 0), 0) * 7;
+                                const s1_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s1 || 0), 0);
+                                const s2_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s2 || 0), 0);
+                                const s3_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s3 || 0), 0);
+                                const s4_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s4 || 0), 0);
+                                const s5_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s5 || 0), 0);
+                                const s6_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s6 || 0), 0);
+                                const s7_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s7 || 0), 0);
+                                const adepts_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.adepts || 0), 0);
+
+                                const s1 = s1_count * 4;
+                                const s2 = s2_count * 6;
+                                const s3 = s3_count * 10;
+                                const s4 = s4_count * 14;
+                                const s5 = s5_count * 24;
+                                const s6 = s6_count * 40;
+                                const s7 = s7_count * 70;
+                                const adepts = adepts_count * 7;
+                                
+                                const dances_count = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.dances || 0), 0);
                                 const dances = playerSum - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
 
                                 let tooltipContent = [
-                                    s1 > 0 ? `Этап I: +${s1}` : '',
-                                    s2 > 0 ? `Этап II: +${s2}` : '',
-                                    s3 > 0 ? `Этап III: +${s3}` : '',
-                                    s4 > 0 ? `Этап IV: +${s4}` : '',
-                                    s5 > 0 ? `Этап V: +${s5}` : '',
-                                    s6 > 0 ? `Этап VI: +${s6}` : '',
-                                    s7 > 0 ? `Этап VII: +${s7}` : '',
-                                    adepts > 0 ? `Адепты: +${adepts}` : '',
-                                    dances > 0 ? `Танцы: +${dances}` : '',
+                                    s1 > 0 ? `Этап I: +${s1} (${s1_count})` : '',
+                                    s2 > 0 ? `Этап II: +${s2} (${s2_count})` : '',
+                                    s3 > 0 ? `Этап III: +${s3} (${s3_count})` : '',
+                                    s4 > 0 ? `Этап IV: +${s4} (${s4_count})` : '',
+                                    s5 > 0 ? `Этап V: +${s5} (${s5_count})` : '',
+                                    s6 > 0 ? `Этап VI: +${s6} (${s6_count})` : '',
+                                    s7 > 0 ? `Этап VII: +${s7} (${s7_count})` : '',
+                                    adepts > 0 ? `Адепты: +${adepts} (${adepts_count})` : '',
+                                    dances > 0 ? `Танцы: +${dances} (${dances_count})` : '',
                                     bonus > 0 ? `Бонус гильдии: +${bonus}` : ''
                                 ].filter(Boolean);
 
                                 if (tooltipContent.length === 0 && sum > 0) tooltipContent = [`Прочие: +${sum}`];
+
+                                // Add period to the top of tooltip
+                                tooltipContent.unshift(formatPeriod(interval.start, interval.end));
 
                                 return (
                                     <div key={i} className="kh-col" style={{ 
@@ -1198,8 +1215,13 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                         alignItems: 'center', 
                                         borderRight: '1px solid rgba(255, 255, 255, 0.05)'
                                     }}>
-                                        <GenericTooltip title="Детализация по периоду" content={tooltipContent.length > 0 ? tooltipContent : ["Данных нет"]}>
-                                            <span style={{ color: sum > 0 ? '#fff' : '#444' }}>{sum.toLocaleString()}</span>
+                                        <GenericTooltip
+                                            title="Итого за период"
+                                            content={tooltipContent}
+                                        >
+                                            <span style={{ fontSize: '0.9rem' }}>
+                                                {sum.toLocaleString()}
+                                            </span>
                                         </GenericTooltip>
                                     </div>
                                 );
@@ -1209,31 +1231,46 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 const playerTotal = filteredRows.reduce((acc, r) => acc + (r.total_valor || 0), 0);
                                 const totalValor = playerTotal + totalGuildBonus;
 
-                                const s1 = filteredRows.reduce((acc, r) => acc + (r.s1 || 0), 0) * 4;
-                                const s2 = filteredRows.reduce((acc, r) => acc + (r.s2 || 0), 0) * 6;
-                                const s3 = filteredRows.reduce((acc, r) => acc + (r.s3 || 0), 0) * 10;
-                                const s4 = filteredRows.reduce((acc, r) => acc + (r.s4 || 0), 0) * 14;
-                                const s5 = filteredRows.reduce((acc, r) => acc + (r.s5 || 0), 0) * 24;
-                                const s6 = filteredRows.reduce((acc, r) => acc + (r.s6 || 0), 0) * 40;
-                                const s7 = filteredRows.reduce((acc, r) => acc + (r.s7 || 0), 0) * 70;
-                                const adepts = filteredRows.reduce((acc, r) => acc + (r.adepts || r.s8 || 0), 0) * 7;
+                                const s1_count = filteredRows.reduce((acc, r) => acc + (r.s1 || 0), 0);
+                                const s2_count = filteredRows.reduce((acc, r) => acc + (r.s2 || 0), 0);
+                                const s3_count = filteredRows.reduce((acc, r) => acc + (r.s3 || 0), 0);
+                                const s4_count = filteredRows.reduce((acc, r) => acc + (r.s4 || 0), 0);
+                                const s5_count = filteredRows.reduce((acc, r) => acc + (r.s5 || 0), 0);
+                                const s6_count = filteredRows.reduce((acc, r) => acc + (r.s6 || 0), 0);
+                                const s7_count = filteredRows.reduce((acc, r) => acc + (r.s7 || 0), 0);
+                                const adepts_count = filteredRows.reduce((acc, r) => acc + (r.adepts || r.s8 || 0), 0);
+
+                                const s1 = s1_count * 4;
+                                const s2 = s2_count * 6;
+                                const s3 = s3_count * 10;
+                                const s4 = s4_count * 14;
+                                const s5 = s5_count * 24;
+                                const s6 = s6_count * 40;
+                                const s7 = s7_count * 70;
+                                const adepts = adepts_count * 7;
+                                const dances_count = filteredRows.reduce((acc, r) => acc + (r.dances || 0), 0);
                                 const dances = playerTotal - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
 
                                 let tooltipContent = [
-                                    s1 > 0 ? `Этап I: +${s1}` : '',
-                                    s2 > 0 ? `Этап II: +${s2}` : '',
-                                    s3 > 0 ? `Этап III: +${s3}` : '',
-                                    s4 > 0 ? `Этап IV: +${s4}` : '',
-                                    s5 > 0 ? `Этап V: +${s5}` : '',
-                                    s6 > 0 ? `Этап VI: +${s6}` : '',
-                                    s7 > 0 ? `Этап VII: +${s7}` : '',
-                                    adepts > 0 ? `Адепты: +${adepts}` : '',
-                                    dances > 0 ? `Танцы: +${dances}` : '',
+                                    s1 > 0 ? `Этап I: +${s1} (${s1_count})` : '',
+                                    s2 > 0 ? `Этап II: +${s2} (${s2_count})` : '',
+                                    s3 > 0 ? `Этап III: +${s3} (${s3_count})` : '',
+                                    s4 > 0 ? `Этап IV: +${s4} (${s4_count})` : '',
+                                    s5 > 0 ? `Этап V: +${s5} (${s5_count})` : '',
+                                    s6 > 0 ? `Этап VI: +${s6} (${s6_count})` : '',
+                                    s7 > 0 ? `Этап VII: +${s7} (${s7_count})` : '',
+                                    adepts > 0 ? `Адепты: +${adepts} (${adepts_count})` : '',
+                                    dances > 0 ? `Танцы: +${dances} (${dances_count})` : '',
                                     totalGuildBonus > 0 ? `Бонус гильдии: +${totalGuildBonus}` : ''
                                 ].filter(Boolean);
 
                                 if (tooltipContent.length === 0 && totalValor > 0) {
                                     tooltipContent = [`Прочие: +${totalValor}`];
+                                }
+
+                                // Add full period to the top of tooltip
+                                if (dateRange.start && dateRange.end) {
+                                    tooltipContent.unshift(formatPeriod(dateRange.start, dateRange.end));
                                 }
 
                                 return (

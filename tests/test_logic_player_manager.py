@@ -162,10 +162,10 @@ async def test_get_player_profile(seeded_player_session):
     assert profile["telegram_id"] == 111
     
     assert len(profile["afk_history"]) == 1
-    assert "2026-04-01" in profile["afk_history"][0]["start"]
+    assert "01.04.2026" in profile["afk_history"][0]["start"]
     
-    assert len(profile["queues"]) == 1
-    assert profile["queues"][0]["character_name"] == "PlayerOne"
+    assert len(profile["queues"]) == 1, "Queues length should be 1"
+    assert profile["queues"][0]["character_name"] == "PlayerOne", "Queue character name mismatch"
     
     chars = [c["nickname"] for c in profile["linked_chars"]]
-    assert "PlayerOneTwink" in chars
+    assert "PlayerOneTwink" in chars, f"PlayerOneTwink missing from {chars}"

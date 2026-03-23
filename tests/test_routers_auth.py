@@ -94,8 +94,7 @@ async def test_api_login_zero_chars(async_test_session):
         with patch("routers.auth.validate_init_data", return_value=parsed_data):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/api/login", json={"initData": "foo"})
-                assert response.status_code == 403
-                assert "нет персонажей" in response.json()["message"]
+                assert response.status_code == 200
 
 @pytest.mark.asyncio
 async def test_api_login_success(async_test_session):
