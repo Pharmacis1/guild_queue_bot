@@ -340,6 +340,8 @@ async def get_kh_table_data(
             "s5_details": r.get("s5_details", []),
             "s6_details": r.get("s6_details", []),
             "s7_details": r.get("s7_details", []),
+            "adepts_details": r.get("adepts_details", []),
+            "dances_details": r.get("dances_details", []),
         })
 
     print(f"DEBUG: Returning {len(final_rows)} rows to API")

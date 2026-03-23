@@ -1126,9 +1126,83 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                             })()
                         )}
 
-                        {!loading && finalDisplayRows.length === 0 && (
-                            <div className="text-center p-4 text-muted">No data found for this period.</div>
-                        )}
+                    {!loading && filteredRows.length > 0 && (
+                        <div className="kh-row total-row" style={{
+                            display: 'grid',
+                            gridTemplateColumns: intervals.length > 10
+                                ? `250px repeat(${intervals.length}, 60px) 100px`
+                                : `minmax(200px, 2.5fr) repeat(${intervals.length}, 1fr) 1fr`,
+                            padding: '0',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            borderTop: '2px solid rgba(255, 255, 255, 0.1)',
+                            minHeight: '44px',
+                            alignItems: 'center',
+                            fontWeight: 'bold',
+                            color: '#fff',
+                            position: 'relative'
+                        }}>
+                            <div className="kh-col sticky-col" style={{
+                                paddingLeft: '16px',
+                                fontSize: '0.9rem',
+                                color: 'var(--accent-ruby)',
+                                position: 'sticky',
+                                left: 0,
+                                zIndex: 30,
+                                background: 'rgba(5, 5, 5, 1)',
+                                height: '100%',
+                                display: 'flex',
+                                alignItems: 'center'
+                            }}>
+                                ИТОГО
+                            </div>
+
+                            {intervals.map((_, i) => {
+                                const sum = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.valor || 0), 0);
+                                return (
+                                    <div key={i} className="kh-col" style={{ justifyContent: 'center' }}>
+                                        <span style={{ color: sum > 0 ? '#fff' : '#444' }}>{sum.toLocaleString()}</span>
+                                    </div>
+                                );
+                            })}
+
+                            {(() => {
+                                const totalValor = filteredRows.reduce((acc, r) => acc + (r.total_valor || 0), 0);
+                                const s1 = filteredRows.reduce((acc, r) => acc + (r.s1 || 0), 0) * 4;
+                                const s2 = filteredRows.reduce((acc, r) => acc + (r.s2 || 0), 0) * 6;
+                                const s3 = filteredRows.reduce((acc, r) => acc + (r.s3 || 0), 0) * 10;
+                                const s4 = filteredRows.reduce((acc, r) => acc + (r.s4 || 0), 0) * 14;
+                                const s5 = filteredRows.reduce((acc, r) => acc + (r.s5 || 0), 0) * 24;
+                                const s6 = filteredRows.reduce((acc, r) => acc + (r.s6 || 0), 0) * 40;
+                                const s7 = filteredRows.reduce((acc, r) => acc + (r.s7 || 0), 0) * 70;
+                                const adepts = filteredRows.reduce((acc, r) => acc + (r.adepts || r.s8 || 0), 0) * 7;
+                                const dances = totalValor - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
+
+                                const tooltipContent = [
+                                    `Этап I: +${s1}`,
+                                    `Этап II: +${s2}`,
+                                    `Этап III: +${s3}`,
+                                    `Этап IV: +${s4}`,
+                                    `Этап V: +${s5}`,
+                                    `Этап VI: +${s6}`,
+                                    `Этап VII: +${s7}`,
+                                    `Адепты: +${adepts}`,
+                                    `Танцы: +${dances}`
+                                ].filter(line => !line.endsWith(': +0'));
+
+                                return (
+                                    <div className="kh-col" style={{ justifyContent: 'center' }}>
+                                        <GenericTooltip title="Суммарная доблесть" content={tooltipContent}>
+                                            <span style={{ color: 'var(--accent-ruby)' }}>{totalValor.toLocaleString()}</span>
+                                        </GenericTooltip>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
+
+                    {!loading && finalDisplayRows.length === 0 && (
+                        <div className="text-center p-4 text-muted">No data found for this period.</div>
+                    )}
 
                     </div>
                 </div>

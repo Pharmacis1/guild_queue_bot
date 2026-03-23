@@ -84,6 +84,8 @@ class KHTableRow(BaseModel):
     s5_details: Optional[List[str]] = []
     s6_details: Optional[List[str]] = []
     s7_details: Optional[List[str]] = []
+    adepts_details: Optional[List[str]] = []
+    dances_details: Optional[List[str]] = []
     main_nickname: Optional[str] = None
     parties: Optional[List[dict]] = []
 

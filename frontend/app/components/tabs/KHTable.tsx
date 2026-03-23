@@ -164,12 +164,19 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
         const field = sortConfig.field;
         const order = sortConfig.order === 'asc' ? 1 : -1;
 
-        if (a[field] !== b[field]) {
+        // Special handling for adepts and dances if they are the sort field
+        let valA = a[field];
+        let valB = b[field];
+
+        if (field === 'adepts') { valA = a.adepts || a.s8; valB = b.adepts || b.s8; }
+        if (field === 'dances') { valA = a.dances || a.s9; valB = b.dances || b.s9; }
+
+        if (valA !== valB) {
             // Sort by value
-            if (typeof a[field] === 'string') {
-                return order * a[field].localeCompare(b[field]);
+            if (typeof valA === 'string') {
+                return order * valA.localeCompare(valB as string);
             }
-            return order * (a[field] - b[field]);
+            return order * ((valA as number) - (valB as number));
         }
         // Secondary sort: total_valor desc
         return b.total_valor - a.total_valor;
@@ -585,16 +592,19 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                     </div>
 
                     {/* Stages 1-9 (Roman for 1-7, then A, D) */}
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
-                        <div
-                            key={num}
-                            className={`kh-col ${num === 7 ? 'kh-stage-vii' : num === 8 ? 'kh-stage-a' : num === 9 ? 'kh-stage-d' : ''}`}
-                            onClick={() => toggleSort(`s${num}`)}
-                            style={{ cursor: 'pointer', textAlign: 'center', color: sortConfig.field === `s${num}` ? '#fff' : '#888' }}
-                        >
-                            {ROMAN_MAP[num] || num}
-                        </div>
-                    ))}
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => {
+                        const field = num <= 7 ? `s${num}` : num === 8 ? 'adepts' : 'dances';
+                        return (
+                            <div
+                                key={num}
+                                className={`kh-col ${num === 7 ? 'kh-stage-vii' : num === 8 ? 'kh-stage-a' : num === 9 ? 'kh-stage-d' : ''}`}
+                                onClick={() => toggleSort(field)}
+                                style={{ cursor: 'pointer', textAlign: 'center', color: sortConfig.field === field ? '#fff' : '#888' }}
+                            >
+                                {ROMAN_MAP[num] || num}
+                            </div>
+                        );
+                    })}
                 </div>
 
                 {/* Table Body */}
@@ -790,8 +800,8 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                             { val: row.s5, det: row.s5_details, t: 'V' },
                                             { val: row.s6, det: row.s6_details, t: 'VI' },
                                             { val: row.s7, det: row.s7_details, t: 'VII' },
-                                            { val: row.adepts || row.s8, det: [], t: 'A' },
-                                            { val: row.dances || row.s9, det: [], t: 'D' }
+                                            { val: row.adepts || row.s8, det: row.adepts_details, t: 'Адепты' },
+                                            { val: row.dances || row.s9, det: row.dances_details, t: 'Танцы' }
                                         ].map((item, idx) => {
                                             let stageClass = "kh-col";
                                             if (idx < 2) stageClass += " stage-early";
@@ -813,7 +823,69 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                         })
                     )}
 
-                    {!loading && sortedRows.length === 0 && (
+                    {!loading && filteredRows.length > 0 && (
+                        <div className="kh-row total-row" style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'minmax(200px, 2.5fr) repeat(9, 1fr)',
+                            paddingLeft: 0,
+                            paddingRight: '16px',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            borderTop: '2px solid rgba(255, 255, 255, 0.1)',
+                            minHeight: '44px',
+                            alignItems: 'center',
+                            fontWeight: 'bold',
+                            color: '#fff'
+                        }}>
+                            <div className="kh-col" style={{ paddingLeft: '16px', fontSize: '0.9rem', color: 'var(--accent-ruby)' }}>
+                                ИТОГО
+                            </div>
+                            {[
+                                { field: 's1', label: 'Этап I', val: 4 },
+                                { field: 's2', label: 'Этап II', val: 6 },
+                                { field: 's3', label: 'Этап III', val: 10 },
+                                { field: 's4', label: 'Этап IV', val: 14 },
+                                { field: 's5', label: 'Этап V', val: 24 },
+                                { field: 's6', label: 'Этап VI', val: 40 },
+                                { field: 's7', label: 'Этап VII', val: 70 },
+                                { field: 'adepts', label: 'Адепты', val: 7 },
+                                { field: 'dances', label: 'Танцы', val: 0 }
+                            ].map((stage, idx) => {
+                                let totalCount = 0;
+                                let totalValor = 0;
+                                filteredRows.forEach(r => {
+                                    let c = 0;
+                                    if (stage.field === 'adepts') c = r.adepts || r.s8;
+                                    else if (stage.field === 'dances') c = r.dances || r.s9;
+                                    else c = (r as any)[stage.field] || 0;
+                                    totalCount += c;
+
+                                    // For dances, valor is variable (2, 4, 8)
+                                    if (stage.field === 'dances') {
+                                        // Sum up from details if possible, or just skip valor in tooltip if too complex
+                                        // Actually backend provides valor_details, but it's not split by stage.
+                                        // Let's just calculate based on the val field if it was fixed.
+                                        // For dances, we'll try to sum up if we had that data.
+                                        // For now, let's just show count.
+                                    } else {
+                                        totalValor += c * stage.val;
+                                    }
+                                });
+
+                                const content = [`Всего: ${totalCount}`];
+                                if (totalValor > 0) content.push(`Доблесть: +${totalValor}`);
+
+                                return (
+                                    <div key={idx} className="kh-col" style={{ textAlign: 'center' }}>
+                                        <GenericTooltip title={stage.label} content={content}>
+                                            <span style={{ color: totalCount > 0 ? '#fff' : '#444' }}>{totalCount}</span>
+                                        </GenericTooltip>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {!loading && rows.length === 0 && (
                         <div className="text-center p-5 text-muted">No data found.</div>
                     )}
                 </div>

@@ -113,6 +113,8 @@ export interface KHTableRow {
     s5_details?: string[];
     s6_details?: string[];
     s7_details?: string[];
+    adepts_details?: string[];
+    dances_details?: string[];
     main_nickname?: string;
     parties?: { name: string; color: string }[];
 }
@@ -170,6 +172,26 @@ export interface MoneyTableRow {
     }[];
     main_nickname?: string;
     parties?: { name: string; color: string }[];
+    s1?: number;
+    s2?: number;
+    s3?: number;
+    s4?: number;
+    s5?: number;
+    s6?: number;
+    s7?: number;
+    s8?: number;
+    s9?: number;
+    adepts?: number;
+    dances?: number;
+    s1_details?: string[];
+    s2_details?: string[];
+    s3_details?: string[];
+    s4_details?: string[];
+    s5_details?: string[];
+    s6_details?: string[];
+    s7_details?: string[];
+    adepts_details?: string[];
+    dances_details?: string[];
 }
 
 export interface MoneyResponse {
