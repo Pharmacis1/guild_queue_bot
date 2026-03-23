@@ -854,8 +854,8 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                 let totalValor = 0;
                                 filteredRows.forEach(r => {
                                     let c = 0;
-                                    if (stage.field === 'adepts') c = r.adepts || r.s8;
-                                    else if (stage.field === 'dances') c = r.dances || r.s9;
+                                    if (stage.field === 'adepts') c = (r.adepts || r.s8 || 0);
+                                    else if (stage.field === 'dances') c = (r.dances || r.s9 || 0);
                                     else c = (r as any)[stage.field] || 0;
                                     totalCount += c;
 

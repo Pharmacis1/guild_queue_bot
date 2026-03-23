@@ -1133,16 +1133,15 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 ? `250px repeat(${intervals.length}, 60px) 100px`
                                 : `minmax(200px, 2.5fr) repeat(${intervals.length}, 1fr) 1fr`,
                             padding: '0',
-                            background: 'rgba(255, 255, 255, 0.05)',
-                            borderTop: '2px solid rgba(255, 255, 255, 0.1)',
+                            background: 'rgba(255, 255, 255, 0.03)',
+                            borderTop: '1px solid rgba(255, 255, 255, 0.15)',
                             minHeight: '44px',
-                            alignItems: 'center',
+                            alignItems: 'stretch',
                             fontWeight: 'bold',
-                            color: '#fff',
-                            position: 'relative'
+                            color: '#fff'
                         }}>
                             <div className="kh-col sticky-col" style={{
-                                paddingLeft: '16px',
+                                padding: '10px 16px',
                                 fontSize: '0.9rem',
                                 color: 'var(--accent-ruby)',
                                 position: 'sticky',
@@ -1151,16 +1150,50 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 background: 'rgba(5, 5, 5, 1)',
                                 height: '100%',
                                 display: 'flex',
-                                alignItems: 'center'
+                                alignItems: 'center',
+                                boxSizing: 'border-box',
+                                borderRight: '1px solid rgba(255, 255, 255, 0.05)'
                             }}>
                                 ИТОГО
                             </div>
 
                             {intervals.map((_, i) => {
                                 const sum = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.valor || 0), 0);
+                                
+                                const s1 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s1 || 0), 0) * 4;
+                                const s2 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s2 || 0), 0) * 6;
+                                const s3 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s3 || 0), 0) * 10;
+                                const s4 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s4 || 0), 0) * 14;
+                                const s5 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s5 || 0), 0) * 24;
+                                const s6 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s6 || 0), 0) * 40;
+                                const s7 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s7 || 0), 0) * 70;
+                                const adepts = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.adepts || 0), 0) * 7;
+                                const dances = sum - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
+
+                                let tooltipContent = [
+                                    s1 > 0 ? `Этап I: +${s1}` : '',
+                                    s2 > 0 ? `Этап II: +${s2}` : '',
+                                    s3 > 0 ? `Этап III: +${s3}` : '',
+                                    s4 > 0 ? `Этап IV: +${s4}` : '',
+                                    s5 > 0 ? `Этап V: +${s5}` : '',
+                                    s6 > 0 ? `Этап VI: +${s6}` : '',
+                                    s7 > 0 ? `Этап VII: +${s7}` : '',
+                                    adepts > 0 ? `Адепты: +${adepts}` : '',
+                                    dances > 0 ? `Танцы: +${dances}` : ''
+                                ].filter(Boolean);
+
+                                if (tooltipContent.length === 0 && sum > 0) tooltipContent = [`Прочие: +${sum}`];
+
                                 return (
-                                    <div key={i} className="kh-col" style={{ justifyContent: 'center' }}>
-                                        <span style={{ color: sum > 0 ? '#fff' : '#444' }}>{sum.toLocaleString()}</span>
+                                    <div key={i} className="kh-col" style={{ 
+                                        justifyContent: 'center', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        borderRight: '1px solid rgba(255, 255, 255, 0.05)'
+                                    }}>
+                                        <GenericTooltip title="Детализация по периоду" content={tooltipContent.length > 0 ? tooltipContent : ["Данных нет"]}>
+                                            <span style={{ color: sum > 0 ? '#fff' : '#444' }}>{sum.toLocaleString()}</span>
+                                        </GenericTooltip>
                                     </div>
                                 );
                             })}
@@ -1177,21 +1210,29 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 const adepts = filteredRows.reduce((acc, r) => acc + (r.adepts || r.s8 || 0), 0) * 7;
                                 const dances = totalValor - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
 
-                                const tooltipContent = [
-                                    `Этап I: +${s1}`,
-                                    `Этап II: +${s2}`,
-                                    `Этап III: +${s3}`,
-                                    `Этап IV: +${s4}`,
-                                    `Этап V: +${s5}`,
-                                    `Этап VI: +${s6}`,
-                                    `Этап VII: +${s7}`,
-                                    `Адепты: +${adepts}`,
-                                    `Танцы: +${dances}`
-                                ].filter(line => !line.endsWith(': +0'));
+                                let tooltipContent = [
+                                    s1 > 0 ? `Этап I: +${s1}` : '',
+                                    s2 > 0 ? `Этап II: +${s2}` : '',
+                                    s3 > 0 ? `Этап III: +${s3}` : '',
+                                    s4 > 0 ? `Этап IV: +${s4}` : '',
+                                    s5 > 0 ? `Этап V: +${s5}` : '',
+                                    s6 > 0 ? `Этап VI: +${s6}` : '',
+                                    s7 > 0 ? `Этап VII: +${s7}` : '',
+                                    adepts > 0 ? `Адепты: +${adepts}` : '',
+                                    dances > 0 ? `Танцы: +${dances}` : ''
+                                ].filter(Boolean);
+
+                                if (tooltipContent.length === 0 && totalValor > 0) {
+                                    tooltipContent = [`Прочие: +${totalValor}`];
+                                }
 
                                 return (
-                                    <div className="kh-col" style={{ justifyContent: 'center' }}>
-                                        <GenericTooltip title="Суммарная доблесть" content={tooltipContent}>
+                                    <div className="kh-col" style={{ 
+                                        justifyContent: 'center', 
+                                        display: 'flex', 
+                                        alignItems: 'center' 
+                                    }}>
+                                        <GenericTooltip title="Суммарная доблесть" content={tooltipContent.length > 0 ? tooltipContent : ["Данных нет"]}>
                                             <span style={{ color: 'var(--accent-ruby)' }}>{totalValor.toLocaleString()}</span>
                                         </GenericTooltip>
                                     </div>

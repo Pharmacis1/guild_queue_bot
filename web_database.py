@@ -323,6 +323,15 @@ async def get_data_from_db(
                         "valor": istats["total_valor"],
                         "gold": istats["total_gold"],
                         "valor_details": istats["valor_details"],
+                        "s1": istats["s1"],
+                        "s2": istats["s2"],
+                        "s3": istats["s3"],
+                        "s4": istats["s4"],
+                        "s5": istats["s5"],
+                        "s6": istats["s6"],
+                        "s7": istats["s7"],
+                        "adepts": istats["adepts"],
+                        "dances": istats["dances"],
                     }
                 )
 
