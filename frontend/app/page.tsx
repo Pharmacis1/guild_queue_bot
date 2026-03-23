@@ -56,7 +56,8 @@ export default function Home() {
     const [refreshKey, setRefreshKey] = useState(0);
     const handleRefresh = () => setRefreshKey(prev => prev + 1);
 
-    if (isTMA && !initData?.user) {
+    if (isTMA && (!initData?.user || !initData.user.main_role_id)) {
+        const isRegistered = !!initData?.user;
         return (
             <main style={{ background: '#0a0a0f', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
                 <div style={{
@@ -70,20 +71,36 @@ export default function Home() {
                     boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
                 }}>
                     <div style={{ fontSize: '50px', marginBottom: '20px' }}>🕷️</div>
-                    <h2 style={{ color: '#fff', fontFamily: 'Cinzel, serif', marginBottom: '15px' }}>Добро пожаловать</h2>
+                    <h2 style={{ color: '#fff', fontFamily: 'Cinzel, serif', marginBottom: '15px' }}>
+                        {isRegistered ? 'Персонаж не привязан' : 'Добро пожаловать'}
+                    </h2>
                     <p style={{ color: '#ccc', fontSize: '16px', lineHeight: '1.5', marginBottom: '25px' }}>
-                        Для доступа к функциям гильдии в Telegram вам необходимо зарегистрироваться и привязать персонажа через бота.
+                        {isRegistered 
+                            ? 'Ваш аккаунт зарегистрирован, но у вас еще нет привязанных персонажей. Пожалуйста, добавьте их в боте.'
+                            : 'Для доступа к функциям гильдии в Telegram вам необходимо зарегистрироваться и привязать персонажа через бота.'}
                     </p>
                     <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '15px', textAlign: 'left', marginBottom: '25px' }}>
-                        <div style={{ color: '#8B0000', fontWeight: 'bold', marginBottom: '8px' }}>Инструкция:</div>
+                        <div style={{ color: '#8B0000', fontWeight: 'bold', marginBottom: '8px' }}>Что делать:</div>
                         <ol style={{ color: '#aaa', fontSize: '14px', paddingLeft: '20px', margin: 0 }}>
-                            <li>Нажмите <b>/start</b> в боте</li>
-                            <li>Пришлите свой скриншот характеристик</li>
-                            <li>Дождитесь одобрения Мастера</li>
+                            {isRegistered ? (
+                                <>
+                                    <li>Вернитесь в чат с ботом</li>
+                                    <li>Нажмите кнопку <b>«👥 Мои персонажи»</b></li>
+                                    <li>Добавьте своих персонажей</li>
+                                </>
+                            ) : (
+                                <>
+                                    <li>Нажмите <b>/start</b> в боте</li>
+                                    <li>Пришлите скриншот характеристик</li>
+                                    <li>Дождитесь одобрения Мастера</li>
+                                </>
+                            )}
                         </ol>
                     </div>
                     <p style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
-                        Если вы уже отправили данные, подождите, пока Мастер подтвердит вашу заявку.
+                        {isRegistered 
+                            ? 'После привязки персонажа, обновите это окно.'
+                            : 'Если вы уже отправили данные, подождите, пока Мастер подтвердит вашу заявку.'}
                     </p>
                 </div>
             </main>
