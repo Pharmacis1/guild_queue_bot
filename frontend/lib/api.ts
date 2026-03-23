@@ -5,10 +5,31 @@ const api = axios.create({
     withCredentials: true, // Important for session cookies (Auth)
 });
 
+// Robust way to get Telegram Init Data
+export const getTMAInitData = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    
+    // 1. Try official WebApp object
+    const fromWebApp = (window as any).Telegram?.WebApp?.initData;
+    if (fromWebApp && fromWebApp.length > 0) return fromWebApp;
+    
+    // 2. Try URL hash (common in TDesktop and first load)
+    const hash = window.location.hash;
+    if (hash) {
+        // Handle both #tgWebAppData=... and direct query params in hash
+        const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.substring(1) : hash);
+        const tgData = hashParams.get('tgWebAppData');
+        if (tgData) return tgData;
+    }
+    
+    return null;
+};
+
 // Add TMA initData to headers if available
 api.interceptors.request.use((config) => {
-    if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData) {
-        config.headers['X-Telegram-Init-Data'] = (window as any).Telegram.WebApp.initData;
+    const initData = getTMAInitData();
+    if (initData) {
+        config.headers['X-Telegram-Init-Data'] = initData;
     }
     return config;
 });

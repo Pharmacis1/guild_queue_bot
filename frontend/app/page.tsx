@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import Header from './components/Header';
-import { fetchInitData, InitData, loginViaTMA } from '@/lib/api';
+import { fetchInitData, InitData, loginViaTMA, getTMAInitData } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import KHTable from './components/tabs/KHTable';
 import MoneyTable from './components/tabs/MoneyTable';
@@ -25,11 +25,12 @@ export default function Home() {
 
     useEffect(() => {
         const init = async () => {
-            const tmaData = typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData;
+            const tmaData = getTMAInitData();
             const tmaActive = !!tmaData;
             setIsTMA(tmaActive);
             
             console.log("TMA Detection:", tmaActive);
+            if (tmaData) console.log("InitData found length:", tmaData.length);
 
             try {
                 let data = await fetchInitData();
