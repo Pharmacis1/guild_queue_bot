@@ -178,6 +178,7 @@ export interface MoneyTableRow {
         s7?: number;
         adepts?: number;
         dances?: number;
+        guild_bonus?: number; // Added
     }[];
     main_nickname?: string;
     parties?: { name: string; color: string }[];
@@ -205,7 +206,8 @@ export interface MoneyTableRow {
 
 export interface MoneyResponse {
     rows: MoneyTableRow[];
-    intervals: { label: string; start: string; end: string }[];
+    intervals: { label: string; start: string; end: string; guild_bonus?: number }[]; // Added
+    total_guild_bonus: number; // Added
     start_date: string;
     end_date: string;
     group_period: string | null;

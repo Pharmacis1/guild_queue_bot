@@ -477,9 +477,24 @@ async def get_money_table_data(
 
         final_rows.append(row)
 
+    # Calculate Guild Bonus (300 per Monday)
+    total_guild_bonus = 0
+    for interval in intervals:
+        s_dt = interval["start"]
+        e_dt = interval["end"]
+        mons = 0
+        curr = s_dt
+        while curr <= e_dt:
+            if curr.weekday() == 0:
+                mons += 1
+            curr += timedelta(days=1)
+        interval["guild_bonus"] = mons * 300
+        total_guild_bonus += interval["guild_bonus"]
+
     return {
         "rows": final_rows,
         "intervals": intervals,
+        "total_guild_bonus": total_guild_bonus,
         "start_date": m_s,
         "end_date": m_e,
         "group_period": group_period,

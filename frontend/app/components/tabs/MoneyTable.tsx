@@ -38,7 +38,8 @@ interface MoneyTableProps {
 export default function MoneyTable({ onRowClick, onObserverClick, classes, currentUser }: MoneyTableProps) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<MoneyTableRow[]>([]);
-    const [intervals, setIntervals] = useState<{ label: string }[]>([]);
+    const [intervals, setIntervals] = useState<{ label: string, guild_bonus?: number }[]>([]);
+    const [totalGuildBonus, setTotalGuildBonus] = useState(0);
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
     // Filters
@@ -97,12 +98,14 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
 
     const fetchData = (params: any = {}) => {
         setLoading(true);
-        // Merge current state with params overrides
         const queryParams = {
-            classes: selectedClasses.length > 0 ? selectedClasses.join(',') : undefined,
-            newcomers: entryType === 'NEW' ? 'only' : entryType === 'OLD' ? 'hide' : undefined,
+            start: period === 'CUSTOM' ? dateRange.start : '',
+            end: period === 'CUSTOM' ? dateRange.end : '',
+            period_type: period,
             group_period: groupPeriod,
             group_count: groupCount,
+            classes: selectedClasses.length > 0 ? selectedClasses.join(',') : '',
+            newcomers: entryType === 'NEW' ? 'only' : entryType === 'OLD' ? 'hide' : undefined,
             ...params
         };
 
@@ -110,6 +113,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
             .then((data) => {
                 setRows(data.rows);
                 setIntervals(data.intervals || []);
+                setTotalGuildBonus(data.total_guild_bonus || 0);
                 setDateRange({ start: data.start_date, end: data.end_date });
 
                 // Expand all twins by default on first successful load
@@ -1157,8 +1161,10 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 ИТОГО
                             </div>
 
-                            {intervals.map((_, i) => {
-                                const sum = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.valor || 0), 0);
+                             {intervals.map((interval, i) => {
+                                const playerSum = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.valor || 0), 0);
+                                const bonus = interval.guild_bonus || 0;
+                                const sum = playerSum + bonus;
                                 
                                 const s1 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s1 || 0), 0) * 4;
                                 const s2 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s2 || 0), 0) * 6;
@@ -1168,7 +1174,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 const s6 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s6 || 0), 0) * 40;
                                 const s7 = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.s7 || 0), 0) * 70;
                                 const adepts = filteredRows.reduce((acc, r) => acc + (r.interval_stats?.[i]?.adepts || 0), 0) * 7;
-                                const dances = sum - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
+                                const dances = playerSum - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
 
                                 let tooltipContent = [
                                     s1 > 0 ? `Этап I: +${s1}` : '',
@@ -1179,7 +1185,8 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     s6 > 0 ? `Этап VI: +${s6}` : '',
                                     s7 > 0 ? `Этап VII: +${s7}` : '',
                                     adepts > 0 ? `Адепты: +${adepts}` : '',
-                                    dances > 0 ? `Танцы: +${dances}` : ''
+                                    dances > 0 ? `Танцы: +${dances}` : '',
+                                    bonus > 0 ? `Бонус гильдии: +${bonus}` : ''
                                 ].filter(Boolean);
 
                                 if (tooltipContent.length === 0 && sum > 0) tooltipContent = [`Прочие: +${sum}`];
@@ -1199,7 +1206,9 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                             })}
 
                             {(() => {
-                                const totalValor = filteredRows.reduce((acc, r) => acc + (r.total_valor || 0), 0);
+                                const playerTotal = filteredRows.reduce((acc, r) => acc + (r.total_valor || 0), 0);
+                                const totalValor = playerTotal + totalGuildBonus;
+
                                 const s1 = filteredRows.reduce((acc, r) => acc + (r.s1 || 0), 0) * 4;
                                 const s2 = filteredRows.reduce((acc, r) => acc + (r.s2 || 0), 0) * 6;
                                 const s3 = filteredRows.reduce((acc, r) => acc + (r.s3 || 0), 0) * 10;
@@ -1208,7 +1217,7 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                 const s6 = filteredRows.reduce((acc, r) => acc + (r.s6 || 0), 0) * 40;
                                 const s7 = filteredRows.reduce((acc, r) => acc + (r.s7 || 0), 0) * 70;
                                 const adepts = filteredRows.reduce((acc, r) => acc + (r.adepts || r.s8 || 0), 0) * 7;
-                                const dances = totalValor - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
+                                const dances = playerTotal - (s1 + s2 + s3 + s4 + s5 + s6 + s7 + adepts);
 
                                 let tooltipContent = [
                                     s1 > 0 ? `Этап I: +${s1}` : '',
@@ -1219,7 +1228,8 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                     s6 > 0 ? `Этап VI: +${s6}` : '',
                                     s7 > 0 ? `Этап VII: +${s7}` : '',
                                     adepts > 0 ? `Адепты: +${adepts}` : '',
-                                    dances > 0 ? `Танцы: +${dances}` : ''
+                                    dances > 0 ? `Танцы: +${dances}` : '',
+                                    totalGuildBonus > 0 ? `Бонус гильдии: +${totalGuildBonus}` : ''
                                 ].filter(Boolean);
 
                                 if (tooltipContent.length === 0 && totalValor > 0) {
