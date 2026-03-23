@@ -80,7 +80,7 @@ async def main():
     await bot.set_my_commands([BotCommand(command="/start", description="🏠 Главное меню")])
     
     # Set Menu Button (WebApp)
-    site_url = os.getenv("SITE_URL")
+    site_url = os.getenv("SITE_URL", "").rstrip("/")
     if not site_url:
         logging.warning("⚠️ SITE_URL is not set in .env! Menu button might not work.")
     else:
