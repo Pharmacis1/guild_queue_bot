@@ -18,23 +18,30 @@ export default function Home() {
     const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [observerTarget, setObserverTarget] = useState<{ roleId: number; name: string } | null>(null);
-    const [isTMA, setIsTMA] = useState(false);
+    const [isTMA, setIsTMA] = useState<boolean | null>(null); // null means "detecting"
+    const [loading, setLoading] = useState(true);
 
     const router = useRouter();
 
     useEffect(() => {
         const init = async () => {
-            const tma = typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData;
-            setIsTMA(!!tma);
+            const tmaData = typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData;
+            const tmaActive = !!tmaData;
+            setIsTMA(tmaActive);
+            
+            console.log("TMA Detection:", tmaActive);
 
             try {
                 let data = await fetchInitData();
+                console.log("Initial data loaded. User:", data.user?.username, "Main Role:", data.user?.main_role_id);
                 
                 // Auto-login if in TMA
-                if (!data.user && tma) {
+                if (!data.user && tmaData) {
                     try {
-                        await loginViaTMA((window as any).Telegram.WebApp.initData);
+                        console.log("Attempting TMA login...");
+                        await loginViaTMA(tmaData);
                         data = await fetchInitData();
+                        console.log("Data after TMA login. User:", data.user?.username);
                     } catch (e) {
                          console.error("Auto-login failed:", e);
                     }
@@ -43,11 +50,14 @@ export default function Home() {
                 setInitData(data);
                 
                 // Redirect to main character profile if available (TMA ONLY)
-                if (data.user?.main_role_id && tma) {
+                if (data.user?.main_role_id && tmaActive) {
+                    console.log("Redirecting to profile:", data.user.main_role_id);
                     router.replace(`/player/${data.user.main_role_id}`);
                 }
             } catch (err) {
                 console.error("Failed to fetch init data:", err);
+            } finally {
+                setLoading(false);
             }
         };
         init();
@@ -55,6 +65,18 @@ export default function Home() {
 
     const [refreshKey, setRefreshKey] = useState(0);
     const handleRefresh = () => setRefreshKey(prev => prev + 1);
+ 
+    // Show loading while we are detecting environment or fetching data
+    if (loading || isTMA === null) {
+        return (
+            <main style={{ background: '#0a0a0f', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ color: '#8B0000', textAlign: 'center' }}>
+                    <div className="spinner-border" role="status" style={{ width: '3rem', height: '3rem' }}></div>
+                    <div style={{ marginTop: '15px', fontFamily: 'Cinzel, serif', fontSize: '1.2rem' }}>Загрузка...</div>
+                </div>
+            </main>
+        );
+    }
 
     if (isTMA && (!initData?.user || !initData.user.main_role_id)) {
         const isRegistered = !!initData?.user;
