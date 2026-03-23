@@ -859,13 +859,9 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     else c = (r as any)[stage.field] || 0;
                                     totalCount += c;
 
-                                    // For dances, valor is variable (2, 4, 8)
                                     if (stage.field === 'dances') {
-                                        // Sum up from details if possible, or just skip valor in tooltip if too complex
-                                        // Actually backend provides valor_details, but it's not split by stage.
-                                        // Let's just calculate based on the val field if it was fixed.
-                                        // For dances, we'll try to sum up if we had that data.
-                                        // For now, let's just show count.
+                                        const stageValSum = (r.s1 || 0) * 4 + (r.s2 || 0) * 6 + (r.s3 || 0) * 10 + (r.s4 || 0) * 14 + (r.s5 || 0) * 24 + (r.s6 || 0) * 40 + (r.s7 || 0) * 70 + (r.adepts || r.s8 || 0) * 7;
+                                        totalValor += (r.total_valor || 0) - stageValSum;
                                     } else {
                                         totalValor += c * stage.val;
                                     }
