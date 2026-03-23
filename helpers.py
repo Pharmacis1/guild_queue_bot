@@ -231,7 +231,8 @@ async def update_user_menu_button(user_tg_id: int, role_id: Optional[int]):
     from typing import Optional
     import os
     
-    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
+    site_url = os.getenv("SITE_URL")
+    if not site_url: return
     url = site_url
     if role_id:
         url = f"{site_url}/player/{role_id}"

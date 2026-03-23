@@ -9,7 +9,7 @@ def get_main_menu(user, is_restricted=False, main_role_id=None):
     kb = []
     
     # 📱 Открыть Профиль
-    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
+    site_url = os.getenv("SITE_URL", "")
     web_app_url = site_url
     if main_role_id:
         web_app_url = f"{site_url}/player/{main_role_id}"

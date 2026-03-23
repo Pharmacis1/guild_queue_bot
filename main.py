@@ -80,14 +80,17 @@ async def main():
     await bot.set_my_commands([BotCommand(command="/start", description="🏠 Главное меню")])
     
     # Set Menu Button (WebApp)
-    site_url = os.getenv("SITE_URL", "https://requiemfinal.share.zrok.io")
-    try:
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="📱 Мой Профиль", web_app=WebAppInfo(url=site_url))
-        )
-    except Exception as e:
-        import logging
-        logging.error(f"Failed to set menu button: {e}")
+    site_url = os.getenv("SITE_URL")
+    if not site_url:
+        logging.warning("⚠️ SITE_URL is not set in .env! Menu button might not work.")
+    else:
+        print(f"DEBUG: Setting menu button to SITE_URL: '{site_url}'")
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="📱 Мой Профиль", web_app=WebAppInfo(url=site_url))
+            )
+        except Exception as e:
+            logging.error(f"Failed to set menu button: {e}")
 
     # 3. Restore Scheduled Tasks
     async with AsyncSessionLocal() as session:
