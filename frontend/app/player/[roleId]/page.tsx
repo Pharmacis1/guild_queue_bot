@@ -286,9 +286,9 @@ export default function PlayerProfileLite() {
                             <button className={styles.pageBtn} onClick={() => setKhOffset(o => o + 1)} disabled={khOffset >= 0}>&gt;</button>
                         </div>
                         <div className={styles.squadTable}>
-                            {squadStats?.squad_stats.map((char, i) => (
+                            {squadStats?.squad_stats?.map((char, i) => (
                                 <div key={i} className={`${styles.squadRow} ${char.role_id === roleId ? styles.squadRowActive : ''}`} onClick={() => router.push(`/player/${char.role_id}`)}>
-                                    <ClassIcon classId={profile.linked_chars.find(c => c.role_id === char.role_id)?.class_id || 0} size={24} />
+                                    <ClassIcon classId={profile?.linked_chars?.find(c => c.role_id === char.role_id)?.class_id || 0} size={24} />
                                     <span className={styles.squadNick} style={{flex: 1, marginLeft: '8px'}}>{char.nickname}</span>
                                     
                                     <div className={styles.squadStages}>

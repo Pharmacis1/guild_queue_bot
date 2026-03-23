@@ -11,6 +11,7 @@ import {
     addAfkHistory
 } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
+import styles from '../../player/[roleId]/ProfileLite.module.css';
 
 interface SettingsModalProps {
     data: InitData | null;
@@ -114,7 +115,7 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
     };
 
     return (
-        <div className={`modal fade show d-block ${isClosing ? 'modal-animate-out' : ''}`} style={{ backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', zIndex: 100000 }}>
+        <div className={`modal fade show d-block ${isClosing ? styles.modalAnimateOut : styles.modalAnimateIn}`} style={{ backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', zIndex: 100000 }}>
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content" style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '16px', color: '#fff' }}>
                     <div className="modal-header" style={{ borderBottom: '1px solid #222', padding: '20px' }}>
@@ -145,12 +146,6 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                     </div>
                 </div>
             </div>
-            <style jsx>{`
-                .modal-animate-in { animation: modalIn 0.3s ease-out; }
-                .modal-animate-out { animation: modalOut 0.2s ease-in forwards; }
-                @keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-                @keyframes modalOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.95); } }
-            `}</style>
         </div>
     );
 }

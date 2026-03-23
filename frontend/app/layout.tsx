@@ -1,5 +1,4 @@
 import './globals.css'
-import 'bootstrap/dist/css/bootstrap.min.css';
 import type { Metadata, Viewport } from 'next'
 import SpiderScroll from './components/ui/SpiderScroll'
 
