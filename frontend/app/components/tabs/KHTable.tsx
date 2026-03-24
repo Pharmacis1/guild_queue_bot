@@ -694,6 +694,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                                     style={{
                                         display: 'grid',
                                         gridTemplateColumns: 'minmax(200px, 2.5fr) repeat(9, 1fr)',
+                                        gap: '0',
                                         paddingLeft: 0,
                                         paddingRight: '16px',
                                         borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
@@ -851,6 +852,7 @@ export default function KHTable({ onRowClick, onObserverClick, classes, currentU
                         <div className="kh-row total-row" style={{
                             display: 'grid',
                             gridTemplateColumns: 'minmax(200px, 2.5fr) repeat(9, 1fr)',
+                            gap: '0',
                             paddingLeft: 0,
                             paddingRight: '16px',
                             background: 'rgba(255, 255, 255, 0.05)',

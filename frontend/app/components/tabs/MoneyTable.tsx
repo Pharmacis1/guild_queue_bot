@@ -1139,7 +1139,12 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                             gridTemplateColumns: intervals.length > 10
                                 ? `250px repeat(${intervals.length}, 60px) 100px`
                                 : `minmax(200px, 2.5fr) repeat(${intervals.length}, 1fr) 1fr`,
+                            gap: '0',
                             padding: '0',
+                            width: '100%',
+                            maxWidth: 'none',
+                            margin: '0 auto',
+                            boxSizing: 'border-box',
                             background: 'rgba(255, 255, 255, 0.03)',
                             borderTop: '1px solid rgba(255, 255, 255, 0.15)',
                             minHeight: '44px',
@@ -1213,7 +1218,8 @@ export default function MoneyTable({ onRowClick, onObserverClick, classes, curre
                                         justifyContent: 'center', 
                                         display: 'flex', 
                                         alignItems: 'center', 
-                                        borderRight: '1px solid rgba(255, 255, 255, 0.05)'
+                                        borderRight: 'none',
+                                        boxSizing: 'border-box'
                                     }}>
                                         <GenericTooltip
                                             title="Итого за период"

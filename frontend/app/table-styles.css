@@ -27,7 +27,7 @@
     /* Stretch to fill full height */
     padding: 0;
     /* No padding here, use column padding */
-    gap: 4px;
+    gap: 0;
     max-width: 1200px;
     margin: 0 auto;
 }
@@ -120,6 +120,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
 }
 
 
