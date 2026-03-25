@@ -91,7 +91,7 @@ class RemoteBrowserSession:
                 self.context.on("page", self._on_popup)
 
                 logger.info(f"Navigating to {url}...")
-                await self.page.goto(url)
+                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 self.is_active = True
                 logger.info("Browser started successfully.")
 
@@ -262,7 +262,7 @@ class RemoteBrowserSession:
             elif action_type == "goto":
                 url = action.get("url")
                 if url:
-                    await self.page.goto(url)
+                    await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     return {"status": "ok", "message": f"Navigated to {url}"}
                 else:
                     raise HTTPException(status_code=400, detail="Missing url for goto action")
