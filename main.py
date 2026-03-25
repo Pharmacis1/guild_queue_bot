@@ -26,11 +26,11 @@ from routers import admin_browser, api, auth, observer, views, api_dashboard
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize Browser
-    # from routers import observer
-    # await observer.init_browser()
+    from routers import observer
+    await observer.init_browser()
     yield
     # Shutdown: Close Browser
-    # await observer.close_browser()
+    await observer.close_browser()
 
 app = FastAPI(lifespan=lifespan)
 

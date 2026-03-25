@@ -171,8 +171,21 @@ class RemoteBrowserSession:
             await self.stop_session()
             raise HTTPException(status_code=503, detail=f"Browser Error: {str(e)}")
 
-    async def stop_session(self):
+    async def stop_session(self, save: bool = True):
         async with self.lock:
+            # Optionally save state before closing - NOW DEFAULT TRUE
+            if self.is_active and self.context:
+                try:
+                    logger.info(f"Attempting to save auth state to {AUTH_FILE}...")
+                    await self.context.storage_state(path=AUTH_FILE)
+                    if os.path.exists(AUTH_FILE):
+                        size = os.path.getsize(AUTH_FILE)
+                        logger.info(f"✅ Auth state saved successfully to {AUTH_FILE} ({size} bytes)")
+                    else:
+                        logger.error(f"❌ storage_state CALLED but {AUTH_FILE} was NOT CREATED!")
+                except Exception as e:
+                    logger.error(f"❌ Failed to save state during stop: {e}")
+
             # Always try to cleanup, even if is_active=False (cleanup failed start)
             try:
                 if self.browser:
@@ -188,7 +201,7 @@ class RemoteBrowserSession:
                 self.page = None
                 self.playwright = None
 
-            return {"status": "ok", "message": "Browser session stopped."}
+            return {"status": "ok", "message": "Browser session stopped." + (" (Saved)" if save else "")}
 
     async def save_session_state(self):
         async with self.lock:
@@ -293,8 +306,8 @@ async def interact(action: dict):
 
 
 @router.post("/stop")
-async def stop_browser():
-    return await session_manager.stop_session()
+async def stop_browser(save: bool = True):
+    return await session_manager.stop_session(save=save)
 
 
 @router.post("/save")

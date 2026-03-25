@@ -89,7 +89,7 @@
 
         <button class="btn btn-info" onclick="triggerScan()">🔍 Run Scan</button>
         <button class="btn btn-success" onclick="saveOnly()">💾 SAVE</button>
-        <button class="btn btn-danger" onclick="stopSession()">⏹ SAVE & STOP</button>
+        <button class="btn btn-danger" onclick="stopSession(true)">⏹ SAVE & STOP</button>
     </div>
     {% else %}
     <div class="auth-container">
@@ -168,19 +168,21 @@
             statusBar.textContent = "SESSION CRASHED";
         }
 
-        async function stopSession() {
+        async function stopSession(save = false) {
             clearInterval(refreshInterval);
             clearInterval(statusInterval);
             overlay.style.display = 'none';
             errorOverlay.style.display = 'none';
 
             try {
-                const res = await fetch('/api/browser/stop', { method: 'POST' });
+                const url = '/api/browser/stop' + (save ? '?save=true' : '');
+                const res = await fetch(url, { method: 'POST' });
                 const data = await res.json();
                 statusBar.style.background = '#d32f2f'; // Red
-                statusBar.textContent = "SESSION STOPPED";
+                statusBar.textContent = "SESSION STOPPED" + (save ? " & SAVED" : "");
                 img.src = "";
                 isRunning = false;
+                if (save) alert("Session saved and stopped!");
             } catch (e) { alert('Network Error: ' + e); }
         }
 
