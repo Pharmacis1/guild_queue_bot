@@ -19,10 +19,7 @@ def get_main_menu(user, is_restricted=False, main_role_id=None):
 
     if not is_restricted:
         kb.append([types.InlineKeyboardButton(text="✍️ Записаться в очередь", callback_data="menu_join")])
-        kb.append([types.InlineKeyboardButton(text="📜 Моя история получения наград", callback_data="menu_history")])
-        kb.append([types.InlineKeyboardButton(text="ℹ️ Инфо об очередях", callback_data="menu_info")])
-        kb.append([types.InlineKeyboardButton(text="🛌 Отсутствие(AFK)", callback_data="menu_afk")])
-        kb.append([types.InlineKeyboardButton(text="🏃 Управление записями в очереди", callback_data="my_active_queues")])
+        kb.append([types.InlineKeyboardButton(text="🛌 Предупредить об отсутствии", callback_data="menu_afk")])
     
     if user.is_master:
         kb.append([types.InlineKeyboardButton(text="👑 Панель Мастера", callback_data="menu_master")])

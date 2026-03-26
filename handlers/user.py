@@ -718,6 +718,10 @@ async def join_menu(callback: types.CallbackQuery, session: AsyncSession = None)
     queues = [q for q in queues if q.name not in REMOVED_QUEUES]
 
     queues.sort(key=get_sort_index)
+    # Get user's active entries to mark joined queues
+    result_user_entries = await session.execute(select(QueueEntry.queue_type_id).filter_by(user_id=user.id))
+    user_queue_ids = set(result_user_entries.scalars().all())
+
     kb = []
 
     for q in queues:
@@ -732,7 +736,18 @@ async def join_menu(callback: types.CallbackQuery, session: AsyncSession = None)
         result_count = await session.execute(stmt)
         count = result_count.scalar() or 0
         status = "🔒 ЗАКРЫТА" if q.is_locked else f"({count})"
-        kb.append([types.InlineKeyboardButton(text=f"{q.name} {status}", callback_data=f"view_q_{q.id}")])
+        
+        prefix = "✅ " if q.id in user_queue_ids else ""
+        kb.append([types.InlineKeyboardButton(text=f"{prefix}{q.name} {status}", callback_data=f"view_q_{q.id}")])
+
+    # Add middle row with History and Info
+    kb.append([
+        types.InlineKeyboardButton(text="ℹ️ Справка", callback_data="menu_info"),
+        types.InlineKeyboardButton(text="📜 История", callback_data="menu_history")
+    ])
+    
+    # Add active queues button
+    kb.append([types.InlineKeyboardButton(text="🏃 Мои активные записи", callback_data="my_active_queues")])
 
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")])
 
@@ -783,6 +798,14 @@ async def view_queue(callback: types.CallbackQuery, session: AsyncSession = None
 
     if user_entry:
         kb.append([types.InlineKeyboardButton(text="🏃 Выйти из очереди", callback_data=f"leave_q_{qid}")])
+        
+        row = [types.InlineKeyboardButton(text="🔄 Сменить персонажа", callback_data=f"swap_start_{user_entry.id}:v{qid}")]
+        
+        if q.name != "Цилинь":
+            mode_text = "🔄 Авто" if not user_entry.auto_requeue else "1️⃣ Разово"
+            row.append(types.InlineKeyboardButton(text=f"🔀 {mode_text}", callback_data=f"toggle_mode_{user_entry.id}:v{qid}"))
+            
+        kb.append(row)
     else:
         # Restriction for Цилинь
         if q.name == "Цилинь":
@@ -992,7 +1015,9 @@ async def toggle_mode_handler(callback: types.CallbackQuery, session: AsyncSessi
         async with AsyncSessionLocal() as session:
             return await toggle_mode_handler(callback, session)
     try:
-        eid = int(callback.data.split("_")[2])
+        data_parts = callback.data.split("_")[2].split(":")
+        eid = int(data_parts[0])
+        return_qid = data_parts[1][1:] if len(data_parts) > 1 else None
     except Exception:
         return
     entry = await session.get(QueueEntry, eid)
@@ -1011,7 +1036,12 @@ async def toggle_mode_handler(callback: types.CallbackQuery, session: AsyncSessi
 
     status = "♾ Авто-запись" if entry.auto_requeue else "1️⃣ Разовая запись"
     await callback.answer(f"Режим изменен: {status}")
-    await show_my_active_queues(callback, session)
+    
+    if return_qid:
+        callback.data = f"view_q_{return_qid}"
+        await view_queue(callback, session)
+    else:
+        await show_my_active_queues(callback, session)
 
 
 @router.callback_query(F.data.startswith("swap_start_"))
@@ -1021,7 +1051,9 @@ async def swap_start(callback: types.CallbackQuery, session: AsyncSession = None
         async with AsyncSessionLocal() as session:
             return await swap_start(callback, session)
     try:
-        eid = int(callback.data.split("_")[2])
+        data_parts = callback.data.split("_")[2].split(":")
+        eid = int(data_parts[0])
+        return_qid = data_parts[1][1:] if len(data_parts) > 1 else None
     except Exception:
         return
     entry = await session.get(QueueEntry, eid)
@@ -1037,8 +1069,12 @@ async def swap_start(callback: types.CallbackQuery, session: AsyncSession = None
     for c in chars:
         if c.nickname == entry.character_name:
             continue
-        kb.append([types.InlineKeyboardButton(text=f"🔄 На: {c.nickname}", callback_data=f"do_swap_{eid}_{c.id}")])
-    kb.append([types.InlineKeyboardButton(text="🔙 Отмена", callback_data="my_active_queues")])
+        cb_data = f"do_swap_{eid}_{c.id}"
+        if return_qid: cb_data += f":v{return_qid}"
+        kb.append([types.InlineKeyboardButton(text=f"🔄 На: {c.nickname}", callback_data=cb_data)])
+    
+    back_cb = f"view_q_{return_qid}" if return_qid else "my_active_queues"
+    kb.append([types.InlineKeyboardButton(text="🔙 Отмена", callback_data=back_cb)])
     await callback.message.edit_text(
         f"👇 Выберите замену для <b>{entry.character_name}</b>:",
         parse_mode="HTML",
@@ -1053,7 +1089,12 @@ async def do_swap_finish(callback: types.CallbackQuery, session: AsyncSession = 
         async with AsyncSessionLocal() as session:
             return await do_swap_finish(callback, session)
     parts = callback.data.split("_")
-    eid, cid = int(parts[2]), int(parts[3])
+    eid = int(parts[2])
+    
+    cid_parts = parts[3].split(":")
+    cid = int(cid_parts[0])
+    return_qid = cid_parts[1][1:] if len(cid_parts) > 1 else None
+    
     entry = await session.get(QueueEntry, eid)
     new_char = await session.get(Character, cid)
 
@@ -1082,7 +1123,12 @@ async def do_swap_finish(callback: types.CallbackQuery, session: AsyncSession = 
         )
 
         await callback.answer(f"✅ {old_nick} -> {new_char.nickname}")
-        await show_my_active_queues(callback, session)
+        
+        if return_qid:
+            callback.data = f"view_q_{return_qid}"
+            await view_queue(callback, session)
+        else:
+            await show_my_active_queues(callback, session)
     else:
         await show_my_active_queues(callback, session)
 
