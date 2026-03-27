@@ -1301,10 +1301,35 @@ async def afk_delete(request: Request):
         if not afk_id:
             return {"status": "error", "message": "Missing afk_id"}
             
-        from database import AFKHistory
+        from database import AFKHistory, User, Player, update
         async with AsyncSessionLocal() as session:
             afk = await session.get(AFKHistory, afk_id)
             if afk:
+                user_id = afk.user_id
+                role_id = afk.role_id
+                start_date = afk.start_date
+                end_date = afk.end_date
+                
+                # If this record is currently active (matches stored fields), clear them
+                if user_id:
+                    user = await session.get(User, user_id)
+                    if user and user.afk_start == start_date and user.afk_end == end_date:
+                        user.afk_start = None
+                        user.afk_end = None
+                        user.afk_reason = None
+                        # Sync all characters of this user
+                        await session.execute(
+                            update(Player).where(Player.user_id == user_id).values(
+                                afk_start=None, afk_end=None, afk_reason=None
+                            )
+                        )
+                elif role_id:
+                    player = await session.get(Player, role_id)
+                    if player and player.afk_start == start_date and player.afk_end == end_date:
+                        player.afk_start = None
+                        player.afk_end = None
+                        player.afk_reason = None
+
                 await session.delete(afk)
                 await session.commit()
         return {"status": "ok"}

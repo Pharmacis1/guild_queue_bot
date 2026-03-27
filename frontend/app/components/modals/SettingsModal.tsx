@@ -8,7 +8,9 @@ import {
     linkCharacter, 
     unlinkCharacter, 
     updateCharacterNickname,
-    addAfkHistory
+    addAfkHistory,
+    updateProfile,
+    deleteAfkHistory
 } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import styles from '../../player/[roleId]/ProfileLite.module.css';
@@ -127,10 +129,109 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                     <div className="modal-body" style={{ padding: '20px' }}>
                         
                         {showAfkForm ? (
-                            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
-                                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>🚧</div>
-                                <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>В разработке</div>
-                                <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Функционал уведомлений об отсутствии скоро появится</div>
+                            <div className={styles.afkSection}>
+                                <div className={styles.afkHeader}>
+                                    <span style={{ fontSize: '1.5rem' }}>☕</span>
+                                    <h6 style={{ margin: 0, fontWeight: 'bold' }}>Параметры отсутствия</h6>
+                                </div>
+                                
+                                <div className={styles.afkForm}>
+                                    <div className={styles.inputGroup}>
+                                        <label>Дата начала</label>
+                                        <input 
+                                            type="date" 
+                                            className={styles.input} 
+                                            value={afkStart} 
+                                            onChange={e => setAfkStart(e.target.value)} 
+                                        />
+                                    </div>
+                                    <div className={styles.inputGroup}>
+                                        <label>Дата окончания</label>
+                                        <input 
+                                            type="date" 
+                                            className={styles.input} 
+                                            value={afkEnd} 
+                                            onChange={e => setAfkEnd(e.target.value)} 
+                                        />
+                                    </div>
+                                    <div className={styles.inputGroup}>
+                                        <label>Причина (необязательно)</label>
+                                        <input 
+                                            type="text" 
+                                            className={styles.input} 
+                                            placeholder="Напр. Отпуск, Ремонт..."
+                                            value={afkReason} 
+                                            onChange={e => setAfkReason(e.target.value)} 
+                                        />
+                                    </div>
+                                    <button 
+                                        className={styles.btnAction} 
+                                        style={{ marginTop: '10px' }}
+                                        onClick={async () => {
+                                            if (!data?.user?.main_role_id || !afkStart || !afkEnd) {
+                                                alert("Укажите период");
+                                                return;
+                                            }
+                                            try {
+                                                const res = await updateProfile(data.user.main_role_id, {
+                                                    afk_start: afkStart,
+                                                    afk_end: afkEnd,
+                                                    afk_reason: afkReason
+                                                });
+                                                if (res.status === 'ok') {
+                                                    alert("Статус отсутствия обновлен");
+                                                    fetchProfile(data.user.main_role_id).then(setProfile);
+                                                    if (onRefresh) onRefresh();
+                                                    setAfkReason('');
+                                                }
+                                            } catch (e: any) {
+                                                alert("Ошибка: " + e.message);
+                                            }
+                                        }}
+                                    >
+                                        💾 Сохранить
+                                    </button>
+                                </div>
+
+                                {profile?.afk_history && profile.afk_history.length > 0 && (
+                                    <div className={styles.afkHistory}>
+                                        <h6 style={{ fontSize: '0.85rem', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px', marginTop: '20px' }}>
+                                            История периодов
+                                        </h6>
+                                        <div className={styles.historyList}>
+                                            {profile.afk_history.map(item => (
+                                                <div key={item.id} className={styles.historyItem}>
+                                                    <div style={{ flex: 1 }}>
+                                                        <div style={{ fontSize: '0.9rem', color: '#fff' }}>
+                                                            {item.start} — {item.end}
+                                                        </div>
+                                                        {item.reason && (
+                                                            <div style={{ fontSize: '0.75rem', color: '#888' }}>
+                                                                {item.reason}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <button 
+                                                        className={styles.btnDeleteSmall}
+                                                        onClick={async () => {
+                                                            if (!confirm("Удалить этот период из истории?")) return;
+                                                            try {
+                                                                await deleteAfkHistory(item.id);
+                                                                if (data?.user?.main_role_id) fetchProfile(data.user.main_role_id).then(setProfile);
+                                                                if (onRefresh) onRefresh();
+                                                            } catch (e: any) {
+                                                                alert("Ошибка: " + e.message);
+                                                            }
+                                                        }}
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <button className="btn btn-outline-secondary w-100 mt-4" onClick={() => setShowAfkForm(false)}>Назад к настройкам</button>
                             </div>
                         ) : (

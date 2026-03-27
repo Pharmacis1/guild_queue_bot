@@ -238,6 +238,11 @@ export default function PlayerProfileLite() {
                     <div style={{ flex: 1, marginLeft: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <h1 className={styles.nickname}>{profile.nickname}</h1>
+                            {profile.afk_start && profile.afk_end && (
+                                <div className={styles.afkBadgeHeader} title={`Отсутствует до ${profile.afk_end}`}>
+                                    ☕ AFK
+                                </div>
+                            )}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div className={styles.roleId}>ID: {profile.role_id}</div>

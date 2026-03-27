@@ -316,8 +316,9 @@ async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Di
         stmt = (
             select(
                 Player.role_id, Player.nickname, Player.class_id, Player.in_clan, Player.is_alt,
+                Player.afk_start.label("p_afk_start"), Player.afk_end.label("p_afk_end"), Player.afk_reason.label("p_afk_reason"),
                 User.id.label("user_id"), User.telegram_id, User.username, 
-                User.afk_start, User.afk_end, User.afk_reason
+                User.afk_start.label("u_afk_start"), User.afk_end.label("u_afk_end"), User.afk_reason.label("u_afk_reason")
             )
             .join(User, Player.user_id == User.id, isouter=True)
             .where(Player.role_id == role_id)
@@ -336,9 +337,9 @@ async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Di
             "user_id": row.user_id,
             "telegram_id": row.telegram_id,
             "username": row.username,
-            "afk_start": row.afk_start,
-            "afk_end": row.afk_end,
-            "afk_reason": row.afk_reason
+            "afk_start": row.u_afk_start if row.u_afk_start else row.p_afk_start,
+            "afk_end": row.u_afk_end if row.u_afk_end else row.p_afk_end,
+            "afk_reason": row.u_afk_reason if row.u_afk_reason else row.p_afk_reason
         }
 
         user_id = data["user_id"]
