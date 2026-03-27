@@ -246,9 +246,6 @@ export default function PlayerProfileLite() {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div className={styles.roleId}>ID: {profile.role_id}</div>
-                            <div className={`${styles.badge} ${profile.is_alt ? styles.badgeAlt : styles.badgeMain}`}>
-                                {profile.is_alt ? 'ТВИН' : 'ОСНОВА'}
-                            </div>
                         </div>
                     </div>
                 </div>
