@@ -120,11 +120,29 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
         <div className={`modal fade show d-block ${isClosing ? styles.modalAnimateOut : styles.modalAnimateIn}`} style={{ backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', zIndex: 100000 }}>
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content" style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '16px', color: '#fff' }}>
-                    <div className="modal-header" style={{ borderBottom: '1px solid #222', padding: '20px' }}>
-                        <h5 className="modal-title" style={{ fontFamily: 'Cinzel, serif' }}>
+                    <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h5 className="modal-title" style={{ fontSize: '16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px', margin: 0, color: 'rgba(255, 255, 255, 0.6)' }}>
                             {showAfkForm ? 'Сообщить об отсутствии' : 'Настройки'}
                         </h5>
-                        <button type="button" className="btn-close btn-close-white" onClick={handleClose}></button>
+                        {showAfkForm ? (
+                            <button 
+                                onClick={handleClose}
+                                style={{
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    color: '#ccc',
+                                    borderRadius: '8px',
+                                    padding: '4px 12px',
+                                    fontSize: '12px',
+                                    fontWeight: 'bold',
+                                    textTransform: 'uppercase'
+                                }}
+                            >
+                                Назад
+                            </button>
+                        ) : (
+                            <button type="button" className="btn-close btn-close-white" onClick={handleClose} aria-label="Close" style={{ fontSize: '10px' }}></button>
+                        )}
                     </div>
                     <div className="modal-body" style={{ padding: '20px' }}>
                         
@@ -165,7 +183,7 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                         />
                                     </div>
                                     <button 
-                                        className={styles.btnAction} 
+                                        className={styles.btnDark} 
                                         style={{ marginTop: '10px' }}
                                         onClick={async () => {
                                             if (!data?.user?.main_role_id || !afkStart || !afkEnd) {
@@ -231,8 +249,6 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                         </div>
                                     </div>
                                 )}
-
-                                <button className="btn btn-outline-secondary w-100 mt-4" onClick={() => setShowAfkForm(false)}>Назад к настройкам</button>
                             </div>
                         ) : (
                             <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
