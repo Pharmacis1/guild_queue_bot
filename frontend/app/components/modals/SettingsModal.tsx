@@ -10,7 +10,9 @@ import {
     updateCharacterNickname,
     addAfkHistory,
     updateProfile,
-    deleteAfkHistory
+    deleteAfkHistory,
+    cancelCharacterRequest,
+    setMainCharacter
 } from '@/lib/api';
 import ClassIcon from '../shared/ClassIcon';
 import styles from '../../player/[roleId]/ProfileLite.module.css';
@@ -35,13 +37,20 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
     const [afkReason, setAfkReason] = useState('');
     const [showAfkForm, setShowAfkForm] = useState(initialShowAfk || false);
 
-    useEffect(() => {
+    const loadProfile = async () => {
         if (data?.user?.main_role_id) {
             setLoading(true);
-            fetchProfile(data.user.main_role_id)
-                .then(setProfile)
-                .finally(() => setLoading(false));
+            try {
+                const res = await fetchProfile(data.user.main_role_id);
+                setProfile(res);
+            } finally {
+                setLoading(false);
+            }
         }
+    };
+
+    useEffect(() => {
+        loadProfile();
     }, [data]);
 
     const handleClose = () => {
@@ -54,10 +63,13 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
         if (!nick || !data?.user?.id) return;
         try {
             const res = await linkCharacter(data.user.id, nick);
-            if (res.status === 'ok') {
+            if (res.status === 'ok' || res.status === 'pending') {
                 setNewCharNickname('');
-                if (data.user?.main_role_id) fetchProfile(data.user.main_role_id).then(setProfile);
+                loadProfile();
                 if (onRefresh) onRefresh();
+                if (res.status === 'pending') {
+                    alert("Заявка на добавление отправлена Мастеру. Ожидайте подтверждения.");
+                }
             } else {
                 alert("Ошибка: " + res.message);
             }
@@ -66,12 +78,24 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
         }
     };
 
+    const handleCancelRequest = async () => {
+        if (!data?.user?.main_role_id) return;
+        if (!confirm("Отменить текущую заявку на добавление персонажа?")) return;
+        try {
+            await cancelCharacterRequest(data.user.main_role_id);
+            loadProfile();
+            if (onRefresh) onRefresh();
+        } catch (e: any) {
+            alert("Ошибка отмены: " + e.message);
+        }
+    };
+
     const handleUnlink = async (charRoleId: number, nickname: string) => {
         if (!confirm(`Отвязать персонажа ${nickname}?`)) return;
         try {
             const res = await unlinkCharacter(charRoleId, nickname);
             if (res.status === 'ok') {
-                if (data?.user?.main_role_id) fetchProfile(data.user.main_role_id).then(setProfile);
+                loadProfile();
                 if (onRefresh) onRefresh();
             } else {
                 alert("Ошибка: " + res.message);
@@ -81,38 +105,26 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
         }
     };
 
+    const handleToggleMain = async (charRoleId: number) => {
+        if (!data?.user?.main_role_id) return;
+        try {
+            await setMainCharacter(data.user.main_role_id, charRoleId);
+            loadProfile();
+            if (onRefresh) onRefresh();
+        } catch (e: any) {
+            alert("Ошибка: " + e.message);
+        }
+    };
+
     const handleEditNickname = async () => {
         if (!editingChar || !data?.user?.main_role_id) return;
         try {
             await updateCharacterNickname(data.user.main_role_id, editingChar.roleId, editingChar.nickname);
             setEditingChar(null);
-            fetchProfile(data.user.main_role_id).then(setProfile);
+            loadProfile();
             if (onRefresh) onRefresh();
         } catch (e: any) {
             alert("Ошибка при изменении ника: " + e.message);
-        }
-    };
-
-    const handleSaveAfk = async () => {
-        if (!data?.user?.main_role_id) return;
-        try {
-            const res = await addAfkHistory({ 
-                role_id: data.user.main_role_id, 
-                start: afkStart, 
-                end: afkEnd || undefined, 
-                reason: afkReason 
-            });
-            if (res.status === 'ok') {
-                setShowAfkForm(false);
-                setAfkReason('');
-                setAfkEnd('');
-                alert("Данные об отсутствии сохранены");
-                if (onRefresh) onRefresh();
-            } else {
-                alert("Ошибка: " + res.message);
-            }
-        } catch (e: any) {
-            alert("Ошибка сохранения AFK: " + e.message);
         }
     };
 
@@ -121,28 +133,24 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content" style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '16px', color: '#fff' }}>
                     <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h5 className="modal-title" style={{ fontSize: '16px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px', margin: 0, color: 'rgba(255, 255, 255, 0.6)' }}>
-                            {showAfkForm ? 'Сообщить об отсутствии' : 'Настройки'}
+                        <h5 className="modal-title" style={{ fontSize: '14px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px', margin: 0, color: 'rgba(255, 255, 255, 0.4)' }}>
+                            {showAfkForm ? 'Отсутствие' : 'Настройки'}
                         </h5>
-                        {showAfkForm ? (
-                            <button 
-                                onClick={handleClose}
-                                style={{
-                                    background: 'rgba(255,255,255,0.05)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
-                                    color: '#ccc',
-                                    borderRadius: '8px',
-                                    padding: '4px 12px',
-                                    fontSize: '12px',
-                                    fontWeight: 'bold',
-                                    textTransform: 'uppercase'
-                                }}
-                            >
-                                Назад
-                            </button>
-                        ) : (
-                            <button type="button" className="btn-close btn-close-white" onClick={handleClose} aria-label="Close" style={{ fontSize: '10px' }}></button>
-                        )}
+                        <button 
+                            onClick={handleClose}
+                            style={{
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                color: '#ccc',
+                                borderRadius: '8px',
+                                padding: '4px 12px',
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase'
+                            }}
+                        >
+                            Назад
+                        </button>
                     </div>
                     <div className="modal-body" style={{ padding: '20px' }}>
                         
@@ -198,7 +206,7 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                 });
                                                 if (res.status === 'ok') {
                                                     alert("Статус отсутствия обновлен");
-                                                    fetchProfile(data.user.main_role_id).then(setProfile);
+                                                    loadProfile();
                                                     if (onRefresh) onRefresh();
                                                     setAfkReason('');
                                                 }
@@ -235,7 +243,7 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                             if (!confirm("Удалить этот период из истории?")) return;
                                                             try {
                                                                 await deleteAfkHistory(item.id);
-                                                                if (data?.user?.main_role_id) fetchProfile(data.user.main_role_id).then(setProfile);
+                                                                loadProfile();
                                                                 if (onRefresh) onRefresh();
                                                             } catch (e: any) {
                                                                 alert("Ошибка: " + e.message);
@@ -251,13 +259,121 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                 )}
                             </div>
                         ) : (
-                            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
-                                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>⚙️</div>
-                                <div style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Настройки в разработке</div>
-                                <div style={{ fontSize: '0.8rem', marginTop: '10px' }}>Управление персонажами временно недоступно</div>
-                                <button className="btn btn-outline-danger w-100 mt-4" onClick={() => setShowAfkForm(true)} style={{ borderColor: '#8B0000', color: '#fff' }}>
-                                    ☕ Сообщить об отсутствии
-                                </button>
+                            <div className="settings-content">
+                                <div className="chars-section">
+                                    <h6 style={{ fontSize: '11px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px', marginBottom: '15px' }}>
+                                        Ваши персонажи
+                                    </h6>
+                                    
+                                    <div className="chars-list">
+                                        {profile?.linked_chars.map(char => (
+                                            <div key={char.nickname} className="char-row" style={{ 
+                                                background: 'rgba(255,255,255,0.03)', 
+                                                borderRadius: '12px', 
+                                                padding: '12px', 
+                                                marginBottom: '10px',
+                                                border: char.is_main ? '1px solid rgba(255, 215, 0, 0.2)' : '1px solid rgba(255,255,255,0.05)'
+                                            }}>
+                                                <div className="d-flex align-items-center justify-content-between">
+                                                    <div className="d-flex align-items-center">
+                                                        <ClassIcon classId={char.class_id} size={24} />
+                                                        {editingChar?.roleId === char.role_id ? (
+                                                            <div className="d-flex flex-column ms-2">
+                                                                <div className="d-flex">
+                                                                    <input 
+                                                                        type="text" 
+                                                                        className="form-control form-control-sm" 
+                                                                        style={{ background: '#000', border: '1px solid #444', color: '#fff', width: '150px' }}
+                                                                        value={editingChar.nickname}
+                                                                        onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
+                                                                    />
+                                                                    <button className="btn btn-sm btn-success ms-2" onClick={handleEditNickname}>
+                                                                        💾
+                                                                    </button>
+                                                                    <button className="btn btn-sm btn-outline-secondary ms-1" onClick={() => setEditingChar(null)}>
+                                                                        ✕
+                                                                    </button>
+                                                                </div>
+                                                                <div style={{ fontSize: '9px', color: '#ffcc00', marginTop: '5px', lineHeight: '1.2' }}>
+                                                                    ⚠️ Используйте, только если ник изменен в игре.<br/>Для другого чара — кнопка «Добавить».
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="ms-3">
+                                                                <div className="d-flex align-items-center">
+                                                                    <span style={{ fontWeight: '600', color: char.is_main ? '#ffd700' : '#fff' }}>{char.nickname}</span>
+                                                                    <button 
+                                                                        className="btn btn-link btn-sm p-0 ms-2" 
+                                                                        style={{ color: 'rgba(255,255,255,0.2)', fontSize: '10px' }}
+                                                                        onClick={() => setEditingChar({ roleId: char.role_id, nickname: char.nickname })}
+                                                                    >
+                                                                        ✏️
+                                                                    </button>
+                                                                </div>
+                                                                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>
+                                                                    {char.is_main ? 'Основа' : 'Твин'}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    <div className="d-flex align-items-center">
+                                                        <button 
+                                                            className={`btn btn-sm ${char.is_main ? 'btn-outline-warning' : 'btn-outline-secondary'}`}
+                                                            style={{ fontSize: '9px', textTransform: 'uppercase', padding: '2px 8px' }}
+                                                            onClick={() => !char.is_main && handleToggleMain(char.role_id)}
+                                                            disabled={char.is_main}
+                                                        >
+                                                            {char.is_main ? 'Главный' : 'Сделать основой'}
+                                                        </button>
+                                                        
+                                                        <button 
+                                                            className="btn btn-link btn-sm text-danger ms-2 p-0"
+                                                            style={{ textDecoration: 'none', fontSize: '14px' }}
+                                                            onClick={() => handleUnlink(char.role_id, char.nickname)}
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {profile?.pending_request_nick ? (
+                                        <div className="pending-status mt-4 p-3" style={{ background: 'rgba(255, 165, 0, 0.05)', borderRadius: '12px', border: '1px dashed rgba(255, 165, 0, 0.3)' }}>
+                                            <div className="d-flex align-items-center justify-content-between">
+                                                <div>
+                                                    <div style={{ fontSize: '11px', color: '#ffa500', fontWeight: 'bold', textTransform: 'uppercase' }}>⏳ Заявка на проверке</div>
+                                                    <div style={{ fontSize: '13px', color: '#fff' }}>{profile.pending_request_nick}</div>
+                                                </div>
+                                                <button className="btn btn-sm btn-outline-danger" style={{ fontSize: '10px' }} onClick={handleCancelRequest}>
+                                                    Отменить
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="add-char-input mt-4">
+                                            <h6 style={{ fontSize: '11px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px', marginBottom: '10px' }}>
+                                                Добавить персонажа
+                                            </h6>
+                                            <div className="input-group">
+                                                <input 
+                                                    type="text" 
+                                                    className="form-control" 
+                                                    placeholder="Никнейм..." 
+                                                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+                                                    value={newCharNickname}
+                                                    onChange={e => setNewCharNickname(e.target.value)}
+                                                    onKeyPress={e => e.key === 'Enter' && handleLink()}
+                                                />
+                                                <button className="btn btn-primary" onClick={handleLink} style={{ background: '#333', border: 'none', fontSize: '12px' }}>
+                                                    Добавить
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>

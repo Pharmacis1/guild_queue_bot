@@ -64,6 +64,7 @@ export interface UserData {
     is_master: boolean;
     is_banned: boolean;
     main_role_id: number | null;
+    pending_request_nick?: string | null;
 }
 
 export const fetchInitData = async (): Promise<InitData> => {
@@ -312,6 +313,7 @@ export interface ProfileResponse {
         record_type: string;
         timestamp: string;
     }[];
+    pending_request_nick?: string | null;
 }
 
 export const fetchProfile = async (roleId: number): Promise<ProfileResponse> => {
@@ -571,6 +573,11 @@ export interface CPApplicationItem {
 
 export const setMainCharacter = async (roleId: number, newMainRoleId: number): Promise<void> => {
     const { data } = await api.post(`/dashboard/profile/${roleId}/set_main`, { new_main_role_id: newMainRoleId });
+    if (data.status === 'error') throw new Error(data.message || "Error");
+};
+
+export const cancelCharacterRequest = async (roleId: number): Promise<void> => {
+    const { data } = await api.post(`/dashboard/profile/${roleId}/cancel_request`);
     if (data.status === 'error') throw new Error(data.message || "Error");
 };
 

@@ -41,6 +41,7 @@ class UserData(BaseModel):
     is_master: bool
     is_banned: bool
     main_role_id: Optional[int] = None
+    pending_request_nick: Optional[str] = None
 
 class InitResponse(BaseModel):
     user: Optional[UserData]
@@ -203,6 +204,7 @@ class ProfileResponse(BaseModel):
     party: Optional[ProfileParty]
     events: List[ProfileEvent] = []
     kh_stats: Optional[KHStatsSummary] = None
+    pending_request_nick: Optional[str] = None
 
 class CPListItem(BaseModel):
     id: int
@@ -318,7 +320,8 @@ async def get_init_data(request: Request):
             avatar_url=user.avatar_url,
             is_master=user.is_master,
             is_banned=user.is_banned,
-            main_role_id=main_role_id
+            main_role_id=main_role_id,
+            pending_request_nick=user.pending_request_nick
         )
 
     return InitResponse(
@@ -404,7 +407,8 @@ async def get_history_endpoint(
     return rows
 
 @router.get("/profile/{role_id}", response_model=ProfileResponse)
-async def get_profile_endpoint(role_id: int, session: AsyncSession = Depends(get_session)):
+async def get_profile_endpoint(role_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
     # Dynamic import to avoid circular dependency if any (though logic modules usually okay)
     from logic.player_manager import get_player_profile
     data = await get_player_profile(session, role_id)
@@ -414,9 +418,16 @@ async def get_profile_endpoint(role_id: int, session: AsyncSession = Depends(get
          from fastapi import HTTPException
          raise HTTPException(status_code=404, detail="Player not found")
     
-    # helper to safe convert dates
-    if data.get("afk_start"): data["afk_start"] = str(data["afk_start"])
-    if data.get("afk_end"): data["afk_end"] = str(data["afk_end"])
+    # helper to safe convert dates to ISO string for ProfileResponse
+    from datetime import datetime
+    if data.get("afk_start") and isinstance(data["afk_start"], datetime):
+        data["afk_start"] = data["afk_start"].strftime("%Y-%m-%d")
+    if data.get("afk_end") and isinstance(data["afk_end"], datetime):
+        data["afk_end"] = data["afk_end"].strftime("%Y-%m-%d")
+    
+    # Add pending request nick
+    if user and (user.is_master or user.id == data.get("user_id")):
+        data["pending_request_nick"] = user.pending_request_nick
 
     return data
 
@@ -563,6 +574,97 @@ async def update_linked_char_nickname(role_id: int, char_role_id: int, req: Nick
         player_record.nickname = req.nickname
     await session.commit()
     return {"status": "ok", "message": "Nickname updated"}
+
+@router.post("/profile/{role_id}/cancel_request")
+async def cancel_pending_request_endpoint(role_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Permission: User can cancel their own request
+    cancelled_nick = user.pending_request_nick
+    if not cancelled_nick:
+        return {"status": "ok", "message": "No pending request"}
+    
+    user.pending_request_nick = None
+    await session.commit()
+    
+    # Notify Masters
+    try:
+        from loader import bot
+        from database import User as UserDB
+        result = await session.execute(select(UserDB).filter_by(is_master=True))
+        masters = result.scalars().all()
+        user_desc = f"@{user.username}" if user.username else f"ID {user.telegram_id}"
+        for m in masters:
+            try:
+                await bot.send_message(
+                    m.telegram_id,
+                    f"❌ <b>Пользователь отменил заявку через сайт!</b>\nИгрок: {user_desc}\nНик: {cancelled_nick}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {"status": "ok", "message": "Request cancelled"}
+
+@router.post("/profile/{role_id}/set_main")
+async def set_main_character_endpoint(role_id: int, req: SetMainRequest, request: Request, session: AsyncSession = Depends(get_session)):
+    user = await get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Permission check: Master or owner
+    can_edit = user.is_master
+    if not can_edit:
+        # Check if the player being set as main belongs to the user
+        from database import Player, Character
+        p_stmt = select(Player.nickname).where(Player.role_id == req.new_main_role_id)
+        p_nick = (await session.execute(p_stmt)).scalars().first()
+        if p_nick:
+            char_row = await session.execute(select(Character).filter_by(user_id=user.id, nickname=p_nick))
+            if char_row.scalars().first():
+                can_edit = True
+    
+    if not can_edit:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    from database import Character, Player
+    # Get nickname of the new main
+    p_stmt = select(Player.nickname).where(Player.role_id == req.new_main_role_id)
+    new_main_nick = (await session.execute(p_stmt)).scalars().first()
+    
+    if not new_main_nick:
+        raise HTTPException(status_code=404, detail="Player not found")
+        
+    # Get user who owns this character
+    c_stmt = select(Character).where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(new_main_nick)))
+    char_obj = (await session.execute(c_stmt)).scalars().first()
+    if not char_obj:
+        raise HTTPException(status_code=404, detail="Character link not found")
+        
+    target_user_id = char_obj.user_id
+    
+    # Set all chars of this user to is_main=False
+    await session.execute(
+        update(Character).where(Character.user_id == target_user_id).values(is_main=False)
+    )
+    # Set this one to is_main=True
+    char_obj.is_main = True
+    
+    # Sync Player table is_alt
+    # Reset all players of this user to is_alt=True
+    stmt_p_reset = update(Player).where(Player.user_id == target_user_id).values(is_alt=True)
+    await session.execute(stmt_p_reset)
+    
+    # Set the new main player to is_alt=False
+    stmt_p_set = update(Player).where(Player.role_id == req.new_main_role_id).values(is_alt=False)
+    await session.execute(stmt_p_set)
+    
+    await session.commit()
+    return {"status": "ok", "message": "Main character updated"}
 
 
 # --- Admin Settings & Backups ---

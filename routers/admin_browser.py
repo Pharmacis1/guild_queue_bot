@@ -93,6 +93,7 @@ class RemoteBrowserSession:
                 logger.info(f"Navigating to {url}...")
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 self.is_active = True
+                print("DEBUG: _launch_browser_task FINISHED")
                 logger.info("Browser started successfully.")
 
             except Exception as e:

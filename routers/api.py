@@ -1401,7 +1401,7 @@ async def char_link(request: Request):
             return {"status": "error", "message": "Missing fields"}
 
         async with AsyncSessionLocal() as session:
-            # 1. Check if nickname exists in Character table
+            # 1. Check if nickname exists in Character table (already linked)
             stmt = select(Character).filter(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(nickname)))
             result = await session.execute(stmt)
             char = result.scalar_one_or_none()
@@ -1409,7 +1409,7 @@ async def char_link(request: Request):
             if char and char.user_id and char.user_id != target_user_id:
                 return {"status": "error", "message": "Персонаж уже привязан к другому профилю"}
 
-            # 2. Check if nickname exists in Player table and is ALREADY linked to someone else
+            # 2. Check if nickname exists in Player table (known char)
             stmt_p = select(Player).filter(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(nickname)))
             result_p = await session.execute(stmt_p)
             player_obj = result_p.scalar_one_or_none()
@@ -1421,21 +1421,57 @@ async def char_link(request: Request):
                 if res_u.scalar_one_or_none():
                     return {"status": "error", "message": "Персонаж уже закреплен за другим участником в базе игроков."}
 
-            if char:
-                char.user_id = target_user_id
-                target_nick = char.nickname
+            if player_obj:
+                # Known character, link immediately
+                if char:
+                    char.user_id = target_user_id
+                else:
+                    char = Character(user_id=target_user_id, nickname=nickname, is_main=False)
+                    session.add(char)
+                
+                # Sync to players
+                player_obj.user_id = target_user_id
+                await session.commit()
+                return {"status": "ok", "message": "Персонаж успешно привязан"}
             else:
-                char = Character(user_id=target_user_id, nickname=nickname, is_main=False)
-                session.add(char)
-                target_nick = nickname
+                # Unknown character, send approval request to Master
+                user = await session.get(User, target_user_id)
+                if not user:
+                    return {"status": "error", "message": "Пользователь не найден"}
+                
+                user.pending_request_nick = nickname
+                await session.commit()
+                
+                # Notify Masters
+                try:
+                    from loader import bot
+                    from aiogram import types
+                    stmt_m = select(User).filter_by(is_master=True)
+                    masters = (await session.execute(stmt_m)).scalars().all()
+                    
+                    user_desc = f"@{user.username}" if user.username else f"ID {user.telegram_id}"
+                    text = f"🛡 <b>Заявка на добавление (с сайта):</b>\n"
+                    text += f"Игрок: {user_desc}\n"
+                    text += f"Ник: <code>{nickname}</code>\n"
+                    text += "⚠️ <i>Этого ника нет в базе. Требуется подтверждение.</i>"
+                    
+                    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+                        [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"appr:ok:{user.id}:web_add:{nickname}")],
+                        [types.InlineKeyboardButton(text="✏️ Исправить и принять", callback_data=f"appr:edit:{user.id}:web_add")],
+                        [types.InlineKeyboardButton(text="❌ Отказать", callback_data=f"appr:no:{user.id}")],
+                    ])
+                    
+                    for m in masters:
+                        try:
+                            await bot.send_message(m.telegram_id, text, parse_mode="HTML", reply_markup=kb)
+                        except Exception: pass
+                except Exception as e:
+                    logging.error(f"Error notifying masters: {e}")
+                
+                return {"status": "pending", "message": "Заявка отправлена Мастеру"}
 
-            # Sync to players
-            p_stmt = update(Player).where(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(target_nick))).values(user_id=target_user_id)
-            await session.execute(p_stmt)
-            await session.commit()
-
-        return {"status": "ok"}
     except Exception as e:
+        logging.error(f"Error in char_link: {e}")
         return {"status": "error", "message": str(e)}
 
 
