@@ -2112,6 +2112,8 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     # Logic similar to finish_main_input / finish_alt_input
     # But since we are in admin.py and can't easy import from user.py, we replicate core logic.
 
+    msg = ""
+
     # 1. Main Char Logic
     if reg_type == "main_input":
         stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
@@ -2148,8 +2150,8 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
                 if e.character_name != nick:
                     e.character_name = nick
 
-    # 2. Alt Logic
-    elif reg_type == "alt_input":
+    # 2. Alt Logic or Web Add (All new chars from web are twins by default)
+    elif reg_type in ["alt_input", "web_add"]:
         stmt_existing = select(Character).filter_by(user_id=target_user.id, nickname=nick)
         result_existing = await session.execute(stmt_existing)
         if result_existing.scalars().first():
@@ -2167,8 +2169,8 @@ async def finalize_approval(event, target_user, nick, reg_type, session: AsyncSe
     if player_obj:
         # is_main == True -> is_alt = False
         # reg_type == "main_input" -> is_alt = False
-        # reg_type == "alt_input" -> is_alt = True
-        player_obj.is_alt = (reg_type == "alt_input")
+        # reg_type in ["alt_input", "web_add"] -> is_alt = True
+        player_obj.is_alt = (reg_type != "main_input")
         player_obj.user_id = target_user.id
         await session.commit()
 
