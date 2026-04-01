@@ -386,7 +386,7 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                 />
                                                 <div style={{ fontSize: '11px', color: '#ffcc00', marginTop: '20px', marginBottom: '20px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255, 204, 0, 0.2)' }}>
                                                     ⚠️ Используйте эту функцию, <b>только если никнейм был изменен в самой игре</b>.<br/><br/>
-                                                    Для добавления нового твина закройте это окно и воспользуйтесь полем «Добавить персонажа».
+                                                    Для добавления другого персонажа закройте это окно и воспользуйтесь полем «Добавить персонажа».
                                                 </div>
                                                 <div className="d-flex justify-content-end" style={{ gap: '10px' }}>
                                                     <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditingChar(null)}>Отмена</button>
