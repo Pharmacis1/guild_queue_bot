@@ -397,13 +397,47 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                     )}
 
                                     {profile?.pending_request_nick ? (
-                                        <div className="pending-status mt-4 p-3" style={{ background: 'rgba(255, 165, 0, 0.05)', borderRadius: '12px', border: '1px dashed rgba(255, 165, 0, 0.3)' }}>
+                                        <div className="pending-status mt-4 p-3" style={{ 
+                                            background: 'rgba(255, 165, 0, 0.03)', 
+                                            borderRadius: '12px', 
+                                            border: '1px solid rgba(255, 165, 0, 0.15)',
+                                            boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+                                        }}>
                                             <div className="d-flex align-items-center justify-content-between">
-                                                <div>
-                                                    <div style={{ fontSize: '11px', color: '#ffa500', fontWeight: 'bold', textTransform: 'uppercase' }}>⏳ Заявка на проверке</div>
-                                                    <div style={{ fontSize: '13px', color: '#fff' }}>{profile.pending_request_nick}</div>
+                                                <div className="d-flex align-items-center">
+                                                    <div style={{ 
+                                                        width: '32px', height: '32px', borderRadius: '8px', 
+                                                        background: 'rgba(255, 165, 0, 0.1)', 
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        marginRight: '12px'
+                                                    }}>
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffa500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', color: '#ffa500', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>Заявка на проверке</div>
+                                                        <div style={{ fontSize: '14px', color: '#fff', fontWeight: '500' }}>{profile.pending_request_nick}</div>
+                                                    </div>
                                                 </div>
-                                                <button className="btn btn-sm btn-outline-danger" style={{ fontSize: '10px' }} onClick={handleCancelRequest}>
+                                                <button 
+                                                    className="btn btn-sm" 
+                                                    style={{ 
+                                                        fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                                                        color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.05)',
+                                                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px',
+                                                        padding: '4px 10px', transition: 'all 0.2s'
+                                                    }}
+                                                    onClick={handleCancelRequest}
+                                                    onMouseOver={(e) => {
+                                                        e.currentTarget.style.color = '#ff4d4d';
+                                                        e.currentTarget.style.borderColor = 'rgba(255,77,77,0.3)';
+                                                        e.currentTarget.style.background = 'rgba(255,77,77,0.05)';
+                                                    }}
+                                                    onMouseOut={(e) => {
+                                                        e.currentTarget.style.color = 'rgba(255,255,255,0.5)';
+                                                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+                                                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                                                    }}
+                                                >
                                                     Отменить
                                                 </button>
                                             </div>
