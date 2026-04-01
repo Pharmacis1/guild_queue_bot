@@ -136,7 +136,35 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
     return (
         <div className={`modal fade show d-block ${isClosing ? styles.modalAnimateOut : styles.modalAnimateIn}`} style={{ backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', zIndex: 100000 }}>
             <div className="modal-dialog modal-dialog-centered">
-                <div className="modal-content" style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '16px', color: '#fff' }}>
+                <div className="modal-content" style={{ background: '#0a0a0a', border: '1px solid #333', borderRadius: '16px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                    {/* Overlay for editing nickname - moved to top level for correct centering in scrollable modals */}
+                    {editingChar && (
+                        <div style={{
+                            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)',
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                            borderRadius: '16px', zIndex: 1000
+                        }}>
+                            <div style={{ width: '80%', background: '#111', padding: '20px', borderRadius: '12px', border: '1px solid #333', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                                <h6 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: '15px', letterSpacing: '1px' }}>Редактирование ника</h6>
+                                <input 
+                                    type="text" 
+                                    className="form-control mb-4" 
+                                    style={{ background: '#000', border: '1px solid #444', color: '#fff', borderRadius: '8px', padding: '10px' }}
+                                    value={editingChar.nickname}
+                                    onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
+                                />
+                                <div style={{ fontSize: '11px', color: '#ffcc00', marginTop: '20px', marginBottom: '20px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255, 204, 0, 0.2)' }}>
+                                    ⚠️ Используйте эту функцию, <b>только если никнейм был изменен в самой игре</b>.<br/><br/>
+                                    Для добавления другого персонажа закройте это окно и воспользуйтесь полем «Добавить персонажа».
+                                </div>
+                                <div className="d-flex justify-content-end" style={{ gap: '10px' }}>
+                                    <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditingChar(null)}>Отмена</button>
+                                    <button className="btn btn-sm btn-primary" style={{ background: '#4CAF50', border: 'none' }} onClick={handleEditNickname}>Сохранить</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <h5 className="modal-title" style={{ fontSize: '14px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px', margin: 0, color: 'rgba(255, 255, 255, 0.4)' }}>
                             {showAfkForm ? 'Отсутствие' : 'Настройки'}
@@ -367,34 +395,6 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                         ))}
                                     </div>
 
-                                    {/* Overlay for editing nickname */}
-                                    {editingChar && (
-                                        <div style={{
-                                            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-                                            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)',
-                                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                                            borderRadius: '16px', zIndex: 10
-                                        }}>
-                                            <div style={{ width: '80%', background: '#111', padding: '20px', borderRadius: '12px', border: '1px solid #333', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-                                                <h6 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: '15px', letterSpacing: '1px' }}>Редактирование ника</h6>
-                                                <input 
-                                                    type="text" 
-                                                    className="form-control mb-4" 
-                                                    style={{ background: '#000', border: '1px solid #444', color: '#fff', borderRadius: '8px', padding: '10px' }}
-                                                    value={editingChar.nickname}
-                                                    onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
-                                                />
-                                                <div style={{ fontSize: '11px', color: '#ffcc00', marginTop: '20px', marginBottom: '20px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255, 204, 0, 0.2)' }}>
-                                                    ⚠️ Используйте эту функцию, <b>только если никнейм был изменен в самой игре</b>.<br/><br/>
-                                                    Для добавления другого персонажа закройте это окно и воспользуйтесь полем «Добавить персонажа».
-                                                </div>
-                                                <div className="d-flex justify-content-end" style={{ gap: '10px' }}>
-                                                    <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditingChar(null)}>Отмена</button>
-                                                    <button className="btn btn-sm btn-primary" style={{ background: '#4CAF50', border: 'none' }} onClick={handleEditNickname}>Сохранить</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
 
                                     {profile?.pending_request_nick ? (
                                         <div className="pending-status mt-4 p-3" style={{ 
