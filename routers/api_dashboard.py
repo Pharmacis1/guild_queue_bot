@@ -4,11 +4,11 @@ import os
 
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, text, func
+from sqlalchemy import select, text, func, update, delete
 from sqlalchemy.orm import selectinload
 
 from consts import CLASSES
-from database import User, AsyncSessionLocal, Player, get_session
+from database import User, AsyncSessionLocal, Player, get_session, QueueEntry
 from sqlalchemy.ext.asyncio import AsyncSession
 from web_database import get_last_update_time
 from logic.dashboard import get_kh_table_data, get_history_data, get_money_table_data
@@ -572,6 +572,12 @@ async def update_linked_char_nickname(role_id: int, char_role_id: int, req: Nick
     player_record = res_p_sync.scalars().first()
     if player_record:
         player_record.nickname = req.nickname
+        
+    # Sync active queues (QueueEntry)
+    # Using sqlalchemy.update for efficiency
+    q_stmt = update(QueueEntry).where(func.lower(func.trim(QueueEntry.character_name)) == func.lower(func.trim(old_nick))).values(character_name=req.nickname)
+    await session.execute(q_stmt)
+    
     await session.commit()
     return {"status": "ok", "message": "Nickname updated"}
 

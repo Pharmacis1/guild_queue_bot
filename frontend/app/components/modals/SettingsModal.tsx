@@ -287,10 +287,30 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                                 <span style={{ fontFamily: 'inherit', fontSize: '15px', letterSpacing: '0.5px', fontWeight: 'bold', color: char.is_main ? '#ffd700' : '#fff' }}>{char.nickname}</span>
                                                                 <button 
                                                                     className="btn btn-link btn-sm p-0 ms-2" 
-                                                                    style={{ color: 'rgba(255,255,255,0.4)' }}
+                                                                    style={{ 
+                                                                        color: '#ffffff', 
+                                                                        border: 'none', 
+                                                                        boxShadow: 'none', 
+                                                                        background: 'rgba(255,255,255,0.05)',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        transition: 'all 0.2s',
+                                                                        width: '26px',
+                                                                        height: '26px',
+                                                                        borderRadius: '6px'
+                                                                    }}
                                                                     onClick={() => setEditingChar({ roleId: char.role_id, nickname: char.nickname })}
+                                                                    onMouseOver={(e) => {
+                                                                        e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+                                                                        e.currentTarget.style.transform = 'translateY(-1px)';
+                                                                    }}
+                                                                    onMouseOut={(e) => {
+                                                                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                                                                        e.currentTarget.style.transform = 'translateY(0)';
+                                                                    }}
                                                                 >
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                                                                 </button>
                                                             </div>
                                                             <div style={{ fontSize: '10px', color: char.is_main ? 'rgba(255, 215, 0, 0.8)' : 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -312,11 +332,33 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                         
                                                         {!char.is_main && (
                                                             <button 
-                                                                className="btn btn-link btn-sm text-danger ms-2 p-0"
-                                                                style={{ textDecoration: 'none' }}
+                                                                className="btn btn-link btn-sm text-danger p-0"
+                                                                style={{ 
+                                                                    textDecoration: 'none',
+                                                                    border: 'none',
+                                                                    boxShadow: 'none',
+                                                                    background: 'rgba(255,77,77,0.1)',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    transition: 'all 0.2s',
+                                                                    color: '#ff3333',
+                                                                    width: '30px',
+                                                                    height: '30px',
+                                                                    borderRadius: '8px',
+                                                                    marginLeft: '18px'
+                                                                }}
                                                                 onClick={() => handleUnlink(char.role_id, char.nickname)}
+                                                                onMouseOver={(e) => {
+                                                                    e.currentTarget.style.background = 'rgba(255,77,77,0.2)';
+                                                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                                                }}
+                                                                onMouseOut={(e) => {
+                                                                    e.currentTarget.style.background = 'rgba(255,77,77,0.1)';
+                                                                    e.currentTarget.style.transform = 'translateY(0)';
+                                                                }}
                                                             >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff3333" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                                                             </button>
                                                         )}
                                                     </div>
@@ -337,12 +379,12 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                 <h6 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: '15px', letterSpacing: '1px' }}>Редактирование ника</h6>
                                                 <input 
                                                     type="text" 
-                                                    className="form-control mb-3" 
-                                                    style={{ background: '#000', border: '1px solid #444', color: '#fff' }}
+                                                    className="form-control mb-4" 
+                                                    style={{ background: '#000', border: '1px solid #444', color: '#fff', borderRadius: '8px', padding: '10px' }}
                                                     value={editingChar.nickname}
                                                     onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
                                                 />
-                                                <div style={{ fontSize: '11px', color: '#ffcc00', marginBottom: '15px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '10px', borderRadius: '8px' }}>
+                                                <div style={{ fontSize: '11px', color: '#ffcc00', marginTop: '20px', marginBottom: '20px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255, 204, 0, 0.2)' }}>
                                                     ⚠️ Используйте эту функцию, <b>только если никнейм был изменен в самой игре</b>.<br/><br/>
                                                     Для добавления нового твина закройте это окно и воспользуйтесь полем «Добавить персонажа».
                                                 </div>
