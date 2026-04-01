@@ -109,7 +109,27 @@ async def update_player_logic(session: AsyncSession, role_id: int, update_data: 
         # 3. Update Players Table
         if nickname is not None:
             new_nick = nickname.strip()
-            if new_nick:  # Only update if not empty to prevent accidental wipe
+            if new_nick and new_nick != current_nickname:
+                # Update all active queues
+                await session.execute(
+                    update(QueueEntry)
+                    .where(func.lower(func.trim(QueueEntry.character_name)) == func.lower(func.trim(current_nickname)))
+                    .values(character_name=new_nick)
+                )
+                # Update Character table links (Renaming existing record instead of orphaned old one)
+                await session.execute(
+                    update(Character)
+                    .where(func.lower(func.trim(Character.nickname)) == func.lower(func.trim(current_nickname)))
+                    .values(nickname=new_nick)
+                )
+                # Update historical records for RewardHistory
+                await session.execute(
+                    update(RewardHistory)
+                    .where(func.lower(func.trim(RewardHistory.character_name)) == func.lower(func.trim(current_nickname)))
+                    .values(character_name=new_nick)
+                )
+                player.nickname = new_nick
+            elif new_nick:
                 player.nickname = new_nick
 
         if class_id is not None:
