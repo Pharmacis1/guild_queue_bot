@@ -99,8 +99,11 @@ async def test_afk_delete_success(async_test_session):
 @pytest.mark.asyncio
 async def test_character_link(async_test_session):
     user = User(id=1, telegram_id=123, username="test")
+    player = Player(role_id=1001, nickname="Hero", in_clan=1)
     async_test_session.add(user)
+    async_test_session.add(player)
     await async_test_session.commit()
+
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.post("/api/character/link", json={"user_id": 1, "nickname": "Hero"})

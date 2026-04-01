@@ -50,6 +50,7 @@ async def test_init_authenticated(async_test_session, mock_current_user, mock_db
     mock_user.avatar_url = "http://test"
     mock_user.is_master = True
     mock_user.is_banned = False
+    mock_user.pending_request_nick = None
     mock_current_user.return_value = mock_user
     
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -58,6 +59,7 @@ async def test_init_authenticated(async_test_session, mock_current_user, mock_db
         data = response.json()
         assert data["user"]["username"] == "testuser"
         assert data["user"]["is_master"] is True
+
 
 # ---------------------------------------------------------
 # GET /kh
