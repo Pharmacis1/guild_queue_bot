@@ -91,7 +91,12 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
     };
 
     const handleUnlink = async (charRoleId: number, nickname: string) => {
-        if (!confirm(`Отвязать персонажа ${nickname}?`)) return;
+        const inQueues = profile?.queues?.some(q => q.character_name?.toLowerCase() === nickname.toLowerCase());
+        const confirmMsg = inQueues 
+            ? `⚠️ Внимание: Персонаж ${nickname} записан в очереди. При отвязке он будет автоматически исключен из всех очередей!\n\nПродолжить отвязку?`
+            : `Отвязать персонажа ${nickname}?`;
+            
+        if (!confirm(confirmMsg)) return;
         try {
             const res = await unlinkCharacter(charRoleId, nickname);
             if (res.status === 'ok') {
@@ -277,68 +282,77 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                                 <div className="d-flex align-items-center justify-content-between">
                                                     <div className="d-flex align-items-center">
                                                         <ClassIcon classId={char.class_id} size={24} />
-                                                        {editingChar?.roleId === char.role_id ? (
-                                                            <div className="d-flex flex-column ms-2">
-                                                                <div className="d-flex">
-                                                                    <input 
-                                                                        type="text" 
-                                                                        className="form-control form-control-sm" 
-                                                                        style={{ background: '#000', border: '1px solid #444', color: '#fff', width: '150px' }}
-                                                                        value={editingChar.nickname}
-                                                                        onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
-                                                                    />
-                                                                    <button className="btn btn-sm btn-success ms-2" onClick={handleEditNickname}>
-                                                                        💾
-                                                                    </button>
-                                                                    <button className="btn btn-sm btn-outline-secondary ms-1" onClick={() => setEditingChar(null)}>
-                                                                        ✕
-                                                                    </button>
-                                                                </div>
-                                                                <div style={{ fontSize: '9px', color: '#ffcc00', marginTop: '5px', lineHeight: '1.2' }}>
-                                                                    ⚠️ Используйте, только если ник изменен в игре.<br/>Для другого чара — кнопка «Добавить».
-                                                                </div>
+                                                        <div className="ms-3">
+                                                            <div className="d-flex align-items-center">
+                                                                <span style={{ fontFamily: 'inherit', fontSize: '15px', letterSpacing: '0.5px', fontWeight: 'bold', color: char.is_main ? '#ffd700' : '#fff' }}>{char.nickname}</span>
+                                                                <button 
+                                                                    className="btn btn-link btn-sm p-0 ms-2" 
+                                                                    style={{ color: 'rgba(255,255,255,0.4)' }}
+                                                                    onClick={() => setEditingChar({ roleId: char.role_id, nickname: char.nickname })}
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                                                </button>
                                                             </div>
-                                                        ) : (
-                                                            <div className="ms-3">
-                                                                <div className="d-flex align-items-center">
-                                                                    <span style={{ fontWeight: '600', color: char.is_main ? '#ffd700' : '#fff' }}>{char.nickname}</span>
-                                                                    <button 
-                                                                        className="btn btn-link btn-sm p-0 ms-2" 
-                                                                        style={{ color: 'rgba(255,255,255,0.2)', fontSize: '10px' }}
-                                                                        onClick={() => setEditingChar({ roleId: char.role_id, nickname: char.nickname })}
-                                                                    >
-                                                                        ✏️
-                                                                    </button>
-                                                                </div>
-                                                                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>
-                                                                    {char.is_main ? 'Основа' : 'Твин'}
-                                                                </div>
+                                                            <div style={{ fontSize: '10px', color: char.is_main ? 'rgba(255, 215, 0, 0.8)' : 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                                {char.is_main ? 'Основа' : 'Твин'}
                                                             </div>
-                                                        )}
+                                                        </div>
                                                     </div>
                                                     
                                                     <div className="d-flex align-items-center">
-                                                        <button 
-                                                            className={`btn btn-sm ${char.is_main ? 'btn-outline-warning' : 'btn-outline-secondary'}`}
-                                                            style={{ fontSize: '9px', textTransform: 'uppercase', padding: '2px 8px' }}
-                                                            onClick={() => !char.is_main && handleToggleMain(char.role_id)}
-                                                            disabled={char.is_main}
-                                                        >
-                                                            {char.is_main ? 'Главный' : 'Сделать основой'}
-                                                        </button>
+                                                        {!char.is_main && (
+                                                            <button 
+                                                                className="btn btn-sm btn-outline-secondary"
+                                                                style={{ fontSize: '9px', textTransform: 'uppercase', padding: '3px 8px', borderRadius: '6px' }}
+                                                                onClick={() => handleToggleMain(char.role_id)}
+                                                            >
+                                                                Сделать основой
+                                                            </button>
+                                                        )}
                                                         
-                                                        <button 
-                                                            className="btn btn-link btn-sm text-danger ms-2 p-0"
-                                                            style={{ textDecoration: 'none', fontSize: '14px' }}
-                                                            onClick={() => handleUnlink(char.role_id, char.nickname)}
-                                                        >
-                                                            🗑️
-                                                        </button>
+                                                        {!char.is_main && (
+                                                            <button 
+                                                                className="btn btn-link btn-sm text-danger ms-2 p-0"
+                                                                style={{ textDecoration: 'none' }}
+                                                                onClick={() => handleUnlink(char.role_id, char.nickname)}
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
+
+                                    {/* Overlay for editing nickname */}
+                                    {editingChar && (
+                                        <div style={{
+                                            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                                            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)',
+                                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                                            borderRadius: '16px', zIndex: 10
+                                        }}>
+                                            <div style={{ width: '80%', background: '#111', padding: '20px', borderRadius: '12px', border: '1px solid #333', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                                                <h6 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: '15px', letterSpacing: '1px' }}>Редактирование ника</h6>
+                                                <input 
+                                                    type="text" 
+                                                    className="form-control mb-3" 
+                                                    style={{ background: '#000', border: '1px solid #444', color: '#fff' }}
+                                                    value={editingChar.nickname}
+                                                    onChange={e => setEditingChar({...editingChar, nickname: e.target.value})}
+                                                />
+                                                <div style={{ fontSize: '11px', color: '#ffcc00', marginBottom: '15px', lineHeight: '1.4', background: 'rgba(255, 204, 0, 0.1)', padding: '10px', borderRadius: '8px' }}>
+                                                    ⚠️ Используйте эту функцию, <b>только если никнейм был изменен в самой игре</b>.<br/><br/>
+                                                    Для добавления нового твина закройте это окно и воспользуйтесь полем «Добавить персонажа».
+                                                </div>
+                                                <div className="d-flex justify-content-end" style={{ gap: '10px' }}>
+                                                    <button className="btn btn-sm btn-outline-secondary" onClick={() => setEditingChar(null)}>Отмена</button>
+                                                    <button className="btn btn-sm btn-primary" style={{ background: '#4CAF50', border: 'none' }} onClick={handleEditNickname}>Сохранить</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {profile?.pending_request_nick ? (
                                         <div className="pending-status mt-4 p-3" style={{ background: 'rgba(255, 165, 0, 0.05)', borderRadius: '12px', border: '1px dashed rgba(255, 165, 0, 0.3)' }}>
@@ -357,17 +371,21 @@ export default function SettingsModal({ data, onClose, onRefresh, initialShowAfk
                                             <h6 style={{ fontSize: '11px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px', marginBottom: '10px' }}>
                                                 Добавить персонажа
                                             </h6>
-                                            <div className="input-group">
+                                            <div className="d-flex" style={{ gap: '10px' }}>
                                                 <input 
                                                     type="text" 
                                                     className="form-control" 
-                                                    placeholder="Никнейм..." 
-                                                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+                                                    placeholder="Введите никнейм..." 
+                                                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '8px' }}
                                                     value={newCharNickname}
                                                     onChange={e => setNewCharNickname(e.target.value)}
                                                     onKeyPress={e => e.key === 'Enter' && handleLink()}
                                                 />
-                                                <button className="btn btn-primary" onClick={handleLink} style={{ background: '#333', border: 'none', fontSize: '12px' }}>
+                                                <button 
+                                                    className="btn btn-primary" 
+                                                    onClick={handleLink} 
+                                                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', fontSize: '12px', borderRadius: '8px', padding: '0 15px', whiteSpace: 'nowrap' }}
+                                                >
                                                     Добавить
                                                 </button>
                                             </div>
