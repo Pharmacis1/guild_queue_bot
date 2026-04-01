@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import User, Player, Character, AFKHistory, AsyncSessionLocal, ConstantParty, PartyMember, QueueEntry, QueueType, Event, RewardHistory
 from consts import CLASSES
+from logic.kh_logic import analyze_events_stats
 
 # Helper to parse dates safely
 def parse_date_safe(date_str: str) -> Optional[datetime]:
@@ -165,11 +166,23 @@ async def update_player_logic(session: AsyncSession, role_id: int, update_data: 
 
             # 5. Demotion Logic: If this char is now MAIN, set all other chars of this user to NOT MAIN
             if is_main_val:
+                # 5a. Update characters table
                 await session.execute(
                     update(Character)
                     .where(and_(Character.user_id == new_user_id, Character.nickname != target_nick))
                     .values(is_main=False)
                 )
+                # 5b. Update players table (sync is_alt)
+                # Find all nicknames of other characters for this user
+                other_nicks_stmt = select(Character.nickname).where(and_(Character.user_id == new_user_id, Character.nickname != target_nick))
+                other_nicks_res = await session.execute(other_nicks_stmt)
+                other_nicks = [r[0] for r in other_nicks_res.all()]
+                if other_nicks:
+                    await session.execute(
+                        update(Player)
+                        .where(Player.nickname.in_(other_nicks))
+                        .values(is_alt=True)
+                    )
 
         # 6. REFLECT AFK DATES
         if "afk_start" in update_data:
@@ -253,7 +266,7 @@ async def calculate_calendar_stats(session: AsyncSession, role_id: int, period_t
     until_ts = end_dt_utc.timestamp()
     
     stmt = (
-        select(Event.value)
+        select(Event.timestamp, Event.value, Event.event_type)
         .where(and_(
             Event.role_id == role_id,
             Event.event_type == 1,
@@ -262,29 +275,14 @@ async def calculate_calendar_stats(session: AsyncSession, role_id: int, period_t
         ))
     )
     result = await session.execute(stmt)
-    vals = result.scalars().all()
+    vals = result.all() # list of Row(timestamp, value, type)
     
-    stats = {
-        "s1": 0, "s2": 0, "s3": 0, "s4": 0, "s5": 0, "s6": 0, "s7": 0,
-        "adepts": 0, "dances": 0, "total_valor": 0
-    }
+    stats_result = analyze_events_stats(vals)
     
-    for v in vals:
-        stats["total_valor"] += (v or 0)
-        if v == 4: stats["s1"] += 1
-        elif v == 6: stats["s2"] += 1
-        elif v == 10: stats["s3"] += 1
-        elif v == 14: stats["s4"] += 1
-        elif v == 24: stats["s5"] += 1
-        elif v == 40: stats["s6"] += 1
-        elif v == 70: stats["s7"] += 1
-        elif v == 7: stats["adepts"] += 1
-        elif v in [2, 8]: stats["dances"] += 1
-        
     return {
         "start_date": start_dt.isoformat(),
         "end_date": end_dt.isoformat(),
-        "stats": stats
+        "stats": stats_result
     }
  
  
@@ -297,7 +295,7 @@ async def calculate_kh_period_stats(session: AsyncSession, role_id: int, days: i
     since_ts = now_ts - (days * 86400)
     
     stmt = (
-        select(Event.value)
+        select(Event.timestamp, Event.value, Event.event_type)
         .where(and_(
             Event.role_id == role_id,
             Event.event_type == 1,
@@ -305,26 +303,9 @@ async def calculate_kh_period_stats(session: AsyncSession, role_id: int, days: i
         ))
     )
     result = await session.execute(stmt)
-    vals = result.scalars().all()
+    vals = result.all()
     
-    stats = {
-        "s1": 0, "s2": 0, "s3": 0, "s4": 0, "s5": 0, "s6": 0, "s7": 0,
-        "adepts": 0, "dances": 0, "total_valor": 0
-    }
-    
-    for v in vals:
-        stats["total_valor"] += (v or 0)
-        if v == 4: stats["s1"] += 1
-        elif v == 6: stats["s2"] += 1
-        elif v == 10: stats["s3"] += 1
-        elif v == 14: stats["s4"] += 1
-        elif v == 24: stats["s5"] += 1
-        elif v == 40: stats["s6"] += 1
-        elif v == 70: stats["s7"] += 1
-        elif v == 7: stats["adepts"] += 1
-        elif v in [2, 8]: stats["dances"] += 1
-        
-    return stats
+    return analyze_events_stats(vals)
  
  
 async def get_player_profile(session: AsyncSession, role_id: int) -> Optional[Dict[str, Any]]:

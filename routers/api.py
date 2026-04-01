@@ -1431,6 +1431,7 @@ async def char_link(request: Request):
                 
                 # Sync to players
                 player_obj.user_id = target_user_id
+                player_obj.is_alt = (not char.is_main)
                 await session.commit()
                 return {"status": "ok", "message": "Персонаж успешно привязан"}
             else:
