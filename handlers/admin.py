@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from datetime import datetime, timedelta
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -572,10 +572,9 @@ async def m_delete_char_admin(callback: types.CallbackQuery, session: AsyncSessi
             player_obj.is_alt = False # Default back to False if unlinked? Or keep?
             # User probably wants it unlinked on site too.
 
-        # Orphan queue entries instead of deleting
-        from sqlalchemy import update
+        # Delete from all active queues (used to be update/orphan)
         await session.execute(
-            update(QueueEntry).filter_by(character_name=nick).values(user_id=None)
+            delete(QueueEntry).filter_by(character_name=nick)
         )
         await session.commit()
         await callback.answer(f"✅ Ник {nick} отвязан.")

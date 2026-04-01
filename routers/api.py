@@ -1501,6 +1501,10 @@ async def char_unlink(request: Request):
                 # Unlink from players
                 p_stmt_io = update(Player).where(func.lower(func.trim(Player.nickname)) == func.lower(func.trim(nickname))).values(user_id=None)
                 await session.execute(p_stmt_io)
+                
+                # IMPORTANT: Remove from ALL active queues (QueueEntry)
+                q_del_stmt = delete(QueueEntry).where(func.lower(func.trim(QueueEntry.character_name)) == func.lower(func.trim(nickname)))
+                await session.execute(q_del_stmt)
 
             await session.commit()
         return {"status": "ok"}
