@@ -19,8 +19,6 @@ services:
   frontend:
     image: hyperf0rm/guild_queue_bot:frontend
     restart: always
-    env_file:
-      - .env
     ports:
       - "3000:3000"
     depends_on:
